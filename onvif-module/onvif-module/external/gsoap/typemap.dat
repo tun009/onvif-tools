@@ -1,14 +1,1 @@
-# external/gsoap/typemap.dat
-# ONVIF type mappings
-
-xsd__boolean        = bool
-xsd__string         = std::string  | #import "stdstring.h"
-xsd__anyURI         = std::string  | #import "stdstring.h"
-xsd__QName          = std::string  | #import "stdstring.h"
-xsd__int            = int
-xsd__long           = LONG64
-xsd__float          = float
-xsd__double         = double
-xsd__unsignedInt    = unsigned int
-xsd__unsignedShort  = unsigned short
-tt__ReferenceToken  = std::string  | #import "stdstring.h"
+# Empty typemap.dat to use standard gSOAP built-in mappings.
