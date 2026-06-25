@@ -10,6 +10,8 @@
 #include <netinet/in.h>
 #endif
 
+extern struct Namespace namespaces[];
+
 OnvifServer::OnvifServer(const ServiceConfig& cfg, std::shared_ptr<ICameraBackend> backend)
     : cfg_(cfg), backend_(std::move(backend)) {}
 
@@ -48,6 +50,9 @@ void OnvifServer::listenLoop() {
         running_ = false;
         return;
     }
+
+    // Gán bảng ánh xạ namespace cho context
+    soap->namespaces = namespaces;
 
     // Cấu hình timeouts và giải phóng địa chỉ port nhanh (REUSEADDR)
     soap->accept_timeout = 1; // 1 giây check running_ một lần
