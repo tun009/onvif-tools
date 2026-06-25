@@ -81,8 +81,6 @@ wsdl2h \
     -o "$GEN_DIR/onvif.h" \
     -t "$EXT_DIR/typemap.dat" \
     -c++11 \
-    -j \
-    -x \
     "$WSDL_DIR/devicemgmt.wsdl" \
     "$WSDL_DIR/media.wsdl" \
     "$WSDL_DIR/ptz.wsdl" \
