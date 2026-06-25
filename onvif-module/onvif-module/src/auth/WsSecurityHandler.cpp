@@ -72,8 +72,8 @@ bool WsSecurityHandler::validate(struct soap* soap) const {
         return false;
     }
 
-    std::string passwordType = token->Password->Type ? *(token->Password->Type) : "";
-    std::string clientPassword = token->Password->__item ? *(token->Password->__item) : "";
+    std::string passwordType = token->Password->Type ? token->Password->Type : "";
+    std::string clientPassword = token->Password->__item ? token->Password->__item : "";
 
     // 1. Plaintext Password
     if (passwordType == "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordText" || passwordType.empty()) {
@@ -91,8 +91,8 @@ bool WsSecurityHandler::validate(struct soap* soap) const {
             return false;
         }
 
-        std::string rawNonce = base64Decode(token->Nonce->__item);
-        std::string createdTime = *(token->wsu__Created);
+        std::string rawNonce = base64Decode(token->Nonce->__item ? token->Nonce->__item : "");
+        std::string createdTime = token->wsu__Created;
 
         // Công thức: PasswordDigest = Base64 ( SHA-1 ( Nonce + Created + Password ) )
         SHA_CTX sha;
