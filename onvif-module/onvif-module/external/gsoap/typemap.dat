@@ -2,9 +2,9 @@
 # ONVIF type mappings
 
 xsd__boolean        = bool
-xsd__string         = std::string  | #import "custom/string.h"
-xsd__anyURI         = std::string  | #import "custom/string.h"
-xsd__QName          = std::string  | #import "custom/string.h"
+xsd__string         = std::string  | #import "stdstring.h"
+xsd__anyURI         = std::string  | #import "stdstring.h"
+xsd__QName          = std::string  | #import "stdstring.h"
 xsd__dateTime       = time_t       | #import "custom/struct_timeval.h"
 xsd__duration       = long         | #import "custom/long_time.h"
 xsd__int            = int
@@ -13,4 +13,4 @@ xsd__float          = float
 xsd__double         = double
 xsd__unsignedInt    = unsigned int
 xsd__unsignedShort  = unsigned short
-tt__ReferenceToken  = std::string  | #import "custom/string.h"
+tt__ReferenceToken  = std::string  | #import "stdstring.h"
