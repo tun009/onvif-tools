@@ -10,6 +10,12 @@ EXT_DIR="$ROOT_DIR/external/gsoap"
 
 mkdir -p "$GEN_DIR" "$WSDL_DIR"
 
+# Automatically ensure schemas and WSDLs are downloaded and patched
+echo "[INFO] Running download_schemas.sh to ensure all schemas are present..."
+bash "$SCRIPT_DIR/download_schemas.sh"
+echo "[INFO] Running download_wsdls.sh to ensure all WSDL files are present..."
+bash "$SCRIPT_DIR/download_wsdls.sh"
+
 for tool in wsdl2h soapcpp2; do
     command -v $tool &>/dev/null || {
         echo "[ERROR] $tool not found. Run: sudo apt install gsoap"

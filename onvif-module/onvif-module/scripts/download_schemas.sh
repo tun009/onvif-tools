@@ -2,7 +2,10 @@
 # scripts/download_schemas.sh
 # Downloads all XSD schemas required by devicemgmt.wsdl for offline wsdl2h compilation.
 
-SCHEMA_DIR="$(cd "$(dirname "$0")/../../../" && pwd)/ver10/schema"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCHEMA_DIR="$(cd "$SCRIPT_DIR/../../../" && pwd)/ver10/schema"
+VER20_ANALYTICS_DIR="$(cd "$SCRIPT_DIR/../../../" && pwd)/ver20/analytics"
+
 mkdir -p "$SCHEMA_DIR"
 cd "$SCHEMA_DIR"
 
@@ -112,7 +115,6 @@ if [ -f "metadatastream.xsd" ]; then
 fi
 
 # 7. Download ver20 analytics schemas
-VER20_ANALYTICS_DIR="$(cd "$(dirname "$0")/../../../" && pwd)/ver20/analytics"
 mkdir -p "$VER20_ANALYTICS_DIR"
 echo "[INFO] Downloading ver20 analytics schemas..."
 wget -q --no-check-certificate -O "$VER20_ANALYTICS_DIR/humanface.xsd" "https://www.onvif.org/onvif/ver20/analytics/humanface.xsd" || true
