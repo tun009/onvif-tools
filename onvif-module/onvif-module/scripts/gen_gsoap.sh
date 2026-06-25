@@ -207,6 +207,11 @@ fi
 echo "[INFO] Removing dummy namespace imports (#import \"ns*.h\") from onvif.h..."
 sed -i -E '/#import "ns[0-9]+\.h"/d' "$GEN_DIR/onvif.h"
 
+# Fix SOAP_ENV__Fault clash: wsa.h (old) and wsa5.h (2005) both define it.
+# We use soapcpp2 -2 (SOAP 1.2), so keep wsa5.h and remove the old wsa.h import.
+echo "[INFO] Removing #import \"wsa.h\" to prevent SOAP_ENV__Fault clash with wsa5.h..."
+sed -i '/#import "wsa\.h"/d' "$GEN_DIR/onvif.h"
+
 echo "[STEP 2] Patching onvif.h BEFORE soapcpp2 (inject wsse.h import)..."
 bash "$SCRIPT_DIR/patch_generated.sh"
 
