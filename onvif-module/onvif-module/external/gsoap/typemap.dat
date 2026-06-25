@@ -1,11 +1,6 @@
 # external/gsoap/typemap.dat
 # ONVIF type mappings
 
-[
-#import "stdstring.h"
-#import "dom.h"
-]
-
 xsd__boolean        = bool
 xsd__string         = std::string  | #import "stdstring.h"
 xsd__anyURI         = std::string  | #import "stdstring.h"

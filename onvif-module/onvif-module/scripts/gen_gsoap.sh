@@ -103,6 +103,12 @@ fi
 echo "[INFO] Removing dummy namespace imports (#import \"ns*.h\") from onvif.h..."
 sed -i -E '/#import "ns[0-9]+\.h"/d' "$GEN_DIR/onvif.h"
 
+# Force prepending stdstring.h and dom.h imports to the very top of onvif.h
+# to ensure soapcpp2 processes them before any ONVIF type definitions.
+echo "[INFO] Prepending standard imports (stdstring.h, dom.h) to onvif.h..."
+python3 -c "import sys; f=open('$GEN_DIR/onvif.h','r+'); c=f.read(); f.seek(0); f.write('#import \"stdstring.h\"\n#import \"dom.h\"\n'+c); f.close()" 2>/dev/null || \
+python -c "import sys; f=open('$GEN_DIR/onvif.h','r+'); c=f.read(); f.seek(0); f.write('#import \"stdstring.h\"\n#import \"dom.h\"\n'+c); f.close()"
+
 echo "[STEP 2] soapcpp2: header → serializers + stubs..."
 GSOAP_SYS_PARENT=$(dirname "$GSOAP_SYS_IMPORT")
 cd "$GEN_DIR"
