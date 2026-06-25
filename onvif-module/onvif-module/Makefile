@@ -104,6 +104,7 @@ clean:
 
 clean-gen:
 	rm -rf $(GEN_DIR)/*.cpp $(GEN_DIR)/*.h $(GEN_DIR)/*.nsmap
+	rm -f $(EXT_DIR)/gsoap/import/wsa5.h
 
 distclean: clean clean-gen
 	rm -rf wsdl/

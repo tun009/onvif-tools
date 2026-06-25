@@ -144,12 +144,23 @@ if [ ! -f "$EXT_DIR/import/wsse.h" ]; then
     fi
 fi
 
-# Patch wsa5.h in external/gsoap/import/ to remove its internal #import "wsa.h".
-# gSOAP 2.8.91's wsa5.h imports wsa.h, and both define SOAP_ENV__Fault → soapcpp2 error.
-# Our patched copy takes priority because -I "$EXT_DIR/import" is listed first in soapcpp2.
+# Patch wsa5.h: gSOAP 2.8.91's wsa5.h has #import "wsa.h" internally.
+# Both define SOAP_ENV__Fault → soapcpp2 semantic error.
+# Copy wsa5.h to our import dir (independent of wsse.h check above) then patch it.
+# Our copy takes priority because -I "$EXT_DIR/import" is listed first in soapcpp2.
+if [ ! -f "$EXT_DIR/import/wsa5.h" ]; then
+    FOUND_WSA5=$(find /usr /usr/local /opt -name "wsa5.h" 2>/dev/null | grep -v "external/gsoap" | head -n 1)
+    if [ -n "$FOUND_WSA5" ]; then
+        cp "$FOUND_WSA5" "$EXT_DIR/import/wsa5.h"
+        echo "[INFO] Copied wsa5.h from $FOUND_WSA5"
+    elif [ -f "/usr/share/gsoap/import/wsa5.h" ]; then
+        cp /usr/share/gsoap/import/wsa5.h "$EXT_DIR/import/wsa5.h"
+        echo "[INFO] Copied wsa5.h from /usr/share/gsoap/import"
+    fi
+fi
 if [ -f "$EXT_DIR/import/wsa5.h" ]; then
     sed -i '/#import "wsa\.h"/d' "$EXT_DIR/import/wsa5.h"
-    echo "[INFO] Patched external/gsoap/import/wsa5.h: removed #import \"wsa.h\""
+    echo "[INFO] Patched wsa5.h: removed #import \"wsa.h\" (prevents SOAP_ENV__Fault clash)"
 fi
 
 # Patch absolute URLs in WSDL files to point to local schema files
