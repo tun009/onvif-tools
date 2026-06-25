@@ -14,6 +14,7 @@ public:
 
     virtual Media2BindingService* copy() override;
 
+    // ── Các method cốt lõi cần override ───────────────────────────────────
     virtual int GetProfiles(
         _ns1__GetProfiles *ns1__GetProfiles,
         _ns1__GetProfilesResponse &ns1__GetProfilesResponse) override;
@@ -26,13 +27,9 @@ public:
         _ns1__GetSnapshotUri *ns1__GetSnapshotUri,
         _ns1__GetSnapshotUriResponse &ns1__GetSnapshotUriResponse) override;
 
-    virtual int GetVideoEncoderConfigurations(
-        _ns1__GetConfiguration *ns1__GetConfiguration,
-        _ns1__GetVideoEncoderConfigurationsResponse &ns1__GetVideoEncoderConfigurationsResponse) override;
-
-    virtual int SetVideoEncoderConfiguration(
-        _ns1__SetVideoEncoderConfiguration *ns1__SetVideoEncoderConfiguration,
-        _ns1__SetVideoEncoderConfigurationResponse &ns1__SetVideoEncoderConfigurationResponse) override;
+    // NOTE: GetVideoEncoderConfigurations & SetVideoEncoderConfiguration
+    // are intentionally NOT overridden here. gSOAP (-DWITH_DEFAULT_VIRTUAL)
+    // provides default stubs returning SOAP_NO_METHOD for unimplemented methods.
 
 private:
     bool validateAuth();

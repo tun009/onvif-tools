@@ -43,8 +43,8 @@ int Media2Service::GetProfiles(
         profile->token = p.token;
         profile->Name  = soap_new_std__string(soap);
         if (profile->Name) *profile->Name = p.name;
-        profile->fixed = nullptr;          // optional, skip
-        profile->Configurations = nullptr; // optional, skip to avoid type issues
+        profile->fixed          = nullptr;
+        profile->Configurations = nullptr;
 
         resp.Profiles.push_back(profile);
     }
@@ -77,7 +77,6 @@ int Media2Service::GetStreamUri(
         return soap_sender_fault(this->soap, "Invalid profile token", nullptr);
     }
 
-    // Replace 127.0.0.1 with actual device IP so external clients can connect
     std::string uri = u.uri;
     size_t pos = uri.find("127.0.0.1");
     if (pos != std::string::npos) uri.replace(pos, 9, cfg_.deviceIp);
@@ -103,9 +102,7 @@ int Media2Service::GetSnapshotUri(
     try {
         u = backend_->getSnapshotUri(profileToken);
     } catch (...) {
-        // Fallback: build URL manually
-        u.uri = "http://" + cfg_.deviceIp + ":" + std::to_string(cfg_.httpPort)
-                + "/snapshot?token=" + profileToken;
+        u.uri = "";
     }
 
     if (u.uri.empty()) {
@@ -113,39 +110,10 @@ int Media2Service::GetSnapshotUri(
                 + "/snapshot?token=" + profileToken;
     }
 
-    // Replace 127.0.0.1 with actual device IP
     size_t pos = u.uri.find("127.0.0.1");
     if (pos != std::string::npos) u.uri.replace(pos, 9, cfg_.deviceIp);
 
     resp.Uri = u.uri;
     std::cout << "[Media2Service] GetSnapshotUri [" << profileToken << "] → " << u.uri << std::endl;
-    return SOAP_OK;
-}
-
-// ── GetVideoEncoderConfigurations ────────────────────────────────────────────
-int Media2Service::GetVideoEncoderConfigurations(
-    _ns1__GetConfiguration */*req*/,
-    _ns1__GetVideoEncoderConfigurationsResponse &/*resp*/)
-{
-    if (!validateAuth()) {
-        return soap_sender_fault_subcode(this->soap, "ter:NotAuthorized", "Sender", "Not Authorized");
-    }
-    // Minimal stub – returns empty list. Will be filled in once inner types confirmed.
-    std::cout << "[Media2Service] GetVideoEncoderConfigurations → (stub)" << std::endl;
-    return SOAP_OK;
-}
-
-// ── SetVideoEncoderConfiguration ─────────────────────────────────────────────
-int Media2Service::SetVideoEncoderConfiguration(
-    _ns1__SetVideoEncoderConfiguration *req,
-    _ns1__SetVideoEncoderConfigurationResponse &/*resp*/)
-{
-    if (!validateAuth()) {
-        return soap_sender_fault_subcode(this->soap, "ter:NotAuthorized", "Sender", "Not Authorized");
-    }
-    if (!req) {
-        return soap_sender_fault(this->soap, "Missing request", nullptr);
-    }
-    std::cout << "[Media2Service] SetVideoEncoderConfiguration OK (stub)" << std::endl;
     return SOAP_OK;
 }
