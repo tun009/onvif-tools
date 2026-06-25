@@ -144,6 +144,14 @@ if [ ! -f "$EXT_DIR/import/wsse.h" ]; then
     fi
 fi
 
+# Patch wsa5.h in external/gsoap/import/ to remove its internal #import "wsa.h".
+# gSOAP 2.8.91's wsa5.h imports wsa.h, and both define SOAP_ENV__Fault → soapcpp2 error.
+# Our patched copy takes priority because -I "$EXT_DIR/import" is listed first in soapcpp2.
+if [ -f "$EXT_DIR/import/wsa5.h" ]; then
+    sed -i '/#import "wsa\.h"/d' "$EXT_DIR/import/wsa5.h"
+    echo "[INFO] Patched external/gsoap/import/wsa5.h: removed #import \"wsa.h\""
+fi
+
 # Patch absolute URLs in WSDL files to point to local schema files
 echo "[INFO] Patching absolute schema URLs in WSDL files to use local paths..."
 for f in "$WSDL_DIR"/*.wsdl; do
@@ -222,9 +230,9 @@ soapcpp2 \
     -2 \
     -j \
     -x \
+    -I "$EXT_DIR/import" \
     -I "$GSOAP_SYS_IMPORT" \
     -I "$GSOAP_SYS_PARENT" \
-    -I "$EXT_DIR/import" \
     -d "$GEN_DIR" \
     "$GEN_DIR/onvif.h"
 
