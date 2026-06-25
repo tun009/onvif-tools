@@ -1,4 +1,9 @@
 #include "backend/BackendConnector.h"
+
+// gSOAP namespace table — required when compiled with -DWITH_NONAMESPACES.
+// Must be included in exactly ONE translation unit.
+#include "onvif.nsmap"
+
 #include <csignal>
 #include <atomic>
 #include <thread>
