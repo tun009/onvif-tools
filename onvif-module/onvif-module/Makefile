@@ -24,15 +24,11 @@ STDSOAP_SRC := $(wildcard $(EXT_DIR)/gsoap/stdsoap2.cpp)
 ifeq ($(STDSOAP_SRC),)
   # Use system library
   GSOAP_LIBS := -lgsoap++
-  WSSE_SRC := $(firstword $(wildcard $(EXT_DIR)/gsoap/plugin/wsseapi.cpp) /usr/share/gsoap/plugin/wsseapi.cpp)
-  WSDD_SRC := $(firstword $(wildcard $(EXT_DIR)/gsoap/plugin/wsddapi.cpp) /usr/share/gsoap/plugin/wsddapi.cpp)
-  GSP_SRCS := $(WSSE_SRC) $(WSDD_SRC)
+  GSP_SRCS :=
 else
   # Use local source
   GSOAP_LIBS :=
-  GSP_SRCS := $(EXT_DIR)/gsoap/stdsoap2.cpp \
-              $(wildcard $(EXT_DIR)/gsoap/plugin/wsseapi.cpp) \
-              $(wildcard $(EXT_DIR)/gsoap/plugin/wsddapi.cpp)
+  GSP_SRCS := $(EXT_DIR)/gsoap/stdsoap2.cpp
 endif
 
 FULL_SRCS := $(APP_SRCS) $(GEN_SRCS) $(GSP_SRCS)
