@@ -17,6 +17,26 @@ for tool in wsdl2h soapcpp2; do
     }
 done
 
+# Auto-detect system gSOAP import directory (differs by distro/version)
+GSOAP_SYS_IMPORT=""
+for candidate in \
+    /usr/share/gsoap/import \
+    /usr/local/share/gsoap/import \
+    /usr/include/gsoap \
+    /usr/local/include/gsoap; do
+    if [ -f "$candidate/xsi.h" ]; then
+        GSOAP_SYS_IMPORT="$candidate"
+        echo "[INFO] Found gSOAP system import dir: $GSOAP_SYS_IMPORT"
+        break
+    fi
+done
+
+if [ -z "$GSOAP_SYS_IMPORT" ]; then
+    echo "[ERROR] Cannot find gSOAP import dir (xsi.h not found)."
+    echo "        Try: sudo apt install gsoap"
+    exit 1
+fi
+
 echo "[STEP 1] wsdl2h: devicemgmt.wsdl → C++ header..."
 wsdl2h \
     -o "$GEN_DIR/onvif.h" \
@@ -34,6 +54,7 @@ soapcpp2 \
     -2 \
     -j \
     -x \
+    -I "$GSOAP_SYS_IMPORT" \
     -I "$EXT_DIR/import" \
     -d "$GEN_DIR" \
     "$GEN_DIR/onvif.h"
