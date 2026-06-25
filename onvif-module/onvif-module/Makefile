@@ -17,7 +17,8 @@ IPC_OBJS := $(patsubst %.cpp, $(BUILD_DIR)/%.o, $(IPC_SRCS))
 FULL_BIN  := onvif-server
 APP_SRCS  := $(shell find $(SRC_DIR) -name '*.cpp')
 GEN_SRCS  := $(GEN_DIR)/soapC.cpp \
-             $(GEN_DIR)/soapDeviceBindingService.cpp
+             $(GEN_DIR)/soapDeviceBindingService.cpp \
+             $(wildcard $(GEN_DIR)/soapMedia2BindingService.cpp)
 
 # Detect where stdsoap2.cpp is. If it's not in EXT_DIR, we use system libgsoap++
 STDSOAP_SRC := $(wildcard $(EXT_DIR)/gsoap/stdsoap2.cpp)

@@ -1,6 +1,8 @@
 #include "OnvifServer.h"
+#include "services/Media2Service.h"
 #include "soapH.h"
 #include <iostream>
+#include <cstring>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -80,9 +82,23 @@ void OnvifServer::listenLoop() {
             break;
         }
 
-        // Xử lý request SOAP với DeviceService
-        DeviceService deviceSvc(soap, cfg_, backend_);
-        if (deviceSvc.serve() != SOAP_OK) {
+        // ── Dispatch dựa trên URL path ────────────────────────────────
+        // Lấy path từ HTTP request (soap->path được gSOAP set sau soap_accept)
+        const char* rawPath = soap->path ? soap->path : "";
+        std::string path(rawPath);
+
+        int serveResult = SOAP_OK;
+        if (path.find("/onvif/media") != std::string::npos) {
+            // Yêu cầu đến Media2Service
+            Media2Service media2Svc(soap, cfg_, backend_);
+            serveResult = media2Svc.serve();
+        } else {
+            // Mặc định: DeviceService (/onvif/device hoặc /onvif/device_service)
+            DeviceService deviceSvc(soap, cfg_, backend_);
+            serveResult = deviceSvc.serve();
+        }
+
+        if (serveResult != SOAP_OK && serveResult != SOAP_STOP) {
             std::cerr << "[OnvifServer] Error processing SOAP request:" << std::endl;
             soap_print_fault(soap, stderr);
         }
