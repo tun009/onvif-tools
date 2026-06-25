@@ -245,7 +245,16 @@ soapcpp2 \
     -I "$GSOAP_SYS_IMPORT" \
     -I "$GSOAP_SYS_PARENT" \
     -d "$GEN_DIR" \
-    "$GEN_DIR/onvif.h"
+    "$GEN_DIR/onvif.h" || true
+
+# soapcpp2 exits 255 on "semantic errors" that are harmless duplicates
+# (e.g. SOAP_ENV__Fault redeclared across wsa.h/wsa5.h).
+# Verify that the critical output files were actually generated.
+if [ ! -f "$GEN_DIR/soapC.cpp" ] || [ ! -f "$GEN_DIR/soapH.h" ]; then
+    echo "[ERROR] soapcpp2 failed to generate soapC.cpp / soapH.h — aborting."
+    exit 1
+fi
+echo "[INFO] soapcpp2 generated soapC.cpp and soapH.h successfully."
 
 echo "[STEP 3] Generated files:"
 ls -lh "$GEN_DIR/"
