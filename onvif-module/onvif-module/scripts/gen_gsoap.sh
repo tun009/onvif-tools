@@ -80,6 +80,9 @@ echo "[STEP 1] wsdl2h: WSDL → C++ header..."
 wsdl2h \
     -o "$GEN_DIR/onvif.h" \
     -t "$EXT_DIR/typemap.dat" \
+    -I "$GSOAP_SYS_IMPORT" \
+    -I "$ROOT_DIR/../../ver10/schema" \
+    -I "$WSDL_DIR" \
     -c++11 \
     -j \
     -x \
