@@ -207,7 +207,10 @@ fi
 echo "[INFO] Removing dummy namespace imports (#import \"ns*.h\") from onvif.h..."
 sed -i -E '/#import "ns[0-9]+\.h"/d' "$GEN_DIR/onvif.h"
 
-echo "[STEP 2] soapcpp2: header → serializers + stubs..."
+echo "[STEP 2] Patching onvif.h BEFORE soapcpp2 (inject wsse.h import)..."
+bash "$SCRIPT_DIR/patch_generated.sh"
+
+echo "[STEP 3] soapcpp2: header → serializers + stubs..."
 GSOAP_SYS_PARENT=$(dirname "$GSOAP_SYS_IMPORT")
 cd "$GEN_DIR"
 soapcpp2 \
@@ -220,10 +223,7 @@ soapcpp2 \
     -d "$GEN_DIR" \
     "$GEN_DIR/onvif.h"
 
-echo "[STEP 2] Generated files:"
+echo "[STEP 3] Generated files:"
 ls -lh "$GEN_DIR/"
-
-echo "[STEP 3] Patching..."
-bash "$SCRIPT_DIR/patch_generated.sh"
 
 echo "[DONE] Code generation complete!"

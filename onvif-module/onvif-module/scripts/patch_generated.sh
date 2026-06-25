@@ -1,10 +1,59 @@
 #!/bin/bash
 # scripts/patch_generated.sh
-GEN_DIR="$(cd "$(dirname "$0")/.." && pwd)/generated"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(dirname "$SCRIPT_DIR")"
+GEN_DIR="$ROOT_DIR/generated"
+EXT_DIR="$ROOT_DIR/external/gsoap"
 
 echo "[PATCH] Fixing generated files..."
 
-# Fix: namespace map
+# ── Fix 1: Inject wsse.h import into onvif.h BEFORE soapcpp2 ─────────────
+# This makes soapcpp2 add wsse__Security to SOAP_ENV__Header struct.
+ONVIF_H="$GEN_DIR/onvif.h"
+if [ -f "$ONVIF_H" ]; then
+    if ! grep -q '#import "wsse.h"' "$ONVIF_H"; then
+        # Find wsse.h location
+        WSSE_H=""
+        for candidate in \
+            "$EXT_DIR/import/wsse.h" \
+            /usr/share/gsoap/import/wsse.h \
+            /usr/local/share/gsoap/import/wsse.h; do
+            if [ -f "$candidate" ]; then
+                WSSE_H="$candidate"
+                break
+            fi
+        done
+
+        if [ -n "$WSSE_H" ]; then
+            # Insert after the first #import line, or at top
+            sed -i '1s|^|#import "wsse.h"\n|' "$ONVIF_H"
+            echo "  [PATCHED] Added #import \"wsse.h\" to onvif.h (wsse found at $WSSE_H)"
+        else
+            echo "  [WARN] wsse.h not found — WS-Security header struct may be missing"
+        fi
+    else
+        echo "  [OK] wsse.h already imported in onvif.h"
+    fi
+fi
+
+# ── Fix 2: Inject SOAP_ENV__Header wsse__Security declaration ────────────
+# gSOAP needs this directive to put wsse__Security into the SOAP header struct.
+if [ -f "$ONVIF_H" ]; then
+    if ! grep -q 'wsse__Security' "$ONVIF_H"; then
+        cat >> "$ONVIF_H" << 'WSSE_HDR'
+
+// Force wsse:Security into SOAP_ENV__Header for WS-Security UsernameToken
+struct SOAP_ENV__Header {
+    _wsse__Security *wsse__Security;
+};
+WSSE_HDR
+        echo "  [PATCHED] Added SOAP_ENV__Header wsse__Security declaration"
+    else
+        echo "  [OK] wsse__Security already declared in onvif.h"
+    fi
+fi
+
+# ── Fix 3: Namespace map ──────────────────────────────────────────────────
 NSMAP="$GEN_DIR/onvif.nsmap"
 if [ ! -f "$NSMAP" ]; then
 cat > "$NSMAP" << 'NSEOF'
@@ -30,6 +79,8 @@ struct Namespace namespaces[] = {
 };
 NSEOF
     echo "  [CREATED] onvif.nsmap"
+else
+    echo "  [OK] onvif.nsmap exists"
 fi
 
 echo "[PATCH] Done."
