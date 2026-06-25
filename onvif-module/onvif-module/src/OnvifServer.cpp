@@ -25,9 +25,6 @@ bool OnvifServer::start() {
 }
 
 void OnvifServer::stop() {
-    if (!running_) return;
-    running_ = false;
-    
     if (masterSocket_ >= 0) {
 #ifdef _WIN32
         closesocket(masterSocket_);
@@ -36,6 +33,8 @@ void OnvifServer::stop() {
 #endif
         masterSocket_ = -1;
     }
+
+    running_ = false;
 
     if (serverThread_.joinable()) {
         serverThread_.join();

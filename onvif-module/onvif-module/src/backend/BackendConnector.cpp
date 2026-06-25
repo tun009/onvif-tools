@@ -98,8 +98,16 @@ bool BackendConnector::connect() {
 void BackendConnector::disconnect() {
     connected_  = false;
     evtRunning_ = false;
-    if (ctrlFd_ >= 0) { ::close(ctrlFd_); ctrlFd_ = -1; }
-    if (evtFd_  >= 0) { ::close(evtFd_);  evtFd_  = -1; }
+    if (ctrlFd_ >= 0) {
+        ::shutdown(ctrlFd_, SHUT_RDWR);
+        ::close(ctrlFd_);
+        ctrlFd_ = -1;
+    }
+    if (evtFd_  >= 0) {
+        ::shutdown(evtFd_, SHUT_RDWR);
+        ::close(evtFd_);
+        evtFd_  = -1;
+    }
     if (evtThread_.joinable()) evtThread_.join();
 }
 
