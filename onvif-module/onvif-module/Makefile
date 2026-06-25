@@ -31,6 +31,13 @@ else
   GSP_SRCS := $(EXT_DIR)/gsoap/stdsoap2.cpp
 endif
 
+# wsddapi.cpp (WS-Discovery) — include if present
+# wsseapi.cpp is intentionally excluded: it requires XML-DSIG/XML-Enc types
+# that conflict with ONVIF-generated types. WS-Security UsernameToken is
+# handled directly in WsSecurityHandler.cpp via OpenSSL without wsseapi.
+WSDD_SRC := $(wildcard $(EXT_DIR)/gsoap/plugin/wsddapi.cpp)
+GSP_SRCS += $(WSDD_SRC)
+
 FULL_SRCS := $(APP_SRCS) $(GEN_SRCS) $(GSP_SRCS)
 FULL_OBJS := $(patsubst %.cpp, $(BUILD_DIR)/%.o, $(FULL_SRCS))
 
@@ -49,7 +56,8 @@ PKG_DEPS   := gstreamer-1.0 gstreamer-rtsp-server-1.0 openssl
 PKG_CFLAGS := $(shell pkg-config --cflags $(PKG_DEPS) 2>/dev/null)
 PKG_LIBS   := $(shell pkg-config --libs   $(PKG_DEPS) 2>/dev/null)
 
-DEFINES := -DWITH_OPENSSL -DWITH_DOM -DONVIF_PROFILE_T
+DEFINES := -DWITH_OPENSSL -DWITH_DOM -DONVIF_PROFILE_T \
+           -DWITH_NONAMESPACES
 
 .PHONY: all ipc-test full gen gen-wsdl install_deps clean clean-gen
 

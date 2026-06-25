@@ -105,18 +105,28 @@ if [ ! -f "$EXT_DIR/stdsoap2.cpp" ] || [ ! -f "$EXT_DIR/stdsoap2.h" ]; then
 fi
 
 # Ensure plugins exist in external/gsoap/plugin/
+# NOTE: wsseapi.cpp is intentionally NOT copied — it requires XML-DSIG/XML-Enc
+# serializer types (ds__SignatureType, xenc__EncryptionMethodType, wsse__FailedCheck)
+# that conflict with ONVIF-generated types from soapcpp2.
+# WS-Security UsernameToken/PasswordDigest is handled in WsSecurityHandler.cpp
+# directly via OpenSSL without wsseapi.
 mkdir -p "$EXT_DIR/plugin"
-if [ ! -f "$EXT_DIR/plugin/wsseapi.cpp" ] || [ ! -f "$EXT_DIR/plugin/wsddapi.cpp" ]; then
-    echo "[INFO] Copying gSOAP plugins to external/gsoap/plugin/ (best effort)..."
-    FOUND_PLUGIN_CPP=$(find /usr /usr/local /opt /home -name "wsseapi.cpp" 2>/dev/null | grep -v "external/gsoap" | head -n 1)
-    if [ -n "$FOUND_PLUGIN_CPP" ]; then
-        PLUGIN_SRC=$(dirname "$FOUND_PLUGIN_CPP")
-        cp "$PLUGIN_SRC"/*.h "$EXT_DIR/plugin/" 2>/dev/null || true
-        cp "$PLUGIN_SRC"/*.cpp "$EXT_DIR/plugin/" 2>/dev/null || true
-        echo "  Copied plugins from $PLUGIN_SRC"
-    elif [ -d "/usr/share/gsoap/plugin" ]; then
+if [ ! -f "$EXT_DIR/plugin/wsddapi.cpp" ]; then
+    echo "[INFO] Copying wsddapi (WS-Discovery) plugin only..."
+    FOUND_WSDD=$(find /usr /usr/local /opt /home -name "wsddapi.cpp" 2>/dev/null | grep -v "external/gsoap" | head -n 1)
+    if [ -n "$FOUND_WSDD" ]; then
+        PLUGIN_SRC=$(dirname "$FOUND_WSDD")
+        cp "$PLUGIN_SRC/wsddapi.cpp" "$EXT_DIR/plugin/" 2>/dev/null || true
+        cp "$PLUGIN_SRC/wsddapi.h"   "$EXT_DIR/plugin/" 2>/dev/null || true
+        echo "  Copied wsddapi from $PLUGIN_SRC"
+    elif [ -f "/usr/share/gsoap/plugin/wsddapi.cpp" ]; then
+        cp /usr/share/gsoap/plugin/wsddapi.cpp "$EXT_DIR/plugin/" 2>/dev/null || true
+        cp /usr/share/gsoap/plugin/wsddapi.h   "$EXT_DIR/plugin/" 2>/dev/null || true
+        echo "  Copied wsddapi from /usr/share/gsoap/plugin"
+    fi
+    # Copy all .h files for includes (headers needed by wsddapi)
+    if [ -d "/usr/share/gsoap/plugin" ]; then
         cp /usr/share/gsoap/plugin/*.h "$EXT_DIR/plugin/" 2>/dev/null || true
-        cp /usr/share/gsoap/plugin/*.cpp "$EXT_DIR/plugin/" 2>/dev/null || true
     fi
 fi
 
