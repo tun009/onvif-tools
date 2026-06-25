@@ -57,7 +57,7 @@ PKG_CFLAGS := $(shell pkg-config --cflags $(PKG_DEPS) 2>/dev/null)
 PKG_LIBS   := $(shell pkg-config --libs   $(PKG_DEPS) 2>/dev/null)
 
 DEFINES := -DWITH_OPENSSL -DWITH_DOM -DONVIF_PROFILE_T \
-           -DWITH_NONAMESPACES
+           -DWITH_NONAMESPACES -DWITH_DEFAULT_VIRTUAL
 
 .PHONY: all ipc-test full gen gen-wsdl install_deps clean clean-gen
 
