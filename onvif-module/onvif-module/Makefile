@@ -18,9 +18,23 @@ FULL_BIN  := onvif-server
 APP_SRCS  := $(shell find $(SRC_DIR) -name '*.cpp')
 GEN_SRCS  := $(wildcard $(GEN_DIR)/soapC.cpp) \
              $(wildcard $(GEN_DIR)/soapServer.cpp)
-GSP_SRCS  := $(wildcard $(EXT_DIR)/gsoap/stdsoap2.cpp) \
-             $(wildcard $(EXT_DIR)/gsoap/plugin/wsseapi.cpp) \
-             $(wildcard $(EXT_DIR)/gsoap/plugin/wsddapi.cpp)
+
+# Detect where stdsoap2.cpp is. If it's not in EXT_DIR, we use system libgsoap++
+STDSOAP_SRC := $(wildcard $(EXT_DIR)/gsoap/stdsoap2.cpp)
+ifeq ($(STDSOAP_SRC),)
+  # Use system library
+  GSOAP_LIBS := -lgsoap++
+  WSSE_SRC := $(firstword $(wildcard $(EXT_DIR)/gsoap/plugin/wsseapi.cpp) /usr/share/gsoap/plugin/wsseapi.cpp)
+  WSDD_SRC := $(firstword $(wildcard $(EXT_DIR)/gsoap/plugin/wsddapi.cpp) /usr/share/gsoap/plugin/wsddapi.cpp)
+  GSP_SRCS := $(WSSE_SRC) $(WSDD_SRC)
+else
+  # Use local source
+  GSOAP_LIBS :=
+  GSP_SRCS := $(EXT_DIR)/gsoap/stdsoap2.cpp \
+              $(wildcard $(EXT_DIR)/gsoap/plugin/wsseapi.cpp) \
+              $(wildcard $(EXT_DIR)/gsoap/plugin/wsddapi.cpp)
+endif
+
 FULL_SRCS := $(APP_SRCS) $(GEN_SRCS) $(GSP_SRCS)
 FULL_OBJS := $(patsubst %.cpp, $(BUILD_DIR)/%.o, $(FULL_SRCS))
 
@@ -30,7 +44,9 @@ INCLUDES := \
     -I$(GEN_DIR) \
     -I$(EXT_DIR)/gsoap \
     -I$(EXT_DIR)/gsoap/plugin \
-    -I$(EXT_DIR)/gsoap/import
+    -I$(EXT_DIR)/gsoap/import \
+    -I/usr/share/gsoap/import \
+    -I/usr/share/gsoap/plugin
 
 # ── pkg-config ────────────────────────────────────────────────────────────
 PKG_DEPS   := gstreamer-1.0 gstreamer-rtsp-server-1.0 openssl
@@ -54,7 +70,7 @@ ipc-test: $(IPC_OBJS)
 full: check-gen $(FULL_OBJS)
 	@echo "[LINK] $(FULL_BIN)"
 	$(CXX) $(CXXFLAGS) $(FULL_OBJS) -o $(FULL_BIN) \
-	    $(PKG_LIBS) -lpthread -lssl -lcrypto -lz
+	    $(PKG_LIBS) $(GSOAP_LIBS) -lpthread -lssl -lcrypto -lz
 	@echo "[DONE] $(FULL_BIN)"
 
 check-gen:
