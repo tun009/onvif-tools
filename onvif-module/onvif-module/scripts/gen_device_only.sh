@@ -104,6 +104,9 @@ python3 -c "import sys; f=open('$GEN_DIR/onvif.h','r+'); c=f.read(); f.seek(0); 
 python -c "import sys; f=open('$GEN_DIR/onvif.h','r+'); c=f.read(); f.seek(0); f.write('#import \"stdstring.h\"\n#import \"dom.h\"\n'+c); f.close()"
 
 echo "[STEP 2] soapcpp2: header → serializers + stubs..."
+echo "=== DIAGNOSTICS: onvif.h lines 180-250 ==="
+sed -n '180,250p' "$GEN_DIR/onvif.h"
+echo "========================================="
 GSOAP_SYS_PARENT=$(dirname "$GSOAP_SYS_IMPORT")
 cd "$GEN_DIR"
 soapcpp2 \
