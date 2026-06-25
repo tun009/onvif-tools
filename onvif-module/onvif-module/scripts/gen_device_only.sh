@@ -22,13 +22,15 @@ GSOAP_SYS_IMPORT=""
 
 # 1. Check common standard paths
 for candidate in \
+    "$CONDA_PREFIX/share/gsoap/import" \
+    "$CONDA_PREFIX/include/gsoap" \
     /usr/share/gsoap/import \
     /usr/local/share/gsoap/import \
     /usr/include/gsoap \
     /usr/local/include/gsoap \
     /usr/include \
     /usr/local/include; do
-    if [ -f "$candidate/xsi.h" ]; then
+    if [ -n "$candidate" ] && [ -f "$candidate/xsd.h" ]; then
         GSOAP_SYS_IMPORT="$candidate"
         break
     fi
@@ -40,35 +42,35 @@ if [ -z "$GSOAP_SYS_IMPORT" ]; then
     if [ -n "$WSDL2H_PATH" ]; then
         BIN_DIR=$(dirname "$WSDL2H_PATH")
         PREFIX_DIR=$(dirname "$BIN_DIR")
-        if [ -f "$PREFIX_DIR/share/gsoap/import/xsi.h" ]; then
+        if [ -f "$PREFIX_DIR/share/gsoap/import/xsd.h" ]; then
             GSOAP_SYS_IMPORT="$PREFIX_DIR/share/gsoap/import"
-        elif [ -f "$PREFIX_DIR/import/xsi.h" ]; then
+        elif [ -f "$PREFIX_DIR/import/xsd.h" ]; then
             GSOAP_SYS_IMPORT="$PREFIX_DIR/import"
         fi
     fi
 fi
 
-# 3. Search in user's home directory (max depth 5 for speed)
+# 3. Search in user's home directory (max depth 10 for conda/custom installs)
 if [ -z "$GSOAP_SYS_IMPORT" ]; then
-    echo "[INFO] Searching home directory for xsi.h..."
-    FOUND_PATH=$(find "$HOME" -maxdepth 5 -name "xsi.h" 2>/dev/null | head -n 1)
+    echo "[INFO] Searching home directory for xsd.h (maxdepth 10)..."
+    FOUND_PATH=$(find "$HOME" -maxdepth 10 -name "xsd.h" 2>/dev/null | head -n 1)
     if [ -n "$FOUND_PATH" ]; then
         GSOAP_SYS_IMPORT=$(dirname "$FOUND_PATH")
     fi
 fi
 
-# 4. Search in /usr and /usr/local (max depth 5)
+# 4. Search in /usr and /usr/local (max depth 10)
 if [ -z "$GSOAP_SYS_IMPORT" ]; then
-    echo "[INFO] Searching /usr and /usr/local for xsi.h..."
-    FOUND_PATH=$(find /usr /usr/local -maxdepth 5 -name "xsi.h" 2>/dev/null | head -n 1)
+    echo "[INFO] Searching /usr and /usr/local for xsd.h (maxdepth 10)..."
+    FOUND_PATH=$(find /usr /usr/local -maxdepth 10 -name "xsd.h" 2>/dev/null | head -n 1)
     if [ -n "$FOUND_PATH" ]; then
         GSOAP_SYS_IMPORT=$(dirname "$FOUND_PATH")
     fi
 fi
 
 if [ -z "$GSOAP_SYS_IMPORT" ]; then
-    echo "[ERROR] Cannot find gSOAP import dir (xsi.h not found)."
-    echo "        Please find where xsi.h is located on your server and set it manually."
+    echo "[ERROR] Cannot find gSOAP import dir (xsd.h not found)."
+    echo "        Please find where xsd.h is located on your server and set it manually."
     exit 1
 fi
 
@@ -84,6 +86,13 @@ wsdl2h \
     "$WSDL_DIR/devicemgmt.wsdl"
 
 echo "[STEP 1] Done: $GEN_DIR/onvif.h ($(wc -l < $GEN_DIR/onvif.h) lines)"
+
+# Fix missing xsi.h issue: xsi namespace is built-in to gSOAP, and its header doesn't exist
+# in the standard import directory. Removing the #import statement avoids the compiler error.
+if grep -q '#import "xsi.h"' "$GEN_DIR/onvif.h"; then
+    echo "[INFO] Removing #import \"xsi.h\" from onvif.h to prevent compilation error..."
+    sed -i '/#import "xsi.h"/d' "$GEN_DIR/onvif.h"
+fi
 
 echo "[STEP 2] soapcpp2: header → serializers + stubs..."
 cd "$GEN_DIR"
