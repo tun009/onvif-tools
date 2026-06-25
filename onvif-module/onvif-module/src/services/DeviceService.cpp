@@ -43,7 +43,7 @@ int DeviceService::GetSystemDateAndTime(
 
     // Allocate response struct using soap memory manager
     auto sdt = soap_new_tt__SystemDateTime(soap);
-    sdt->DateTimeType = tt__DateTimeType::Manual;
+    sdt->DateTimeType = tt__SetDateTimeType::Manual;
     sdt->DaylightSavings = dt.daylightSaving;
 
     // TimeZone
@@ -174,7 +174,7 @@ int DeviceService::GetScopes(
     for (const auto& uri : scopeUris) {
         auto scope = soap_new_tt__Scope(soap);
         scope->ScopeDef = tt__ScopeDefinition::Fixed;
-        scope->ScopeURI = uri;
+        scope->ScopeItem = uri;
         tds__GetScopesResponse.Scopes.push_back(scope);
     }
 
