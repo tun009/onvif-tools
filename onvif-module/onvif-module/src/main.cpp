@@ -1,4 +1,5 @@
 #include "backend/BackendConnector.h"
+#include "OnvifServer.h"
 
 // gSOAP namespace table — required when compiled with -DWITH_NONAMESPACES.
 // stdsoap2.h must come first to define struct Namespace.
@@ -128,18 +129,34 @@ int main(int argc, char* argv[]) {
 
     } catch (const std::exception& e) {
         fprintf(stderr, "[TEST] Exception: %s\n", e.what());
+    // ── Start ONVIF SOAP server ───────────────────────────────────
+    ServiceConfig svcCfg;
+    svcCfg.deviceIp = cfg.deviceIp;
+    svcCfg.httpPort = cfg.httpPort;
+    svcCfg.rtspPort = cfg.rtspPort;
+    svcCfg.deviceUuid = cfg.deviceUuid;
+    svcCfg.username = cfg.username;
+    svcCfg.password = cfg.password;
+
+    // Sử dụng no-op deleter vì backend nằm trên stack ở main
+    auto backendPtr = std::shared_ptr<ICameraBackend>(&backend, [](ICameraBackend*){});
+    OnvifServer server(svcCfg, backendPtr);
+    
+    printf("[main] Starting ONVIF SOAP server...\n");
+    if (server.start()) {
+        printf("[main] ONVIF SOAP server running on port %d\n", svcCfg.httpPort);
+    } else {
+        fprintf(stderr, "[main] Failed to start ONVIF SOAP server!\n");
     }
 
-    // ── TODO: Start ONVIF SOAP server here ────────────────────────
-    // OnvifServer server(cfg, backend);
-    // server.start();
-    printf("\n[main] ONVIF SOAP server: TODO (gSOAP setup required)\n");
-    printf("[main] Run 'make gen' first to generate gSOAP code\n");
     printf("[main] Press Ctrl+C to exit\n\n");
 
     while (g_running) {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
+
+    printf("[main] Stopping ONVIF SOAP server...\n");
+    server.stop();
 
     backend.disconnect();
     printf("[main] Done.\n");

@@ -1,154 +1,131 @@
-// WsSecurityHandler.cpp
-// Validates ONVIF WS-Security UsernameToken without wsseapi.cpp.
-// Parses the wsse:Security SOAP header from the gSOAP-generated struct
-// and verifies PasswordDigest using OpenSSL SHA1 + Base64.
-
 #include "auth/WsSecurityHandler.h"
-
-// gSOAP generated headers — must be generated first (make gen)
 #include "soapH.h"
-
 #include <openssl/sha.h>
-#include <openssl/bio.h>
 #include <openssl/evp.h>
+#include <openssl/bio.h>
 #include <openssl/buffer.h>
 #include <cstring>
-#include <ctime>
-#include <vector>
-#include <algorithm>
-#include <stdexcept>
+#include <iostream>
 
-// ── Base64 helpers ────────────────────────────────────────────────────────
-
-static std::vector<uint8_t> b64Decode(const std::string& in) {
-    BIO* b64  = BIO_new(BIO_f_base64());
-    BIO* bmem = BIO_new_mem_buf(in.data(), static_cast<int>(in.size()));
-    bmem = BIO_push(b64, bmem);
-    BIO_set_flags(bmem, BIO_FLAGS_BASE64_NO_NL);
-
-    std::vector<uint8_t> out(in.size());
-    int len = BIO_read(bmem, out.data(), static_cast<int>(out.size()));
-    BIO_free_all(bmem);
-
-    if (len <= 0) return {};
-    out.resize(static_cast<size_t>(len));
+// Helper decode Base64
+static std::string base64Decode(const std::string& in) {
+    if (in.empty()) return "";
+    BIO *bio, *b64;
+    char* buffer = (char*)malloc(in.size());
+    if (!buffer) return "";
+    memset(buffer, 0, in.size());
+    bio = BIO_new_mem_buf(in.data(), in.size());
+    b64 = BIO_new(BIO_f_base64());
+    bio = BIO_push(b64, bio);
+    BIO_set_flags(bio, BIO_FLAGS_BASE64_NO_NL);
+    int decoded_len = BIO_read(bio, buffer, in.size());
+    BIO_free_all(bio);
+    std::string out(buffer, decoded_len);
+    free(buffer);
     return out;
 }
 
-static std::string b64Encode(const uint8_t* data, size_t len) {
-    BIO* b64  = BIO_new(BIO_f_base64());
-    BIO* bout = BIO_new(BIO_s_mem());
-    bout = BIO_push(b64, bout);
-    BIO_set_flags(bout, BIO_FLAGS_BASE64_NO_NL);
-    BIO_write(bout, data, static_cast<int>(len));
-    BIO_flush(bout);
-
-    BUF_MEM* bptr;
-    BIO_get_mem_ptr(bout, &bptr);
-    std::string result(bptr->data, bptr->length);
-    BIO_free_all(bout);
-    return result;
+// Helper encode Base64
+static std::string base64Encode(const unsigned char* buffer, size_t length) {
+    BIO *bio, *b64;
+    BUF_MEM *bufferPtr;
+    b64 = BIO_new(BIO_f_base64());
+    bio = BIO_new(BIO_s_mem());
+    bio = BIO_push(b64, bio);
+    BIO_set_flags(bio, BIO_FLAGS_BASE64_NO_NL);
+    BIO_write(bio, buffer, length);
+    (void)BIO_flush(bio);
+    BIO_get_mem_ptr(bio, &bufferPtr);
+    std::string out(bufferPtr->data, bufferPtr->length);
+    BIO_free_all(bio);
+    return out;
 }
 
-// ── PasswordDigest verification ───────────────────────────────────────────
-
-bool WsSecurityHandler::verifyDigest(const std::string& nonceB64,
-                                      const std::string& created,
-                                      const std::string& digestB64,
-                                      const std::string& password) {
-    auto nonce = b64Decode(nonceB64);
-    if (nonce.empty()) return false;
-
-    // Input = nonce_bytes || created_string || password_string
-    std::vector<uint8_t> input;
-    input.insert(input.end(), nonce.begin(), nonce.end());
-    input.insert(input.end(), created.begin(), created.end());
-    input.insert(input.end(), password.begin(), password.end());
-
-    uint8_t sha1[SHA_DIGEST_LENGTH];
-    SHA1(input.data(), input.size(), sha1);
-
-    std::string computed = b64Encode(sha1, SHA_DIGEST_LENGTH);
-    return computed == digestB64;
-}
-
-// ── Anti-replay nonce check ───────────────────────────────────────────────
-
-bool WsSecurityHandler::checkNonce(const std::string& nonce,
-                                    const std::string& created) const {
-    std::lock_guard<std::mutex> lock(nonceMutex_);
-
-    // Parse ISO8601 timestamp
-    struct tm tm{};
-    strptime(created.c_str(), "%Y-%m-%dT%H:%M:%SZ", &tm);
-    time_t createdTime = timegm(&tm);
-    time_t now         = time(nullptr);
-
-    if (std::abs(static_cast<long>(now - createdTime)) > NONCE_WINDOW_SEC) {
-        return false;  // timestamp out of ±5min window
-    }
-
-    if (usedNonces_.count(nonce)) {
-        return false;  // replay detected
-    }
-
-    usedNonces_[nonce] = now;
-
-    // Evict expired nonces
-    for (auto it = usedNonces_.begin(); it != usedNonces_.end(); ) {
-        if (now - it->second > NONCE_WINDOW_SEC)
-            it = usedNonces_.erase(it);
-        else
-            ++it;
-    }
-
-    return true;
-}
-
-// ── Main validate ─────────────────────────────────────────────────────────
-
-bool WsSecurityHandler::validate(struct soap* ctx) const {
-    if (!ctx || !ctx->header) return false;
-
-    // gSOAP places parsed WS-Security header in ctx->header->wsse__Security
-    // The struct name depends on what soapcpp2 generated from the WSDL.
-    // Try the standard generated field name:
-    auto* security = ctx->header->wsse__Security;
-    if (!security) return false;
-
-    // UsernameToken
-    if (!security->UsernameToken || !security->UsernameToken->Username)
+bool WsSecurityHandler::validate(struct soap* soap) const {
+    if (!soap || !soap->header) {
+        std::cerr << "[WsSecurity] Auth failed: No SOAP header" << std::endl;
         return false;
-
-    const std::string user = security->UsernameToken->Username;
-    if (user != username_) return false;
-
-    auto* pwdField = security->UsernameToken->Password;
-    if (!pwdField) return false;
-
-    std::string pwType = pwdField->Type ? pwdField->Type : "";
-    std::string pwValue = pwdField->__item ? pwdField->__item : "";
-
-    // ── PasswordDigest ────────────────────────────────────────────
-    if (pwType.find("PasswordDigest") != std::string::npos) {
-        if (!security->UsernameToken->Nonce ||
-            !security->UsernameToken->wsu__Created) return false;
-
-        const std::string nonce   =
-            security->UsernameToken->Nonce->__item
-            ? security->UsernameToken->Nonce->__item : "";
-        const std::string created =
-            security->UsernameToken->wsu__Created
-            ? security->UsernameToken->wsu__Created : "";
-
-        if (!checkNonce(nonce, created)) return false;
-        return verifyDigest(nonce, created, pwValue, password_);
     }
 
-    // ── PasswordText (fallback) ───────────────────────────────────
-    if (pwType.find("PasswordText") != std::string::npos || pwType.empty()) {
-        return pwValue == password_;
+    // Lấy wsse:Security
+    auto security = soap->header->wsse__Security;
+    if (!security || !security->UsernameToken) {
+        // Đối với GetSystemDateAndTime thì không cần auth, các API khác sẽ check qua validate
+        std::cerr << "[WsSecurity] Auth failed: No UsernameToken in Security header" << std::endl;
+        return false;
     }
 
+    auto token = security->UsernameToken;
+    if (!token->Username) {
+        std::cerr << "[WsSecurity] Auth failed: Username is missing" << std::endl;
+        return false;
+    }
+
+    std::string clientUser(token->Username);
+    if (clientUser != username_) {
+        std::cerr << "[WsSecurity] Auth failed: Username mismatch. Expected: " 
+                  << username_ << ", Got: " << clientUser << std::endl;
+        return false;
+    }
+
+    if (!token->Password) {
+        std::cerr << "[WsSecurity] Auth failed: Password node is missing" << std::endl;
+        return false;
+    }
+
+    std::string passwordType = token->Password->Type ? token->Password->Type : "";
+    std::string clientPassword = token->Password->__item ? token->Password->__item : "";
+
+    // 1. Plaintext Password
+    if (passwordType == "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordText" || passwordType.empty()) {
+        if (clientPassword == password_) {
+            return true;
+        }
+        std::cerr << "[WsSecurity] Plaintext password validation failed" << std::endl;
+        return false;
+    }
+
+    // 2. PasswordDigest
+    if (passwordType == "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordDigest") {
+        if (!token->Nonce || !token->Created) {
+            std::cerr << "[WsSecurity] Digest auth failed: Missing Nonce or Created timestamp" << std::endl;
+            return false;
+        }
+
+        std::string rawNonce = base64Decode(token->Nonce);
+        std::string createdTime(token->Created);
+
+        // Công thức: PasswordDigest = Base64 ( SHA-1 ( Nonce + Created + Password ) )
+        SHA_CTX sha;
+        unsigned char hash[SHA_DIGEST_LENGTH];
+        SHA1_Init(&sha);
+        SHA1_Update(&sha, rawNonce.data(), rawNonce.size());
+        SHA1_Update(&sha, createdTime.data(), createdTime.size());
+        SHA1_Update(&sha, password_.data(), password_.size());
+        SHA1_Final(hash, &sha);
+
+        std::string calculatedDigest = base64Encode(hash, SHA_DIGEST_LENGTH);
+        if (calculatedDigest == clientPassword) {
+            return true;
+        }
+
+        // Fallback: Một số client gửi Nonce dạng chuỗi thô thay vì mã hóa base64 trước đó
+        std::string rawNonceStr(token->Nonce);
+        SHA1_Init(&sha);
+        SHA1_Update(&sha, rawNonceStr.data(), rawNonceStr.size());
+        SHA1_Update(&sha, createdTime.data(), createdTime.size());
+        SHA1_Update(&sha, password_.data(), password_.size());
+        SHA1_Final(hash, &sha);
+        
+        calculatedDigest = base64Encode(hash, SHA_DIGEST_LENGTH);
+        if (calculatedDigest == clientPassword) {
+            return true;
+        }
+
+        std::cerr << "[WsSecurity] Digest verification failed" << std::endl;
+        return false;
+    }
+
+    std::cerr << "[WsSecurity] Unsupported password type: " << passwordType << std::endl;
     return false;
 }
