@@ -17,25 +17,62 @@ for tool in wsdl2h soapcpp2; do
     }
 done
 
-# Auto-detect system gSOAP import directory (differs by distro/version)
+# Auto-detect system gSOAP import directory (differs by distro/version/installation)
 GSOAP_SYS_IMPORT=""
+
+# 1. Check common standard paths
 for candidate in \
     /usr/share/gsoap/import \
     /usr/local/share/gsoap/import \
     /usr/include/gsoap \
-    /usr/local/include/gsoap; do
+    /usr/local/include/gsoap \
+    /usr/include \
+    /usr/local/include; do
     if [ -f "$candidate/xsi.h" ]; then
         GSOAP_SYS_IMPORT="$candidate"
-        echo "[INFO] Found gSOAP system import dir: $GSOAP_SYS_IMPORT"
         break
     fi
 done
 
+# 2. Check relative to wsdl2h binary path (if installed from source or custom prefix)
+if [ -z "$GSOAP_SYS_IMPORT" ]; then
+    WSDL2H_PATH=$(command -v wsdl2h 2>/dev/null)
+    if [ -n "$WSDL2H_PATH" ]; then
+        BIN_DIR=$(dirname "$WSDL2H_PATH")
+        PREFIX_DIR=$(dirname "$BIN_DIR")
+        if [ -f "$PREFIX_DIR/share/gsoap/import/xsi.h" ]; then
+            GSOAP_SYS_IMPORT="$PREFIX_DIR/share/gsoap/import"
+        elif [ -f "$PREFIX_DIR/import/xsi.h" ]; then
+            GSOAP_SYS_IMPORT="$PREFIX_DIR/import"
+        fi
+    fi
+fi
+
+# 3. Search in user's home directory (max depth 5 for speed)
+if [ -z "$GSOAP_SYS_IMPORT" ]; then
+    echo "[INFO] Searching home directory for xsi.h..."
+    FOUND_PATH=$(find "$HOME" -maxdepth 5 -name "xsi.h" 2>/dev/null | head -n 1)
+    if [ -n "$FOUND_PATH" ]; then
+        GSOAP_SYS_IMPORT=$(dirname "$FOUND_PATH")
+    fi
+fi
+
+# 4. Search in /usr and /usr/local (max depth 5)
+if [ -z "$GSOAP_SYS_IMPORT" ]; then
+    echo "[INFO] Searching /usr and /usr/local for xsi.h..."
+    FOUND_PATH=$(find /usr /usr/local -maxdepth 5 -name "xsi.h" 2>/dev/null | head -n 1)
+    if [ -n "$FOUND_PATH" ]; then
+        GSOAP_SYS_IMPORT=$(dirname "$FOUND_PATH")
+    fi
+fi
+
 if [ -z "$GSOAP_SYS_IMPORT" ]; then
     echo "[ERROR] Cannot find gSOAP import dir (xsi.h not found)."
-    echo "        Try: sudo apt install gsoap"
+    echo "        Please find where xsi.h is located on your server and set it manually."
     exit 1
 fi
+
+echo "[INFO] Found gSOAP import dir: $GSOAP_SYS_IMPORT"
 
 echo "[STEP 1] wsdl2h: devicemgmt.wsdl → C++ header..."
 wsdl2h \
