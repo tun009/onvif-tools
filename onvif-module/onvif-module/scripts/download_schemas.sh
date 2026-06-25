@@ -15,6 +15,9 @@ FILES=(
     "t-1.xsd|https://docs.oasis-open.org/wsn/t-1.xsd"
     "ws-addr.xsd|https://www.w3.org/2005/08/addressing/ws-addr.xsd"
     "xml.xsd|https://www.w3.org/2001/xml.xsd"
+    "xmlmime.xsd|https://www.w3.org/2005/05/xmlmime"
+    "xop-include.xsd|https://www.w3.org/2004/08/xop/include"
+    "soap-envelope.xsd|https://www.w3.org/2003/05/soap-envelope"
 )
 
 for item in "${FILES[@]}"; do
@@ -46,6 +49,12 @@ if [ -f "onvif.xsd" ]; then
     sed -i 's|https://www.w3.org/2005/08/addressing/ws-addr.xsd|ws-addr.xsd|g' onvif.xsd
     sed -i 's|http://www.w3.org/2001/xml.xsd|xml.xsd|g' onvif.xsd
     sed -i 's|https://www.w3.org/2001/xml.xsd|xml.xsd|g' onvif.xsd
+    sed -i 's|http://www.w3.org/2005/05/xmlmime|xmlmime.xsd|g' onvif.xsd
+    sed -i 's|https://www.w3.org/2005/05/xmlmime|xmlmime.xsd|g' onvif.xsd
+    sed -i 's|http://www.w3.org/2004/08/xop/include|xop-include.xsd|g' onvif.xsd
+    sed -i 's|https://www.w3.org/2004/08/xop/include|xop-include.xsd|g' onvif.xsd
+    sed -i 's|http://www.w3.org/2003/05/soap-envelope|soap-envelope.xsd|g' onvif.xsd
+    sed -i 's|https://www.w3.org/2003/05/soap-envelope|soap-envelope.xsd|g' onvif.xsd
 fi
 
 # 2. Patch b-2.xsd
@@ -64,6 +73,12 @@ if [ -f "bf-2.xsd" ]; then
     sed -i 's|https://www.w3.org/2005/08/addressing/ws-addr.xsd|ws-addr.xsd|g' bf-2.xsd
     sed -i 's|http://www.w3.org/2001/xml.xsd|xml.xsd|g' bf-2.xsd
     sed -i 's|https://www.w3.org/2001/xml.xsd|xml.xsd|g' bf-2.xsd
+fi
+
+# 4. Patch soap-envelope.xsd
+if [ -f "soap-envelope.xsd" ]; then
+    sed -i 's|http://www.w3.org/2001/xml.xsd|xml.xsd|g' soap-envelope.xsd
+    sed -i 's|https://www.w3.org/2001/xml.xsd|xml.xsd|g' soap-envelope.xsd
 fi
 
 echo "[DONE] Offline schemas download and patching complete!"
