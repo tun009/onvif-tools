@@ -80,6 +80,45 @@ if [ -z "$GSOAP_SYS_IMPORT" ]; then
     exit 1
 fi
 
+# Ensure gSOAP runtime files stdsoap2.cpp and stdsoap2.h exist in external/gsoap/
+if [ ! -f "$EXT_DIR/stdsoap2.cpp" ] || [ ! -f "$EXT_DIR/stdsoap2.h" ]; then
+    echo "[INFO] Copying stdsoap2.cpp and stdsoap2.h to external/gsoap/..."
+    GSOAP_SRC=$(dpkg -L libgsoap-dev 2>/dev/null | grep stdsoap2.h | head -1 | xargs dirname)
+    if [ -n "$GSOAP_SRC" ] && [ -f "$GSOAP_SRC/stdsoap2.cpp" ]; then
+        cp "$GSOAP_SRC/stdsoap2.h"   "$EXT_DIR/"
+        cp "$GSOAP_SRC/stdsoap2.cpp" "$EXT_DIR/"
+    elif [ -f "/usr/share/gsoap/src/stdsoap2.cpp" ]; then
+        cp /usr/share/gsoap/src/stdsoap2.h   "$EXT_DIR/"
+        cp /usr/share/gsoap/src/stdsoap2.cpp "$EXT_DIR/"
+    elif [ -f "/usr/share/gsoap/stdsoap2.cpp" ]; then
+        cp /usr/share/gsoap/stdsoap2.h   "$EXT_DIR/"
+        cp /usr/share/gsoap/stdsoap2.cpp "$EXT_DIR/"
+    else
+        echo "[ERROR] Cannot find stdsoap2.cpp or stdsoap2.h on the system."
+        echo "        Please install libgsoap-dev: sudo apt-get install libgsoap-dev"
+        exit 1
+    fi
+fi
+
+# Ensure plugins exist in external/gsoap/plugin/
+mkdir -p "$EXT_DIR/plugin"
+if [ ! -f "$EXT_DIR/plugin/wsseapi.cpp" ] || [ ! -f "$EXT_DIR/plugin/wsddapi.cpp" ]; then
+    echo "[INFO] Copying gSOAP plugins to external/gsoap/plugin/..."
+    if [ -d "/usr/share/gsoap/plugin" ]; then
+        cp /usr/share/gsoap/plugin/*.h "$EXT_DIR/plugin/" 2>/dev/null || true
+        cp /usr/share/gsoap/plugin/*.cpp "$EXT_DIR/plugin/" 2>/dev/null || true
+    fi
+fi
+
+# Ensure imports exist in external/gsoap/import/
+mkdir -p "$EXT_DIR/import"
+if [ ! -f "$EXT_DIR/import/wsse.h" ]; then
+    echo "[INFO] Copying gSOAP imports to external/gsoap/import/..."
+    if [ -d "/usr/share/gsoap/import" ]; then
+        cp /usr/share/gsoap/import/*.h "$EXT_DIR/import/" 2>/dev/null || true
+    fi
+fi
+
 # Patch absolute URLs in WSDL files to point to local schema files
 echo "[INFO] Patching absolute schema URLs in WSDL files to use local paths..."
 for f in "$WSDL_DIR"/*.wsdl; do
