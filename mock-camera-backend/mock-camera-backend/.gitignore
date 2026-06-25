@@ -1,0 +1,7 @@
+build/
+logs/
+run/
+bin/mediamtx
+*.o
+mock-camera-server
+include/third_party/nlohmann/json.hpp

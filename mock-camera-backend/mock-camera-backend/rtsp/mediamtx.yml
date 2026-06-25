@@ -1,0 +1,22 @@
+rtspAddress:  :8554
+rtmpAddress:  :1935
+hlsAddress:   :8888
+api:          yes
+apiAddress:   :9997
+logLevel:     info
+
+paths:
+  main:
+    source:      publisher
+    publishUser: mock
+    publishPass: mock123
+
+  sub1:
+    source:      publisher
+    publishUser: mock
+    publishPass: mock123
+
+  sub2:
+    source:      publisher
+    publishUser: mock
+    publishPass: mock123
