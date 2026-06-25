@@ -94,6 +94,11 @@ if grep -q '#import "xsi.h"' "$GEN_DIR/onvif.h"; then
     sed -i '/#import "xsi.h"/d' "$GEN_DIR/onvif.h"
 fi
 
+# Fix missing ns*.h issue: wsdl2h generates dummy #import "nsX.h" statements for namespaces
+# that do not have explicit typemap mappings. Removing them prevents soapcpp2 from failing.
+echo "[INFO] Removing dummy namespace imports (#import \"ns*.h\") from onvif.h..."
+sed -i -E '/#import "ns[0-9]+\.h"/d' "$GEN_DIR/onvif.h"
+
 echo "[STEP 2] soapcpp2: header → serializers + stubs..."
 cd "$GEN_DIR"
 soapcpp2 \
