@@ -23,7 +23,7 @@ GEN_SRCS  := $(GEN_DIR)/soapC.cpp \
 STDSOAP_SRC := $(wildcard $(EXT_DIR)/gsoap/stdsoap2.cpp)
 ifeq ($(STDSOAP_SRC),)
   # Use system library
-  GSOAP_LIBS := -lgsoap++
+  GSOAP_LIBS := -lgsoapssl++
   GSP_SRCS :=
 else
   # Use local source
