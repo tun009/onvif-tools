@@ -129,6 +129,8 @@ int main(int argc, char* argv[]) {
 
     } catch (const std::exception& e) {
         fprintf(stderr, "[TEST] Exception: %s\n", e.what());
+    }
+
     // ── Start ONVIF SOAP server ───────────────────────────────────
     ServiceConfig svcCfg;
     svcCfg.deviceIp = cfg.deviceIp;

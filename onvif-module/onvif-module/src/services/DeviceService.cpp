@@ -19,7 +19,7 @@ bool DeviceService::validateAuth() {
 // ── GetSystemDateAndTime ─────────────────────────────────────────────────────
 int DeviceService::GetSystemDateAndTime(
     _tds__GetSystemDateAndTime *tds__GetSystemDateAndTime, 
-    _tds__GetSystemDateAndTimeResponse *tds__GetSystemDateAndTimeResponse) 
+    _tds__GetSystemDateAndTimeResponse &tds__GetSystemDateAndTimeResponse) 
 {
     (void)tds__GetSystemDateAndTime;
     auto soap = this->soap;
@@ -43,12 +43,12 @@ int DeviceService::GetSystemDateAndTime(
 
     // Allocate response struct using soap memory manager
     auto sdt = soap_new_tt__SystemDateTime(soap);
-    sdt->DateTimeType = tt__DateTimeType__Manual;
-    sdt->DaylightSavings = dt.daylightSaving ? soap_bool_true : soap_bool_false;
+    sdt->DateTimeType = tt__DateTimeType::Manual;
+    sdt->DaylightSavings = dt.daylightSaving;
 
     // TimeZone
     sdt->TimeZone = soap_new_tt__TimeZone(soap);
-    sdt->TimeZone->TZ = soap_strdup(soap, "UTC");
+    sdt->TimeZone->TZ = "UTC";
 
     // UTCDateTime
     sdt->UTCDateTime = soap_new_tt__DateTime(soap);
@@ -62,7 +62,7 @@ int DeviceService::GetSystemDateAndTime(
     sdt->UTCDateTime->Time->Minute = dt.minute;
     sdt->UTCDateTime->Time->Second = dt.second;
 
-    tds__GetSystemDateAndTimeResponse->SystemDateAndTime = sdt;
+    tds__GetSystemDateAndTimeResponse.SystemDateAndTime = sdt;
 
     return SOAP_OK;
 }
@@ -70,14 +70,13 @@ int DeviceService::GetSystemDateAndTime(
 // ── GetDeviceInformation ─────────────────────────────────────────────────────
 int DeviceService::GetDeviceInformation(
     _tds__GetDeviceInformation *tds__GetDeviceInformation, 
-    _tds__GetDeviceInformationResponse *tds__GetDeviceInformationResponse) 
+    _tds__GetDeviceInformationResponse &tds__GetDeviceInformationResponse) 
 {
     (void)tds__GetDeviceInformation;
     if (!validateAuth()) {
         return soap_sender_fault(this->soap, "Sender", "Not Authorized");
     }
 
-    auto soap = this->soap;
     DeviceInfo info;
     try {
         info = backend_->getDeviceInfo();
@@ -90,11 +89,11 @@ int DeviceService::GetDeviceInformation(
         info.hardwareId = "JetsonOrinNX-8GB";
     }
 
-    tds__GetDeviceInformationResponse->Manufacturer = soap_strdup(soap, info.manufacturer.c_str());
-    tds__GetDeviceInformationResponse->Model = soap_strdup(soap, info.model.c_str());
-    tds__GetDeviceInformationResponse->FirmwareVersion = soap_strdup(soap, info.firmwareVersion.c_str());
-    tds__GetDeviceInformationResponse->SerialNumber = soap_strdup(soap, info.serialNumber.c_str());
-    tds__GetDeviceInformationResponse->HardwareId = soap_strdup(soap, info.hardwareId.c_str());
+    tds__GetDeviceInformationResponse.Manufacturer = info.manufacturer;
+    tds__GetDeviceInformationResponse.Model = info.model;
+    tds__GetDeviceInformationResponse.FirmwareVersion = info.firmwareVersion;
+    tds__GetDeviceInformationResponse.SerialNumber = info.serialNumber;
+    tds__GetDeviceInformationResponse.HardwareId = info.hardwareId;
 
     return SOAP_OK;
 }
@@ -102,7 +101,7 @@ int DeviceService::GetDeviceInformation(
 // ── GetCapabilities ──────────────────────────────────────────────────────────
 int DeviceService::GetCapabilities(
     _tds__GetCapabilities *tds__GetCapabilities, 
-    _tds__GetCapabilitiesResponse *tds__GetCapabilitiesResponse) 
+    _tds__GetCapabilitiesResponse &tds__GetCapabilitiesResponse) 
 {
     (void)tds__GetCapabilities;
     auto soap = this->soap;
@@ -111,17 +110,17 @@ int DeviceService::GetCapabilities(
 
     // Device capabilities
     caps->Device = soap_new_tt__DeviceCapabilities(soap);
-    caps->Device->XAddr = soap_strdup(soap, ("http://" + cfg_.deviceIp + ":" + std::to_string(cfg_.httpPort) + "/onvif/device").c_str());
+    caps->Device->XAddr = "http://" + cfg_.deviceIp + ":" + std::to_string(cfg_.httpPort) + "/onvif/device";
     
     // Media capabilities (VMS expects media capability even if implemented partially/postponed)
     caps->Media = soap_new_tt__MediaCapabilities(soap);
-    caps->Media->XAddr = soap_strdup(soap, ("http://" + cfg_.deviceIp + ":" + std::to_string(cfg_.httpPort) + "/onvif/media").c_str());
+    caps->Media->XAddr = "http://" + cfg_.deviceIp + ":" + std::to_string(cfg_.httpPort) + "/onvif/media";
     
     // PTZ capabilities
     caps->PTZ = soap_new_tt__PTZCapabilities(soap);
-    caps->PTZ->XAddr = soap_strdup(soap, ("http://" + cfg_.deviceIp + ":" + std::to_string(cfg_.httpPort) + "/onvif/ptz").c_str());
+    caps->PTZ->XAddr = "http://" + cfg_.deviceIp + ":" + std::to_string(cfg_.httpPort) + "/onvif/ptz";
 
-    tds__GetCapabilitiesResponse->Capabilities = caps;
+    tds__GetCapabilitiesResponse.Capabilities = caps;
 
     return SOAP_OK;
 }
@@ -129,7 +128,7 @@ int DeviceService::GetCapabilities(
 // ── GetServices ──────────────────────────────────────────────────────────────
 int DeviceService::GetServices(
     _tds__GetServices *tds__GetServices, 
-    _tds__GetServicesResponse *tds__GetServicesResponse) 
+    _tds__GetServicesResponse &tds__GetServicesResponse) 
 {
     (void)tds__GetServices;
     auto soap = this->soap;
@@ -141,7 +140,7 @@ int DeviceService::GetServices(
     deviceSvc->Version = soap_new_tt__OnvifVersion(soap);
     deviceSvc->Version->Major = 21;
     deviceSvc->Version->Minor = 12;
-    tds__GetServicesResponse->Service.push_back(deviceSvc);
+    tds__GetServicesResponse.Service.push_back(deviceSvc);
 
     // 2. Media Service (VMS might query this)
     auto mediaSvc = soap_new_tds__Service(soap);
@@ -150,7 +149,7 @@ int DeviceService::GetServices(
     mediaSvc->Version = soap_new_tt__OnvifVersion(soap);
     mediaSvc->Version->Major = 20;
     mediaSvc->Version->Minor = 12;
-    tds__GetServicesResponse->Service.push_back(mediaSvc);
+    tds__GetServicesResponse.Service.push_back(mediaSvc);
 
     return SOAP_OK;
 }
@@ -158,7 +157,7 @@ int DeviceService::GetServices(
 // ── GetScopes ────────────────────────────────────────────────────────────────
 int DeviceService::GetScopes(
     _tds__GetScopes *tds__GetScopes, 
-    _tds__GetScopesResponse *tds__GetScopesResponse) 
+    _tds__GetScopesResponse &tds__GetScopesResponse) 
 {
     (void)tds__GetScopes;
     auto soap = this->soap;
@@ -174,9 +173,9 @@ int DeviceService::GetScopes(
 
     for (const auto& uri : scopeUris) {
         auto scope = soap_new_tt__Scope(soap);
-        scope->ScopeDef = tt__ScopeDefinition__Fixed;
-        scope->ScopeURIs = soap_strdup(soap, uri.c_str());
-        tds__GetScopesResponse->Scopes.push_back(scope);
+        scope->ScopeDef = tt__ScopeDefinition::Fixed;
+        scope->ScopeURI = uri;
+        tds__GetScopesResponse.Scopes.push_back(scope);
     }
 
     return SOAP_OK;
@@ -185,7 +184,7 @@ int DeviceService::GetScopes(
 // ── GetUsers ─────────────────────────────────────────────────────────────────
 int DeviceService::GetUsers(
     _tds__GetUsers *tds__GetUsers, 
-    _tds__GetUsersResponse *tds__GetUsersResponse) 
+    _tds__GetUsersResponse &tds__GetUsersResponse) 
 {
     (void)tds__GetUsers;
     if (!validateAuth()) {
@@ -195,9 +194,9 @@ int DeviceService::GetUsers(
     auto soap = this->soap;
 
     auto user = soap_new_tt__User(soap);
-    user->Username = soap_strdup(soap, cfg_.username.c_str());
-    user->UserLevel = tt__UserLevel__Administrator;
-    tds__GetUsersResponse->User.push_back(user);
+    user->Username = cfg_.username;
+    user->UserLevel = tt__UserLevel::Administrator;
+    tds__GetUsersResponse.User.push_back(user);
 
     return SOAP_OK;
 }

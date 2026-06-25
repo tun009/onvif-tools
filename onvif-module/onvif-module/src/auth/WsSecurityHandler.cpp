@@ -50,7 +50,6 @@ bool WsSecurityHandler::validate(struct soap* soap) const {
     // Lấy wsse:Security
     auto security = soap->header->wsse__Security;
     if (!security || !security->UsernameToken) {
-        // Đối với GetSystemDateAndTime thì không cần auth, các API khác sẽ check qua validate
         std::cerr << "[WsSecurity] Auth failed: No UsernameToken in Security header" << std::endl;
         return false;
     }
@@ -61,7 +60,7 @@ bool WsSecurityHandler::validate(struct soap* soap) const {
         return false;
     }
 
-    std::string clientUser(token->Username);
+    std::string clientUser = token->Username;
     if (clientUser != username_) {
         std::cerr << "[WsSecurity] Auth failed: Username mismatch. Expected: " 
                   << username_ << ", Got: " << clientUser << std::endl;
@@ -73,8 +72,8 @@ bool WsSecurityHandler::validate(struct soap* soap) const {
         return false;
     }
 
-    std::string passwordType = token->Password->Type ? token->Password->Type : "";
-    std::string clientPassword = token->Password->__item ? token->Password->__item : "";
+    std::string passwordType = token->Password->Type ? *(token->Password->Type) : "";
+    std::string clientPassword = token->Password->__item ? *(token->Password->__item) : "";
 
     // 1. Plaintext Password
     if (passwordType == "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordText" || passwordType.empty()) {
@@ -87,13 +86,13 @@ bool WsSecurityHandler::validate(struct soap* soap) const {
 
     // 2. PasswordDigest
     if (passwordType == "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordDigest") {
-        if (!token->Nonce || !token->Created) {
+        if (!token->Nonce || !token->wsu__Created) {
             std::cerr << "[WsSecurity] Digest auth failed: Missing Nonce or Created timestamp" << std::endl;
             return false;
         }
 
-        std::string rawNonce = base64Decode(token->Nonce);
-        std::string createdTime(token->Created);
+        std::string rawNonce = base64Decode(token->Nonce->__item);
+        std::string createdTime = *(token->wsu__Created);
 
         // Công thức: PasswordDigest = Base64 ( SHA-1 ( Nonce + Created + Password ) )
         SHA_CTX sha;
@@ -110,7 +109,7 @@ bool WsSecurityHandler::validate(struct soap* soap) const {
         }
 
         // Fallback: Một số client gửi Nonce dạng chuỗi thô thay vì mã hóa base64 trước đó
-        std::string rawNonceStr(token->Nonce);
+        std::string rawNonceStr = token->Nonce->__item;
         SHA1_Init(&sha);
         SHA1_Update(&sha, rawNonceStr.data(), rawNonceStr.size());
         SHA1_Update(&sha, createdTime.data(), createdTime.size());
