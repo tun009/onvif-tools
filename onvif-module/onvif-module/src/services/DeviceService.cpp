@@ -68,14 +68,13 @@ int DeviceService::GetSystemDateAndTime(
 }
 
 // ── GetDeviceInformation ─────────────────────────────────────────────────────
+// NOTE: Per ONVIF spec, GetDeviceInformation does NOT require authentication.
+// It is a public endpoint accessible to any client for device discovery.
 int DeviceService::GetDeviceInformation(
     _tds__GetDeviceInformation *tds__GetDeviceInformation, 
     _tds__GetDeviceInformationResponse &tds__GetDeviceInformationResponse) 
 {
     (void)tds__GetDeviceInformation;
-    if (!validateAuth()) {
-        return soap_sender_fault_subcode(this->soap, "ter:NotAuthorized", "Sender", "Not Authorized");
-    }
 
     DeviceInfo info;
     try {
