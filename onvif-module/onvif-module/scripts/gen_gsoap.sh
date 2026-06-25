@@ -83,17 +83,29 @@ fi
 # Ensure gSOAP runtime files stdsoap2.cpp and stdsoap2.h exist in external/gsoap/
 if [ ! -f "$EXT_DIR/stdsoap2.cpp" ] || [ ! -f "$EXT_DIR/stdsoap2.h" ]; then
     echo "[INFO] Copying stdsoap2.cpp and stdsoap2.h to external/gsoap/..."
-    GSOAP_SRC=$(dpkg -L libgsoap-dev 2>/dev/null | grep stdsoap2.h | head -1 | xargs dirname)
-    if [ -n "$GSOAP_SRC" ] && [ -f "$GSOAP_SRC/stdsoap2.cpp" ]; then
-        cp "$GSOAP_SRC/stdsoap2.h"   "$EXT_DIR/"
-        cp "$GSOAP_SRC/stdsoap2.cpp" "$EXT_DIR/"
-    elif [ -f "/usr/share/gsoap/src/stdsoap2.cpp" ]; then
-        cp /usr/share/gsoap/src/stdsoap2.h   "$EXT_DIR/"
-        cp /usr/share/gsoap/src/stdsoap2.cpp "$EXT_DIR/"
-    elif [ -f "/usr/share/gsoap/stdsoap2.cpp" ]; then
-        cp /usr/share/gsoap/stdsoap2.h   "$EXT_DIR/"
-        cp /usr/share/gsoap/stdsoap2.cpp "$EXT_DIR/"
-    else
+    
+    # Try dynamic find excluding external/gsoap in case it's custom installed
+    FOUND_CPP=$(find /usr /usr/local /opt /home -name "stdsoap2.cpp" 2>/dev/null | grep -v "external/gsoap" | head -n 1)
+    if [ -n "$FOUND_CPP" ] && [ -f "$FOUND_CPP" ]; then
+        GSOAP_SRC=$(dirname "$FOUND_CPP")
+        if [ -f "$GSOAP_SRC/stdsoap2.h" ]; then
+            cp "$GSOAP_SRC/stdsoap2.h"   "$EXT_DIR/"
+            cp "$GSOAP_SRC/stdsoap2.cpp" "$EXT_DIR/"
+            echo "  Copied stdsoap2 files from $GSOAP_SRC"
+        fi
+    fi
+    
+    if [ ! -f "$EXT_DIR/stdsoap2.cpp" ]; then
+        # Try finding via dpkg
+        GSOAP_SRC=$(dpkg -L libgsoap-dev 2>/dev/null | grep stdsoap2.h | head -1 | xargs dirname)
+        if [ -n "$GSOAP_SRC" ] && [ -f "$GSOAP_SRC/stdsoap2.cpp" ]; then
+            cp "$GSOAP_SRC/stdsoap2.h"   "$EXT_DIR/"
+            cp "$GSOAP_SRC/stdsoap2.cpp" "$EXT_DIR/"
+            echo "  Copied from dpkg package path: $GSOAP_SRC"
+        fi
+    fi
+
+    if [ ! -f "$EXT_DIR/stdsoap2.cpp" ]; then
         echo "[ERROR] Cannot find stdsoap2.cpp or stdsoap2.h on the system."
         echo "        Please install libgsoap-dev: sudo apt-get install libgsoap-dev"
         exit 1
@@ -104,7 +116,13 @@ fi
 mkdir -p "$EXT_DIR/plugin"
 if [ ! -f "$EXT_DIR/plugin/wsseapi.cpp" ] || [ ! -f "$EXT_DIR/plugin/wsddapi.cpp" ]; then
     echo "[INFO] Copying gSOAP plugins to external/gsoap/plugin/..."
-    if [ -d "/usr/share/gsoap/plugin" ]; then
+    FOUND_PLUGIN_CPP=$(find /usr /usr/local /opt /home -name "wsseapi.cpp" 2>/dev/null | grep -v "external/gsoap" | head -n 1)
+    if [ -n "$FOUND_PLUGIN_CPP" ]; then
+        PLUGIN_SRC=$(dirname "$FOUND_PLUGIN_CPP")
+        cp "$PLUGIN_SRC"/*.h "$EXT_DIR/plugin/" 2>/dev/null || true
+        cp "$PLUGIN_SRC"/*.cpp "$EXT_DIR/plugin/" 2>/dev/null || true
+        echo "  Copied plugins from $PLUGIN_SRC"
+    elif [ -d "/usr/share/gsoap/plugin" ]; then
         cp /usr/share/gsoap/plugin/*.h "$EXT_DIR/plugin/" 2>/dev/null || true
         cp /usr/share/gsoap/plugin/*.cpp "$EXT_DIR/plugin/" 2>/dev/null || true
     fi
@@ -114,7 +132,12 @@ fi
 mkdir -p "$EXT_DIR/import"
 if [ ! -f "$EXT_DIR/import/wsse.h" ]; then
     echo "[INFO] Copying gSOAP imports to external/gsoap/import/..."
-    if [ -d "/usr/share/gsoap/import" ]; then
+    FOUND_IMPORT_H=$(find /usr /usr/local /opt /home -name "wsse.h" 2>/dev/null | grep -v "external/gsoap" | head -n 1)
+    if [ -n "$FOUND_IMPORT_H" ]; then
+        IMPORT_SRC=$(dirname "$FOUND_IMPORT_H")
+        cp "$IMPORT_SRC"/*.h "$EXT_DIR/import/" 2>/dev/null || true
+        echo "  Copied imports from $IMPORT_SRC"
+    elif [ -d "/usr/share/gsoap/import" ]; then
         cp /usr/share/gsoap/import/*.h "$EXT_DIR/import/" 2>/dev/null || true
     fi
 fi
