@@ -13,6 +13,8 @@ WSDLS=(
     "https://www.onvif.org/onvif/ver10/events/wsdl/event.wsdl"
     "https://www.onvif.org/onvif/ver20/analytics/wsdl/analytics.wsdl"
     "https://www.onvif.org/onvif/ver10/network/wsdl/remotediscovery.wsdl"
+    "https://docs.oasis-open.org/wsn/bw-2.wsdl"
+    "https://docs.oasis-open.org/wsrf/rw-2.wsdl"
 )
 
 echo "[INFO] Downloading ONVIF WSDLs..."

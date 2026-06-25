@@ -94,6 +94,16 @@ for f in "$WSDL_DIR"/*.wsdl; do
         sed -i 's|https://www.w3.org/2004/08/xop/include.xsd|../../../ver10/schema/xop-include.xsd|g' "$f"
         sed -i 's|http://www.w3.org/2003/05/soap-envelope|../../../ver10/schema/soap-envelope.xsd|g' "$f"
         sed -i 's|https://www.w3.org/2003/05/soap-envelope|../../../ver10/schema/soap-envelope.xsd|g' "$f"
+        
+        # Additional mappings for WS-Notification / Discovery
+        sed -i 's|http://docs.oasis-open.org/wsn/bw-2.wsdl|bw-2.wsdl|g' "$f"
+        sed -i 's|https://docs.oasis-open.org/wsn/bw-2.wsdl|bw-2.wsdl|g' "$f"
+        sed -i 's|http://docs.oasis-open.org/wsrf/rw-2.wsdl|rw-2.wsdl|g' "$f"
+        sed -i 's|https://docs.oasis-open.org/wsrf/rw-2.wsdl|rw-2.wsdl|g' "$f"
+        sed -i 's|http://docs.oasis-open.org/wsrf/r-2.xsd|../../../ver10/schema/r-2.xsd|g' "$f"
+        sed -i 's|https://docs.oasis-open.org/wsrf/r-2.xsd|../../../ver10/schema/r-2.xsd|g' "$f"
+        sed -i 's|http://schemas.xmlsoap.org/ws/2005/04/discovery/ws-discovery.xsd|../../../ver10/schema/ws-discovery.xsd|g' "$f"
+        sed -i 's|https://schemas.xmlsoap.org/ws/2005/04/discovery/ws-discovery.xsd|../../../ver10/schema/ws-discovery.xsd|g' "$f"
     fi
 done
 
