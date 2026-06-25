@@ -74,7 +74,7 @@ int DeviceService::GetDeviceInformation(
 {
     (void)tds__GetDeviceInformation;
     if (!validateAuth()) {
-        return soap_sender_faultsubcode(this->soap, "ter:NotAuthorized", "Sender", "Not Authorized");
+        return soap_sender_fault_subcode(this->soap, "ter:NotAuthorized", "Sender", "Not Authorized");
     }
 
     DeviceInfo info;
@@ -188,7 +188,7 @@ int DeviceService::GetUsers(
 {
     (void)tds__GetUsers;
     if (!validateAuth()) {
-        return soap_sender_faultsubcode(this->soap, "ter:NotAuthorized", "Sender", "Not Authorized");
+        return soap_sender_fault_subcode(this->soap, "ter:NotAuthorized", "Sender", "Not Authorized");
     }
 
     auto soap = this->soap;
