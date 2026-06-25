@@ -81,6 +81,8 @@ wsdl2h \
     -o "$GEN_DIR/onvif.h" \
     -t "$EXT_DIR/typemap.dat" \
     -c++11 \
+    -j \
+    -x \
     "$WSDL_DIR/devicemgmt.wsdl"
 
 echo "[STEP 1] Done: $GEN_DIR/onvif.h ($(wc -l < $GEN_DIR/onvif.h) lines)"
