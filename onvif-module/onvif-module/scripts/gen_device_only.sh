@@ -74,7 +74,28 @@ if [ -z "$GSOAP_SYS_IMPORT" ]; then
     exit 1
 fi
 
-echo "[INFO] Found gSOAP import dir: $GSOAP_SYS_IMPORT"
+# Patch absolute URLs in WSDL files to point to local schema files
+echo "[INFO] Patching absolute schema URLs in WSDL files to use local paths..."
+for f in "$WSDL_DIR"/*.wsdl; do
+    if [ -f "$f" ]; then
+        sed -i 's|http://docs.oasis-open.org/wsn/b-2.xsd|../../../ver10/schema/b-2.xsd|g' "$f"
+        sed -i 's|https://docs.oasis-open.org/wsn/b-2.xsd|../../../ver10/schema/b-2.xsd|g' "$f"
+        sed -i 's|http://docs.oasis-open.org/wsn/t-1.xsd|../../../ver10/schema/t-1.xsd|g' "$f"
+        sed -i 's|https://docs.oasis-open.org/wsn/t-1.xsd|../../../ver10/schema/t-1.xsd|g' "$f"
+        sed -i 's|http://docs.oasis-open.org/wsrf/bf-2.xsd|../../../ver10/schema/bf-2.xsd|g' "$f"
+        sed -i 's|https://docs.oasis-open.org/wsrf/bf-2.xsd|../../../ver10/schema/bf-2.xsd|g' "$f"
+        sed -i 's|http://www.w3.org/2005/08/addressing/ws-addr.xsd|../../../ver10/schema/ws-addr.xsd|g' "$f"
+        sed -i 's|https://www.w3.org/2005/08/addressing/ws-addr.xsd|../../../ver10/schema/ws-addr.xsd|g' "$f"
+        sed -i 's|http://www.w3.org/2001/xml.xsd|../../../ver10/schema/xml.xsd|g' "$f"
+        sed -i 's|https://www.w3.org/2001/xml.xsd|../../../ver10/schema/xml.xsd|g' "$f"
+        sed -i 's|http://www.w3.org/2005/05/xmlmime.xsd|../../../ver10/schema/xmlmime.xsd|g' "$f"
+        sed -i 's|https://www.w3.org/2005/05/xmlmime.xsd|../../../ver10/schema/xmlmime.xsd|g' "$f"
+        sed -i 's|http://www.w3.org/2004/08/xop/include.xsd|../../../ver10/schema/xop-include.xsd|g' "$f"
+        sed -i 's|https://www.w3.org/2004/08/xop/include.xsd|../../../ver10/schema/xop-include.xsd|g' "$f"
+        sed -i 's|http://www.w3.org/2003/05/soap-envelope|../../../ver10/schema/soap-envelope.xsd|g' "$f"
+        sed -i 's|https://www.w3.org/2003/05/soap-envelope|../../../ver10/schema/soap-envelope.xsd|g' "$f"
+    fi
+done
 
 echo "[STEP 1] wsdl2h: devicemgmt.wsdl → C++ header..."
 wsdl2h \
