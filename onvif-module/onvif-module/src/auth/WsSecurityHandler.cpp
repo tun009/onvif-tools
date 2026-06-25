@@ -120,7 +120,7 @@ bool WsSecurityHandler::validate(struct soap* ctx) const {
     if (!security->UsernameToken || !security->UsernameToken->Username)
         return false;
 
-    const std::string& user = security->UsernameToken->Username->__item;
+    const std::string user = security->UsernameToken->Username;
     if (user != username_) return false;
 
     auto* pwdField = security->UsernameToken->Password;
@@ -132,14 +132,14 @@ bool WsSecurityHandler::validate(struct soap* ctx) const {
     // ── PasswordDigest ────────────────────────────────────────────
     if (pwType.find("PasswordDigest") != std::string::npos) {
         if (!security->UsernameToken->Nonce ||
-            !security->UsernameToken->Created) return false;
+            !security->UsernameToken->wsu__Created) return false;
 
         const std::string nonce   =
             security->UsernameToken->Nonce->__item
             ? security->UsernameToken->Nonce->__item : "";
         const std::string created =
-            security->UsernameToken->Created->__item
-            ? security->UsernameToken->Created->__item : "";
+            security->UsernameToken->wsu__Created
+            ? security->UsernameToken->wsu__Created : "";
 
         if (!checkNonce(nonce, created)) return false;
         return verifyDigest(nonce, created, pwValue, password_);
