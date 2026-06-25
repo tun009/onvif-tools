@@ -1,5 +1,5 @@
 CXX      := g++
-CXXFLAGS := -std=c++17 -Wall -Wextra -O2 -pthread -Wno-unused-parameter
+CXXFLAGS := -std=c++17 -Wall -Wextra -O0 -pthread -Wno-unused-parameter
 
 INC_DIR   := include
 SRC_DIR   := src
