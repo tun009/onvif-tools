@@ -14,7 +14,7 @@ FILES=(
     "bf-2.xsd|https://docs.oasis-open.org/wsrf/bf-2.xsd"
     "t-1.xsd|https://docs.oasis-open.org/wsn/t-1.xsd"
     "ws-addr.xsd|https://www.w3.org/2005/08/addressing/ws-addr.xsd"
-    "wsdd.xsd|https://docs.oasis-open.org/ws-dd/ns/discovery/2009/01/wsdd.xsd"
+    "xml.xsd|https://www.w3.org/2001/xml.xsd"
 )
 
 for item in "${FILES[@]}"; do
@@ -29,7 +29,9 @@ for item in "${FILES[@]}"; do
             # Try HTTP if HTTPS fails
             http_url=$(echo "$url" | sed 's/https:/http:/')
             echo "  RETRY GET $filename from $http_url"
-            wget -q --no-check-certificate -O "$filename" "$http_url"
+            wget -q --no-check-certificate -O "$filename" "$http_url" || {
+                echo "[WARN] Failed to download $filename, continuing anyway..."
+            }
         }
     fi
 done
@@ -42,8 +44,8 @@ if [ -f "onvif.xsd" ]; then
     sed -i 's|https://docs.oasis-open.org/wsn/b-2.xsd|b-2.xsd|g' onvif.xsd
     sed -i 's|http://www.w3.org/2005/08/addressing/ws-addr.xsd|ws-addr.xsd|g' onvif.xsd
     sed -i 's|https://www.w3.org/2005/08/addressing/ws-addr.xsd|ws-addr.xsd|g' onvif.xsd
-    sed -i 's|http://docs.oasis-open.org/ws-dd/ns/discovery/2009/01/wsdd.xsd|wsdd.xsd|g' onvif.xsd
-    sed -i 's|https://docs.oasis-open.org/ws-dd/ns/discovery/2009/01/wsdd.xsd|wsdd.xsd|g' onvif.xsd
+    sed -i 's|http://www.w3.org/2001/xml.xsd|xml.xsd|g' onvif.xsd
+    sed -i 's|https://www.w3.org/2001/xml.xsd|xml.xsd|g' onvif.xsd
 fi
 
 # 2. Patch b-2.xsd
@@ -56,10 +58,12 @@ if [ -f "b-2.xsd" ]; then
     sed -i 's|https://www.w3.org/2005/08/addressing/ws-addr.xsd|ws-addr.xsd|g' b-2.xsd
 fi
 
-# 3. Patch wsdd.xsd
-if [ -f "wsdd.xsd" ]; then
-    sed -i 's|http://www.w3.org/2005/08/addressing/ws-addr.xsd|ws-addr.xsd|g' wsdd.xsd
-    sed -i 's|https://www.w3.org/2005/08/addressing/ws-addr.xsd|ws-addr.xsd|g' wsdd.xsd
+# 3. Patch bf-2.xsd
+if [ -f "bf-2.xsd" ]; then
+    sed -i 's|http://www.w3.org/2005/08/addressing/ws-addr.xsd|ws-addr.xsd|g' bf-2.xsd
+    sed -i 's|https://www.w3.org/2005/08/addressing/ws-addr.xsd|ws-addr.xsd|g' bf-2.xsd
+    sed -i 's|http://www.w3.org/2001/xml.xsd|xml.xsd|g' bf-2.xsd
+    sed -i 's|https://www.w3.org/2001/xml.xsd|xml.xsd|g' bf-2.xsd
 fi
 
 echo "[DONE] Offline schemas download and patching complete!"
