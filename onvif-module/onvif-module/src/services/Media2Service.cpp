@@ -41,8 +41,7 @@ int Media2Service::GetProfiles(
         auto profile = soap_new_ns1__MediaProfile(soap);
         if (!profile) continue;
         profile->token = p.token;
-        profile->Name  = soap_new_std__string(soap);
-        if (profile->Name) *profile->Name = p.name;
+        profile->Name  = p.name;
         profile->fixed          = nullptr;
         profile->Configurations = nullptr;
 
