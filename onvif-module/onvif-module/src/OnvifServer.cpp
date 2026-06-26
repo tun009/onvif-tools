@@ -178,6 +178,7 @@ void OnvifServer::listenLoop() {
         if (serveResult != SOAP_OK && serveResult != SOAP_STOP) {
             std::cerr << "[OnvifServer] Error processing SOAP request:" << std::endl;
             soap_print_fault(soap, stderr);
+            soap_send_fault(soap);
         }
 
         // Giải phóng vùng nhớ của phiên kết nối này
