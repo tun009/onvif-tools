@@ -41,7 +41,6 @@ fi
 
 # ── Fix 3: Namespace map ──────────────────────────────────────────────────
 NSMAP="$GEN_DIR/onvif.nsmap"
-if [ ! -f "$NSMAP" ]; then
 cat > "$NSMAP" << 'NSEOF'
 struct Namespace namespaces[] = {
     {"SOAP-ENV","http://www.w3.org/2003/05/soap-envelope","http://schemas.xmlsoap.org/soap/envelope/",NULL},
@@ -64,9 +63,6 @@ struct Namespace namespaces[] = {
     {NULL,NULL,NULL,NULL}
 };
 NSEOF
-    echo "  [CREATED] onvif.nsmap"
-else
-    echo "  [OK] onvif.nsmap exists"
-fi
+echo "  [CREATED/UPDATED] onvif.nsmap"
 
 echo "[PATCH] Done."

@@ -3,6 +3,7 @@
 #include "soapH.h"
 #include <iostream>
 #include <cstring>
+#include <string>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -21,6 +22,24 @@ extern struct Namespace namespaces[];
 static int acceptMustUnderstandHeaders(struct soap* soap) {
     soap->mustUnderstand = 0; // Reset mustUnderstand flag whenever any header is parsed
     return SOAP_OK; // Mark all headers as "understood"
+}
+
+static size_t (*original_frecv)(struct soap*, char*, size_t) = nullptr;
+static int (*original_fsend)(struct soap*, const char*, size_t) = nullptr;
+
+static size_t custom_frecv(struct soap *soap, char *buf, size_t len) {
+    size_t n = original_frecv ? original_frecv(soap, buf, len) : 0;
+    if (n > 0) {
+        std::string data(buf, n);
+        std::cout << "[DEBUG RECV] " << data << std::endl;
+    }
+    return n;
+}
+
+static int custom_fsend(struct soap *soap, const char *buf, size_t len) {
+    std::string data(buf, len);
+    std::cout << "[DEBUG SEND] " << data << std::endl;
+    return original_fsend ? original_fsend(soap, buf, len) : -1;
 }
 
 OnvifServer::OnvifServer(const ServiceConfig& cfg, std::shared_ptr<ICameraBackend> backend)
@@ -61,6 +80,12 @@ void OnvifServer::listenLoop() {
         running_ = false;
         return;
     }
+
+    // Thiết lập hooks cho debug
+    original_frecv = soap->frecv;
+    soap->frecv = custom_frecv;
+    original_fsend = soap->fsend;
+    soap->fsend = custom_fsend;
 
     // Gán bảng ánh xạ namespace cho context
     soap->namespaces = namespaces;
@@ -103,10 +128,29 @@ void OnvifServer::listenLoop() {
         DeviceService deviceSvc(soap, cfg_, backend_);
         Media2Service media2Svc(soap, cfg_, backend_);
 
+        // Gán namespaces cho các Service object (quan trọng khi compile với -DWITH_NONAMESPACES)
+        deviceSvc.namespaces = namespaces;
+        media2Svc.namespaces = namespaces;
+
         // Thiết lập cấu hình lại cho soap context sau khi bị Service constructors ghi đè/reset
         soap->namespaces = namespaces;
         soap->fheader = acceptMustUnderstandHeaders;
         soap->mustUnderstand = 0;
+
+        if (deviceSvc.soap) {
+            deviceSvc.soap->namespaces = namespaces;
+            deviceSvc.soap->fheader = acceptMustUnderstandHeaders;
+            deviceSvc.soap->mustUnderstand = 0;
+            deviceSvc.soap->frecv = custom_frecv;
+            deviceSvc.soap->fsend = custom_fsend;
+        }
+        if (media2Svc.soap) {
+            media2Svc.soap->namespaces = namespaces;
+            media2Svc.soap->fheader = acceptMustUnderstandHeaders;
+            media2Svc.soap->mustUnderstand = 0;
+            media2Svc.soap->frecv = custom_frecv;
+            media2Svc.soap->fsend = custom_fsend;
+        }
 
         // ── Dispatch dựa trên URL path ────────────────────────────────
         int serveResult = SOAP_OK;
@@ -117,6 +161,8 @@ void OnvifServer::listenLoop() {
 
             // Bỏ qua lỗi MustUnderstand check
             soap->mustUnderstand = 0;
+            if (deviceSvc.soap) deviceSvc.soap->mustUnderstand = 0;
+            if (media2Svc.soap) media2Svc.soap->mustUnderstand = 0;
 
             if (path.find("/onvif/media") != std::string::npos) {
                 // Yêu cầu đến Media2Service
