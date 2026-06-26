@@ -14,6 +14,15 @@
 
 extern struct Namespace namespaces[];
 
+// ── Custom header handler ─────────────────────────────────────────────────────
+// gSOAP tự động fault khi nhận header có mustUnderstand="1" mà nó không
+// nhận ra. ONVIF tool luôn gửi wsse:Security với mustUnderstand="1".
+// Callback này chấp nhận header đó để code của chúng ta xử lý sau.
+static int acceptMustUnderstandHeaders(struct soap* soap) {
+    (void)soap;
+    return SOAP_OK; // Mark all headers as "understood"
+}
+
 OnvifServer::OnvifServer(const ServiceConfig& cfg, std::shared_ptr<ICameraBackend> backend)
     : cfg_(cfg), backend_(std::move(backend)) {}
 
@@ -55,6 +64,9 @@ void OnvifServer::listenLoop() {
 
     // Gán bảng ánh xạ namespace cho context
     soap->namespaces = namespaces;
+
+    // Chấp nhận wsse:Security header (mustUnderstand="1") không bị fault
+    soap->fheader = acceptMustUnderstandHeaders;
 
     // Cấu hình timeouts và giải phóng địa chỉ port nhanh (REUSEADDR)
     soap->accept_timeout = 1; // 1 giây check running_ một lần
