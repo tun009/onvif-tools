@@ -19,7 +19,7 @@ extern struct Namespace namespaces[];
 // nhận ra. ONVIF tool luôn gửi wsse:Security với mustUnderstand="1".
 // Callback này chấp nhận header đó để code của chúng ta xử lý sau.
 static int acceptMustUnderstandHeaders(struct soap* soap) {
-    (void)soap;
+    soap->mustUnderstand = 0; // Reset mustUnderstand flag whenever any header is parsed
     return SOAP_OK; // Mark all headers as "understood"
 }
 
@@ -95,19 +95,26 @@ void OnvifServer::listenLoop() {
         }
 
         // ── Dispatch dựa trên URL path ────────────────────────────────
-        // Lấy path từ HTTP request (soap->path được gSOAP set sau soap_accept)
-        const char* rawPath = soap->path ? soap->path : "";
-        std::string path(rawPath);
-
         int serveResult = SOAP_OK;
-        if (path.find("/onvif/media") != std::string::npos) {
-            // Yêu cầu đến Media2Service
-            Media2Service media2Svc(soap, cfg_, backend_);
-            serveResult = media2Svc.serve();
+        if (soap_begin_serve(soap) == SOAP_OK) {
+            // Lấy path từ HTTP request (soap->path được gSOAP set sau soap_begin_serve)
+            const char* rawPath = soap->path ? soap->path : "";
+            std::string path(rawPath);
+
+            // Bỏ qua lỗi MustUnderstand check
+            soap->mustUnderstand = 0;
+
+            if (path.find("/onvif/media") != std::string::npos) {
+                // Yêu cầu đến Media2Service
+                Media2Service media2Svc(soap, cfg_, backend_);
+                serveResult = media2Svc.dispatch();
+            } else {
+                // Mặc định: DeviceService (/onvif/device hoặc /onvif/device_service)
+                DeviceService deviceSvc(soap, cfg_, backend_);
+                serveResult = deviceSvc.dispatch();
+            }
         } else {
-            // Mặc định: DeviceService (/onvif/device hoặc /onvif/device_service)
-            DeviceService deviceSvc(soap, cfg_, backend_);
-            serveResult = deviceSvc.serve();
+            serveResult = soap->error;
         }
 
         if (serveResult != SOAP_OK && serveResult != SOAP_STOP) {

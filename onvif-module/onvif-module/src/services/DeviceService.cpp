@@ -22,6 +22,7 @@ int DeviceService::GetSystemDateAndTime(
     _tds__GetSystemDateAndTimeResponse &tds__GetSystemDateAndTimeResponse) 
 {
     (void)tds__GetSystemDateAndTime;
+    this->soap->mustUnderstand = 0;
     auto soap = this->soap;
 
     // Get time from backend (IPC)
@@ -75,6 +76,7 @@ int DeviceService::GetDeviceInformation(
     _tds__GetDeviceInformationResponse &tds__GetDeviceInformationResponse) 
 {
     (void)tds__GetDeviceInformation;
+    this->soap->mustUnderstand = 0;
 
     DeviceInfo info;
     try {
@@ -103,6 +105,7 @@ int DeviceService::GetCapabilities(
     _tds__GetCapabilitiesResponse &tds__GetCapabilitiesResponse) 
 {
     (void)tds__GetCapabilities;
+    this->soap->mustUnderstand = 0;
     auto soap = this->soap;
 
     auto caps = soap_new_tt__Capabilities(soap);
@@ -130,6 +133,7 @@ int DeviceService::GetServices(
     _tds__GetServicesResponse &tds__GetServicesResponse) 
 {
     (void)tds__GetServices;
+    this->soap->mustUnderstand = 0;
     auto soap = this->soap;
 
     // 1. Device Service
@@ -159,6 +163,7 @@ int DeviceService::GetScopes(
     _tds__GetScopesResponse &tds__GetScopesResponse) 
 {
     (void)tds__GetScopes;
+    this->soap->mustUnderstand = 0;
     auto soap = this->soap;
 
     std::vector<std::string> scopeUris = {
@@ -186,6 +191,7 @@ int DeviceService::GetUsers(
     _tds__GetUsersResponse &tds__GetUsersResponse) 
 {
     (void)tds__GetUsers;
+    this->soap->mustUnderstand = 0;
     if (!validateAuth()) {
         return soap_sender_fault_subcode(this->soap, "ter:NotAuthorized", "Sender", "Not Authorized");
     }
