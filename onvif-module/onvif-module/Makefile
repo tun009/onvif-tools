@@ -39,8 +39,11 @@ endif
 WSDD_SRC := $(wildcard $(EXT_DIR)/gsoap/plugin/wsddapi.cpp)
 GSP_SRCS += $(WSDD_SRC)
 
-FULL_SRCS := $(APP_SRCS) $(GEN_SRCS) $(GSP_SRCS)
-FULL_OBJS := $(patsubst %.cpp, $(BUILD_DIR)/%.o, $(FULL_SRCS))
+# Detect any custom serializers copied to external/gsoap/custom (e.g. struct_timeval)
+CUSTOM_SRCS := $(wildcard $(EXT_DIR)/custom/*.cpp) $(wildcard $(EXT_DIR)/custom/*.c)
+
+FULL_SRCS := $(APP_SRCS) $(GEN_SRCS) $(GSP_SRCS) $(CUSTOM_SRCS)
+FULL_OBJS := $(patsubst %.cpp, $(BUILD_DIR)/%.o, $(patsubst %.c, $(BUILD_DIR)/%.o, $(FULL_SRCS)))
 
 # ── Includes ──────────────────────────────────────────────────────────────
 INCLUDES := \
@@ -84,6 +87,11 @@ check-gen:
 
 # ── Compile rules ─────────────────────────────────────────────────────────
 $(BUILD_DIR)/%.o: %.cpp
+	@mkdir -p $(dir $@)
+	@echo "[CC] $<"
+	$(CXX) $(CXXFLAGS) $(DEFINES) $(INCLUDES) $(PKG_CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/%.o: %.c
 	@mkdir -p $(dir $@)
 	@echo "[CC] $<"
 	$(CXX) $(CXXFLAGS) $(DEFINES) $(INCLUDES) $(PKG_CFLAGS) -c $< -o $@
