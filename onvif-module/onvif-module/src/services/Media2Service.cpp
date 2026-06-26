@@ -45,7 +45,61 @@ int Media2Service::GetProfiles(
         profile->token = p.token;
         profile->Name  = p.name;
         profile->fixed          = nullptr;
-        profile->Configurations = nullptr;
+        profile->Configurations = soap_new_ns1__ConfigurationSet(soap);
+
+        if (profile->Configurations) {
+            bool wantVideoSource = true;
+            bool wantVideoEncoder = true;
+
+            if (req && !req->Type.empty()) {
+                wantVideoSource = false;
+                wantVideoEncoder = false;
+                for (const auto& t : req->Type) {
+                    if (t == "VideoSource") wantVideoSource = true;
+                    else if (t == "VideoEncoder") wantVideoEncoder = true;
+                }
+            }
+
+            if (wantVideoSource) {
+                auto vsc = soap_new_tt__VideoSourceConfiguration(soap);
+                if (vsc) {
+                    vsc->token = "video_source_config";
+                    vsc->Name = "VideoSourceConfig";
+                    vsc->SourceToken = p.sourceToken.empty() ? "video_source_token" : p.sourceToken;
+                    vsc->Bounds = soap_new_tt__IntRectangle(soap);
+                    if (vsc->Bounds) {
+                        vsc->Bounds->x = 0;
+                        vsc->Bounds->y = 0;
+                        vsc->Bounds->width = 1920;
+                        vsc->Bounds->height = 1080;
+                    }
+                    profile->Configurations->VideoSource = vsc;
+                }
+            }
+
+            if (wantVideoEncoder) {
+                auto vec = soap_new_tt__VideoEncoder2Configuration(soap);
+                if (vec) {
+                    vec->token = p.token == "profile_main" ? "video_encoder_config" : ("video_encoder_config_" + p.token);
+                    vec->Name = p.token == "profile_main" ? "VideoEncoderConfig" : ("VideoEncoderConfig_" + p.token);
+                    vec->Encoding = p.videoConfig.codec == Codec::H265 ? "H265" : "H264";
+                    vec->Quality = 50.0f;
+                    
+                    vec->Resolution = soap_new_tt__VideoResolution2(soap);
+                    if (vec->Resolution) {
+                        vec->Resolution->Width = p.videoConfig.resolution.width;
+                        vec->Resolution->Height = p.videoConfig.resolution.height;
+                    }
+
+                    vec->RateControl = soap_new_tt__VideoRateControl2(soap);
+                    if (vec->RateControl) {
+                        vec->RateControl->FrameRateLimit = p.videoConfig.framerate;
+                        vec->RateControl->BitrateLimit = p.videoConfig.bitrate;
+                    }
+                    profile->Configurations->VideoEncoder = vec;
+                }
+            }
+        }
 
         resp.Profiles.push_back(profile);
     }
