@@ -7,22 +7,26 @@ logLevel:     info
 
 paths:
   main:
-    source:             publisher
-    publishUser:        mock
-    publishPass:        mock123
-    runOnDemand:        ffmpeg -re -f lavfi -i testsrc2=size=1920x1080:rate=30 -c:v libx264 -preset ultrafast -tune zerolatency -f rtsp -rtsp_transport tcp rtsp://mock:mock123@127.0.0.1:8554/main
-    runOnDemandRestart: yes
+    # ffmpeg auto-starts when mediamtx starts, no auth required for readers
+    runOnInit: >-
+      ffmpeg -re -f lavfi -i testsrc2=size=1920x1080:rate=30
+      -c:v libx264 -preset ultrafast -tune zerolatency
+      -f rtsp -rtsp_transport tcp
+      rtsp://127.0.0.1:8554/main
+    runOnInitRestart: yes
 
   sub1:
-    source:             publisher
-    publishUser:        mock
-    publishPass:        mock123
-    runOnDemand:        ffmpeg -re -f lavfi -i testsrc2=size=1280x720:rate=15 -c:v libx264 -preset ultrafast -tune zerolatency -f rtsp -rtsp_transport tcp rtsp://mock:mock123@127.0.0.1:8554/sub1
-    runOnDemandRestart: yes
+    runOnInit: >-
+      ffmpeg -re -f lavfi -i testsrc2=size=1280x720:rate=15
+      -c:v libx264 -preset ultrafast -tune zerolatency
+      -f rtsp -rtsp_transport tcp
+      rtsp://127.0.0.1:8554/sub1
+    runOnInitRestart: yes
 
   sub2:
-    source:             publisher
-    publishUser:        mock
-    publishPass:        mock123
-    runOnDemand:        ffmpeg -re -f lavfi -i testsrc2=size=640x480:rate=10 -c:v libx264 -preset ultrafast -tune zerolatency -f rtsp -rtsp_transport tcp rtsp://mock:mock123@127.0.0.1:8554/sub2
-    runOnDemandRestart: yes
+    runOnInit: >-
+      ffmpeg -re -f lavfi -i testsrc2=size=640x480:rate=10
+      -c:v libx264 -preset ultrafast -tune zerolatency
+      -f rtsp -rtsp_transport tcp
+      rtsp://127.0.0.1:8554/sub2
+    runOnInitRestart: yes
