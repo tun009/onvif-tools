@@ -52,13 +52,13 @@ public:
         ns1__GetConfiguration *ns1__GetVideoEncoderConfigurationOptions,
         _ns1__GetVideoEncoderConfigurationOptionsResponse &ns1__GetVideoEncoderConfigurationOptionsResponse) override;
 
-    virtual int SetVideoSourceConfiguration(
-        _ns1__setVideoSourceConfiguration *ns1__setVideoSourceConfiguration,
-        _ns1__setVideoSourceConfigurationResponse &ns1__setVideoSourceConfigurationResponse) override;
+    virtual int setvideosourceconfiguration(
+        _ns1__setvideosourceconfiguration *ns1__setvideosourceconfiguration,
+        ns1__setconfigurationResponse &ns1__setvideosourceconfigurationResponse) override;
 
     virtual int SetVideoEncoderConfiguration(
-        _ns1__setVideoEncoderConfiguration *ns1__setVideoEncoderConfiguration,
-        _ns1__setVideoEncoderConfigurationResponse &ns1__setVideoEncoderConfigurationResponse) override;
+        _ns1__SetVideoEncoderConfiguration *ns1__SetVideoEncoderConfiguration,
+        ns1__SetConfigurationResponse &ns1__SetVideoEncoderConfigurationResponse) override;
 
 private:
     bool validateAuth();
