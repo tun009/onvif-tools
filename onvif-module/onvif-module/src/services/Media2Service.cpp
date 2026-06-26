@@ -284,17 +284,17 @@ int Media2Service::GetVideoEncoderConfigurationOptions(
     return SOAP_OK;
 }
 
-// ── setvideosourceconfiguration ──────────────────────────────────────────────
-int Media2Service::setvideosourceconfiguration(
-    _ns1__setvideosourceconfiguration *req,
-    ns1__setconfigurationResponse &resp)
+// ── setVideoSourceConfiguration ──────────────────────────────────────────────
+int Media2Service::setVideoSourceConfiguration(
+    _ns1__setVideoSourceConfiguration *req,
+    ns1__setConfigurationResponse &resp)
 {
     this->soap->mustUnderstand = 0;
     if (!validateAuth()) {
         return soap_sender_fault_subcode(this->soap, "ter:NotAuthorized", "Sender", "Not Authorized");
     }
     this->soap->header = nullptr;
-    std::cout << "[Media2Service] setvideosourceconfiguration called" << std::endl;
+    std::cout << "[Media2Service] setVideoSourceConfiguration called" << std::endl;
     return SOAP_OK;
 }
 

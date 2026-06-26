@@ -52,9 +52,9 @@ public:
         ns1__GetConfiguration *ns1__GetVideoEncoderConfigurationOptions,
         _ns1__GetVideoEncoderConfigurationOptionsResponse &ns1__GetVideoEncoderConfigurationOptionsResponse) override;
 
-    virtual int setvideosourceconfiguration(
-        _ns1__setvideosourceconfiguration *ns1__setvideosourceconfiguration,
-        ns1__setconfigurationResponse &ns1__setvideosourceconfigurationResponse) override;
+    virtual int setVideoSourceConfiguration(
+        _ns1__setVideoSourceConfiguration *ns1__setVideoSourceConfiguration,
+        ns1__setConfigurationResponse &ns1__setVideoSourceConfigurationResponse) override;
 
     virtual int SetVideoEncoderConfiguration(
         _ns1__SetVideoEncoderConfiguration *ns1__SetVideoEncoderConfiguration,
