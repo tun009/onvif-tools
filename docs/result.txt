@@ -1,0 +1,95 @@
+(base) chudat@chudat-H110M-DS2V-DDR3:~/tungdt/onvif-tools/onvif-module/onvif-module$ ./onvif-server
+==============================================
+  ONVIF Module
+  Device : 192.168.8.114:8080
+  Backend: /tmp/mock-camera.sock
+==============================================
+[main] Connecting to mock backend...
+[BackendConnector] connected ctrl=/tmp/mock-camera.sock
+[main] Backend connected. Running smoke test...
+
+[TEST] GetDeviceInfo:
+  Manufacturer : MockCam Inc.
+  Model        : MockCam-4K
+  Firmware     : 1.0.0
+  Serial       : MOCK-001-2024
+[TEST] GetSystemDateAndTime:
+  2026-06-26 05:15:16 UTC
+[TEST] GetProfiles: 3 profiles
+  [profile_main] Main 4K
+  [profile_sub1] Sub1 1080p
+  [profile_sub2] Sub2 480p
+[TEST] StreamUri [profile_main]: rtsp://127.0.0.1:8554/main
+[TEST] StreamUri [profile_sub1]: rtsp://127.0.0.1:8554/sub1
+[TEST] StreamUri [profile_sub2]: rtsp://127.0.0.1:8554/sub2
+[TEST] PTZ Status: pan=0.00 tilt=0.00 zoom=0.00
+[TEST] ImagingSettings: brightness=50.0 contrast=50.0
+
+[TEST] All smoke tests PASSED
+[main] Starting ONVIF SOAP server...
+[main] ONVIF SOAP server running on port 8080
+[main] Press Ctrl+C to exit
+
+[OnvifServer] Active namespaces:
+  SOAP-ENV -> http://www.w3.org/2003/05/soap-envelope
+  SOAP-ENC -> http://www.w3.org/2003/05/soap-encoding
+  xsi -> http://www.w3.org/2001/XMLSchema-instance
+  xsd -> http://www.w3.org/2001/XMLSchema
+  wsa5 -> http://www.w3.org/2005/08/addressing
+  wsse -> http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd
+  wsu -> http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd
+  wsdd -> http://docs.oasis-open.org/ws-dd/ns/discovery/2009/01
+  tt -> http://www.onvif.org/ver10/schema
+  tds -> http://www.onvif.org/ver10/device/wsdl
+  tr2 -> http://www.onvif.org/ver20/media/wsdl
+  tptz -> http://www.onvif.org/ver20/ptz/wsdl
+  timg -> http://www.onvif.org/ver20/imaging/wsdl
+  tev -> http://www.onvif.org/ver10/events/wsdl
+  tan -> http://www.onvif.org/ver20/analytics/wsdl
+  tdn -> http://www.onvif.org/ver10/network/wsdl
+  wsnt -> http://docs.oasis-open.org/wsn/b-2
+[OnvifServer] Listening on port 8080
+[DEBUG RECV] POST /onvif/device_service HTTP/1.1
+Host: 192.168.8.114:8080
+Content-Type: application/soap+xml; charset=utf-8
+Content-Length: 926
+
+<?xml version="1.0" encoding="utf-8"?><s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Header><wsse:Security xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd" xmlns:wsu="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd"><wsse:UsernameToken><wsse:Username>admin</wsse:Username><wsse:Password Type="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordDigest">htGV9PHwlMhyJma5PiqbbIAYMQ8=</wsse:Password><wsse:Nonce>GYd1frbIAXx01eyFnD2dFQ==</wsse:Nonce><wsu:Created>2026-06-26T05:15:23Z</wsu:Created></wsse:UsernameToken></wsse:Security></s:Header><s:Body xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"><GetServices xmlns="http://www.onvif.org/ver10/device/wsdl"><IncludeCapability>false</IncludeCapability></GetServices></s:Body></s:Envelope>
+[DEBUG SEND] HTTP/1.1 200 OK
+Server: gSOAP/2.8
+X-Frame-Options: SAMEORIGIN
+Content-Type: application/soap+xml; charset=utf-8
+Content-Length: 2873
+Connection: close
+
+<?xml version="1.0" encoding="UTF-8"?>
+<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://www.w3.org/2003/05/soap-envelope" xmlns:SOAP-ENC="http://www.w3.org/2003/05/soap-encoding" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:c14n="http://www.w3.org/2001/10/xml-exc-c14n#" xmlns:ds="http://www.w3.org/2000/09/xmldsig#" xmlns:saml1="urn:oasis:names:tc:SAML:1.0:assertion" xmlns:saml2="urn:oasis:names:tc:SAML:2.0:assertion" xmlns:wsu="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd" xmlns:xenc="http://www.w3.org/2001/04/xmlenc#" xmlns:wsc="http://docs.oasis-open.org/ws-sx/ws-secureconversation/200512" xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd" xmlns:wsa="http://schemas.xmlsoap.org/ws/2004/08/addressing" xmlns:wsdd="http://schemas.xmlsoap.org/ws/2005/04/discovery" xmlns:chan="http://schemas.microsoft.com/ws/2005/02/duplex" xmlns:wsdd10="http://tempuri.org/wsdd10.xsd" xmlns:wsa5="http://www.w3.org/2005/08/addressing" xmlns:wsrfr="http://docs.oasis-open.org/wsrf/r-2" xmlns:ns2="http://www.onvif.org/ver20/analytics/humanface" xmlns:ns3="http://www.onvif.org/ver20/analytics/humanbody" xmlns:xmime="http://tempuri.org/xmime.xsd" xmlns:xop="http://www.w3.org/2004/08/xop/include" xmlns:tt="http://www.onvif.org/ver10/schema" xmlns:wsrfbf="http://docs.oasis-open.org/wsrf/bf-2" xmlns:wstop="http://docs.oasis-open.org/wsn/t-1" xmlns:ns1="http://www.onvif.org/ver20/media/wsdl" xmlns:tan="http://www.onvif.org/ver20/analytics/wsdl" xmlns:tdn="http://www.onvif.org/ver10/network/wsdl" xmlns:tds="http://www.onvif.org/ver10/device/wsdl" xmlns:tev="http://www.onvif.org/ver10/events/wsdl" xmlns:wsnt="http://docs.oasis-open.org/wsn/b-2" xmlns:timg="http://www.onvif.org/ver20/imaging/wsdl" xmlns:tptz="http://www.onvif.org/ver20/ptz/wsdl"><SOAP-ENV:Header><wsse:Security SOAP-ENV:mustUnderstand="true"><wsse:UsernameToken><wsse:Username>admin</wsse:Username><wsse:Password Type="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordDigest">htGV9PHwlMhyJma5PiqbbIAYMQ8=</wsse:Password><wsse:Nonce>GYd1frbIAXx01eyFnD2dFQ==</wsse:Nonce><wsu:Created>2026-06-26T05:15:23Z</wsu:Created></wsse:UsernameToken></wsse:Security></SOAP-ENV:Header><SOAP-ENV:Body><tds:GetServicesResponse><tds:Service><tds:Namespace>http://www.onvif.org/ver10/device/wsdl</tds:Namespace><tds:XAddr>http://192.168.8.114:8080/onvif/device</tds:XAddr><tds:Version><tt:Major>21</tt:Major><tt:Minor>12</tt:Minor></tds:Version></tds:Service><tds:Service><tds:Namespace>http://www.onvif.org/ver20/media/wsdl</tds:Namespace><tds:XAddr>http://192.168.8.114:8080/onvif/media</tds:XAddr><tds:Version><tt:Major>20</tt:Major><tt:Minor>12</tt:Minor></tds:Version></tds:Service></tds:GetServicesResponse></SOAP-ENV:Body></SOAP-ENV:Envelope>
+
+[DEBUG RECV] POST /onvif/device_service HTTP/1.1
+Host: 192.168.8.114:8080
+Content-Type: application/soap+xml; charset=utf-8
+Content-Length: 926
+
+<?xml version="1.0" encoding="utf-8"?><s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Header><wsse:Security xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd" xmlns:wsu="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd"><wsse:UsernameToken><wsse:Username>admin</wsse:Username><wsse:Password Type="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordDigest">A3DUCiD0IJHY5U/WNZid8c/zTV0=</wsse:Password><wsse:Nonce>f72n3jDISK2mgQ8RIfwJzA==</wsse:Nonce><wsu:Created>2026-06-26T05:15:24Z</wsu:Created></wsse:UsernameToken></wsse:Security></s:Header><s:Body xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"><GetServices xmlns="http://www.onvif.org/ver10/device/wsdl"><IncludeCapability>false</IncludeCapability></GetServices></s:Body></s:Envelope>
+[DEBUG SEND] HTTP/1.1 200 OK
+Server: gSOAP/2.8
+X-Frame-Options: SAMEORIGIN
+Content-Type: application/soap+xml; charset=utf-8
+Content-Length: 2873
+Connection: close
+
+<?xml version="1.0" encoding="UTF-8"?>
+<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://www.w3.org/2003/05/soap-envelope" xmlns:SOAP-ENC="http://www.w3.org/2003/05/soap-encoding" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:c14n="http://www.w3.org/2001/10/xml-exc-c14n#" xmlns:ds="http://www.w3.org/2000/09/xmldsig#" xmlns:saml1="urn:oasis:names:tc:SAML:1.0:assertion" xmlns:saml2="urn:oasis:names:tc:SAML:2.0:assertion" xmlns:wsu="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd" xmlns:xenc="http://www.w3.org/2001/04/xmlenc#" xmlns:wsc="http://docs.oasis-open.org/ws-sx/ws-secureconversation/200512" xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd" xmlns:wsa="http://schemas.xmlsoap.org/ws/2004/08/addressing" xmlns:wsdd="http://schemas.xmlsoap.org/ws/2005/04/discovery" xmlns:chan="http://schemas.microsoft.com/ws/2005/02/duplex" xmlns:wsdd10="http://tempuri.org/wsdd10.xsd" xmlns:wsa5="http://www.w3.org/2005/08/addressing" xmlns:wsrfr="http://docs.oasis-open.org/wsrf/r-2" xmlns:ns2="http://www.onvif.org/ver20/analytics/humanface" xmlns:ns3="http://www.onvif.org/ver20/analytics/humanbody" xmlns:xmime="http://tempuri.org/xmime.xsd" xmlns:xop="http://www.w3.org/2004/08/xop/include" xmlns:tt="http://www.onvif.org/ver10/schema" xmlns:wsrfbf="http://docs.oasis-open.org/wsrf/bf-2" xmlns:wstop="http://docs.oasis-open.org/wsn/t-1" xmlns:ns1="http://www.onvif.org/ver20/media/wsdl" xmlns:tan="http://www.onvif.org/ver20/analytics/wsdl" xmlns:tdn="http://www.onvif.org/ver10/network/wsdl" xmlns:tds="http://www.onvif.org/ver10/device/wsdl" xmlns:tev="http://www.onvif.org/ver10/events/wsdl" xmlns:wsnt="http://docs.oasis-open.org/wsn/b-2" xmlns:timg="http://www.onvif.org/ver20/imaging/wsdl" xmlns:tptz="http://www.onvif.org/ver20/ptz/wsdl"><SOAP-ENV:Header><wsse:Security SOAP-ENV:mustUnderstand="true"><wsse:UsernameToken><wsse:Username>admin</wsse:Username><wsse:Password Type="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordDigest">A3DUCiD0IJHY5U/WNZid8c/zTV0=</wsse:Password><wsse:Nonce>f72n3jDISK2mgQ8RIfwJzA==</wsse:Nonce><wsu:Created>2026-06-26T05:15:24Z</wsu:Created></wsse:UsernameToken></wsse:Security></SOAP-ENV:Header><SOAP-ENV:Body><tds:GetServicesResponse><tds:Service><tds:Namespace>http://www.onvif.org/ver10/device/wsdl</tds:Namespace><tds:XAddr>http://192.168.8.114:8080/onvif/device</tds:XAddr><tds:Version><tt:Major>21</tt:Major><tt:Minor>12</tt:Minor></tds:Version></tds:Service><tds:Service><tds:Namespace>http://www.onvif.org/ver20/media/wsdl</tds:Namespace><tds:XAddr>http://192.168.8.114:8080/onvif/media</tds:XAddr><tds:Version><tt:Major>20</tt:Major><tt:Minor>12</tt:Minor></tds:Version></tds:Service></tds:GetServicesResponse></SOAP-ENV:Body></SOAP-ENV:Envelope>
+
+[DEBUG RECV] POST /onvif/device_service HTTP/1.1
+Host: 192.168.8.114:8080
+Content-Type: application/soap+xml; charset=utf-8
+Content-Length: 926
+
+<?xml version="1.0" encoding="utf-8"?><s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Header><wsse:Security xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd" xmlns:wsu="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd"><wsse:UsernameToken><wsse:Username>admin</wsse:Username><wsse:Password Type="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordDigest">OHLrqTFxuuCv6LClycg6fy75Ilw=</wsse:Password><wsse:Nonce>Ljn5W2XIRTUGZv3mONUCfQ==</wsse:Nonce><wsu:Created>2026-06-26T05:15:24Z</wsu:Created></wsse:UsernameToken></wsse:Security></s:Header><s:Body xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"><GetServices xmlns="http://www.onvif.org/ver10/device/wsdl"><IncludeCapability>false</IncludeCapability></GetServices></s:Body></s:Envelope>
+[DEBUG SEND] HTTP/1.1 200 OK
+Server: gSOAP/2.8
+X-Frame-Options: SAMEORIGIN
+Content-Type: application/soap+xml; charset=utf-8
+Content-Length: 2873
+Connection: close

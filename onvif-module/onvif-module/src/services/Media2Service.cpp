@@ -24,6 +24,7 @@ int Media2Service::GetProfiles(
     _ns1__GetProfilesResponse &resp)
 {
     this->soap->mustUnderstand = 0;
+    this->soap->header = nullptr;
     auto soap = this->soap;
     std::string filterToken;
     if (req && req->Token) filterToken = *req->Token;
@@ -62,6 +63,7 @@ int Media2Service::GetStreamUri(
     if (!validateAuth()) {
         return soap_sender_fault_subcode(this->soap, "ter:NotAuthorized", "Sender", "Not Authorized");
     }
+    this->soap->header = nullptr;
 
     std::string profileToken;
     if (req) profileToken = req->ProfileToken;
@@ -96,6 +98,7 @@ int Media2Service::GetSnapshotUri(
     if (!validateAuth()) {
         return soap_sender_fault_subcode(this->soap, "ter:NotAuthorized", "Sender", "Not Authorized");
     }
+    this->soap->header = nullptr;
 
     std::string profileToken;
     if (req) profileToken = req->ProfileToken;
