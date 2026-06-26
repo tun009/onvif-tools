@@ -35,6 +35,30 @@ public:
         ns1__GetConfiguration *ns1__GetVideoEncoderConfigurations,
         _ns1__GetVideoEncoderConfigurationsResponse &ns1__GetVideoEncoderConfigurationsResponse) override;
 
+    virtual int AddConfiguration(
+        _ns1__AddConfiguration *ns1__AddConfiguration,
+        _ns1__AddConfigurationResponse &ns1__AddConfigurationResponse) override;
+
+    virtual int RemoveConfiguration(
+        _ns1__RemoveConfiguration *ns1__RemoveConfiguration,
+        _ns1__RemoveConfigurationResponse &ns1__RemoveConfigurationResponse) override;
+
+    virtual int GetVideoSourceConfigurationOptions(
+        ns1__GetConfiguration *ns1__GetVideoSourceConfigurationOptions,
+        _ns1__GetVideoSourceConfigurationOptionsResponse &ns1__GetVideoSourceConfigurationOptionsResponse) override;
+
+    virtual int GetVideoEncoderConfigurationOptions(
+        ns1__GetConfiguration *ns1__GetVideoEncoderConfigurationOptions,
+        _ns1__GetVideoEncoderConfigurationOptionsResponse &ns1__GetVideoEncoderConfigurationOptionsResponse) override;
+
+    virtual int SetVideoSourceConfiguration(
+        _ns1__SetVideoSourceConfiguration *ns1__SetVideoSourceConfiguration,
+        _ns1__SetVideoSourceConfigurationResponse &ns1__SetVideoSourceConfigurationResponse) override;
+
+    virtual int SetVideoEncoderConfiguration(
+        _ns1__SetVideoEncoderConfiguration *ns1__SetVideoEncoderConfiguration,
+        _ns1__SetVideoEncoderConfigurationResponse &ns1__SetVideoEncoderConfigurationResponse) override;
+
 private:
     bool validateAuth();
     ServiceConfig cfg_;

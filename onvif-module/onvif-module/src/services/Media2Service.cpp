@@ -192,3 +192,124 @@ int Media2Service::GetVideoEncoderConfigurations(
     return SOAP_OK;
 }
 
+// ── AddConfiguration ─────────────────────────────────────────────────────────
+int Media2Service::AddConfiguration(
+    _ns1__AddConfiguration *req,
+    _ns1__AddConfigurationResponse &resp)
+{
+    this->soap->mustUnderstand = 0;
+    if (!validateAuth()) {
+        return soap_sender_fault_subcode(this->soap, "ter:NotAuthorized", "Sender", "Not Authorized");
+    }
+    this->soap->header = nullptr;
+    std::cout << "[Media2Service] AddConfiguration called" << std::endl;
+    return SOAP_OK;
+}
+
+// ── RemoveConfiguration ──────────────────────────────────────────────────────
+int Media2Service::RemoveConfiguration(
+    _ns1__RemoveConfiguration *req,
+    _ns1__RemoveConfigurationResponse &resp)
+{
+    this->soap->mustUnderstand = 0;
+    if (!validateAuth()) {
+        return soap_sender_fault_subcode(this->soap, "ter:NotAuthorized", "Sender", "Not Authorized");
+    }
+    this->soap->header = nullptr;
+    std::cout << "[Media2Service] RemoveConfiguration called" << std::endl;
+    return SOAP_OK;
+}
+
+// ── GetVideoSourceConfigurationOptions ───────────────────────────────────────
+int Media2Service::GetVideoSourceConfigurationOptions(
+    ns1__GetConfiguration *req,
+    _ns1__GetVideoSourceConfigurationOptionsResponse &resp)
+{
+    this->soap->mustUnderstand = 0;
+    if (!validateAuth()) {
+        return soap_sender_fault_subcode(this->soap, "ter:NotAuthorized", "Sender", "Not Authorized");
+    }
+    this->soap->header = nullptr;
+    auto soap = this->soap;
+
+    auto opt = soap_new_tt__VideoSourceConfigurationOptions(soap);
+    if (opt) {
+        opt->VideoSourceTokensAvailable.push_back("video_source_token");
+        resp.Options = opt;
+    }
+
+    std::cout << "[Media2Service] GetVideoSourceConfigurationOptions called" << std::endl;
+    return SOAP_OK;
+}
+
+// ── GetVideoEncoderConfigurationOptions ───────────────────────────────────────
+int Media2Service::GetVideoEncoderConfigurationOptions(
+    ns1__GetConfiguration *req,
+    _ns1__GetVideoEncoderConfigurationOptionsResponse &resp)
+{
+    this->soap->mustUnderstand = 0;
+    if (!validateAuth()) {
+        return soap_sender_fault_subcode(this->soap, "ter:NotAuthorized", "Sender", "Not Authorized");
+    }
+    this->soap->header = nullptr;
+    auto soap = this->soap;
+
+    auto opt = soap_new_tt__VideoEncoder2ConfigurationOptions(soap);
+    if (opt) {
+        opt->Encoding = "H264";
+        
+        opt->QualityRange = soap_new_tt__FloatRange(soap);
+        if (opt->QualityRange) {
+            opt->QualityRange->Min = 0.0f;
+            opt->QualityRange->Max = 100.0f;
+        }
+
+        auto res = soap_new_tt__VideoResolution2(soap);
+        if (res) {
+            res->Width = 1920;
+            res->Height = 1080;
+            opt->ResolutionsAvailable.push_back(res);
+        }
+
+        opt->BitrateRange = soap_new_tt__IntRange(soap);
+        if (opt->BitrateRange) {
+            opt->BitrateRange->Min = 64;
+            opt->BitrateRange->Max = 8192;
+        }
+
+        resp.Options.push_back(opt);
+    }
+
+    std::cout << "[Media2Service] GetVideoEncoderConfigurationOptions called" << std::endl;
+    return SOAP_OK;
+}
+
+// ── SetVideoSourceConfiguration ──────────────────────────────────────────────
+int Media2Service::SetVideoSourceConfiguration(
+    _ns1__SetVideoSourceConfiguration *req,
+    _ns1__SetVideoSourceConfigurationResponse &resp)
+{
+    this->soap->mustUnderstand = 0;
+    if (!validateAuth()) {
+        return soap_sender_fault_subcode(this->soap, "ter:NotAuthorized", "Sender", "Not Authorized");
+    }
+    this->soap->header = nullptr;
+    std::cout << "[Media2Service] SetVideoSourceConfiguration called" << std::endl;
+    return SOAP_OK;
+}
+
+// ── SetVideoEncoderConfiguration ──────────────────────────────────────────────
+int Media2Service::SetVideoEncoderConfiguration(
+    _ns1__SetVideoEncoderConfiguration *req,
+    _ns1__SetVideoEncoderConfigurationResponse &resp)
+{
+    this->soap->mustUnderstand = 0;
+    if (!validateAuth()) {
+        return soap_sender_fault_subcode(this->soap, "ter:NotAuthorized", "Sender", "Not Authorized");
+    }
+    this->soap->header = nullptr;
+    std::cout << "[Media2Service] SetVideoEncoderConfiguration called" << std::endl;
+    return SOAP_OK;
+}
+
+
