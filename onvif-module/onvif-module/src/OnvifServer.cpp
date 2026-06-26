@@ -64,6 +64,11 @@ void OnvifServer::listenLoop() {
 
     // Gán bảng ánh xạ namespace cho context
     soap->namespaces = namespaces;
+    std::cout << "[OnvifServer] Active namespaces:" << std::endl;
+    for (int i = 0; namespaces[i].id != nullptr; ++i) {
+        std::cout << "  " << namespaces[i].id << " -> " 
+                  << (namespaces[i].ns ? namespaces[i].ns : "NULL") << std::endl;
+    }
 
     // Chấp nhận wsse:Security header (mustUnderstand="1") không bị fault
     soap->fheader = acceptMustUnderstandHeaders;
@@ -107,15 +112,21 @@ void OnvifServer::listenLoop() {
             if (path.find("/onvif/media") != std::string::npos) {
                 // Yêu cầu đến Media2Service
                 Media2Service media2Svc(soap, cfg_, backend_);
-                soap->fheader = acceptMustUnderstandHeaders;
-                soap->namespaces = namespaces;
+                media2Svc.fheader = acceptMustUnderstandHeaders;
+                media2Svc.namespaces = namespaces;
+                media2Svc.mustUnderstand = 0;
                 serveResult = media2Svc.dispatch();
+                soap->error = media2Svc.error;
+                soap->fault = media2Svc.fault;
             } else {
                 // Mặc định: DeviceService (/onvif/device hoặc /onvif/device_service)
                 DeviceService deviceSvc(soap, cfg_, backend_);
-                soap->fheader = acceptMustUnderstandHeaders;
-                soap->namespaces = namespaces;
+                deviceSvc.fheader = acceptMustUnderstandHeaders;
+                deviceSvc.namespaces = namespaces;
+                deviceSvc.mustUnderstand = 0;
                 serveResult = deviceSvc.dispatch();
+                soap->error = deviceSvc.error;
+                soap->fault = deviceSvc.fault;
             }
         } else {
             serveResult = soap->error;
