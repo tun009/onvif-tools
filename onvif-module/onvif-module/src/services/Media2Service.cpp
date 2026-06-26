@@ -286,8 +286,8 @@ int Media2Service::GetVideoEncoderConfigurationOptions(
 
 // ── SetVideoSourceConfiguration ──────────────────────────────────────────────
 int Media2Service::SetVideoSourceConfiguration(
-    _ns1__SetVideoSourceConfiguration *req,
-    _ns1__SetVideoSourceConfigurationResponse &resp)
+    _ns1__setVideoSourceConfiguration *req,
+    _ns1__setVideoSourceConfigurationResponse &resp)
 {
     this->soap->mustUnderstand = 0;
     if (!validateAuth()) {
@@ -300,8 +300,8 @@ int Media2Service::SetVideoSourceConfiguration(
 
 // ── SetVideoEncoderConfiguration ──────────────────────────────────────────────
 int Media2Service::SetVideoEncoderConfiguration(
-    _ns1__SetVideoEncoderConfiguration *req,
-    _ns1__SetVideoEncoderConfigurationResponse &resp)
+    _ns1__setVideoEncoderConfiguration *req,
+    _ns1__setVideoEncoderConfigurationResponse &resp)
 {
     this->soap->mustUnderstand = 0;
     if (!validateAuth()) {
