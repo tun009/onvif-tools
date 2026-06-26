@@ -112,21 +112,21 @@ void OnvifServer::listenLoop() {
             if (path.find("/onvif/media") != std::string::npos) {
                 // Yêu cầu đến Media2Service
                 Media2Service media2Svc(soap, cfg_, backend_);
-                media2Svc.fheader = acceptMustUnderstandHeaders;
-                media2Svc.namespaces = namespaces;
-                media2Svc.mustUnderstand = 0;
+                media2Svc.soap->fheader = acceptMustUnderstandHeaders;
+                media2Svc.soap->namespaces = namespaces;
+                media2Svc.soap->mustUnderstand = 0;
                 serveResult = media2Svc.dispatch();
-                soap->error = media2Svc.error;
-                soap->fault = media2Svc.fault;
+                soap->error = media2Svc.soap->error;
+                soap->fault = media2Svc.soap->fault;
             } else {
                 // Mặc định: DeviceService (/onvif/device hoặc /onvif/device_service)
                 DeviceService deviceSvc(soap, cfg_, backend_);
-                deviceSvc.fheader = acceptMustUnderstandHeaders;
-                deviceSvc.namespaces = namespaces;
-                deviceSvc.mustUnderstand = 0;
+                deviceSvc.soap->fheader = acceptMustUnderstandHeaders;
+                deviceSvc.soap->namespaces = namespaces;
+                deviceSvc.soap->mustUnderstand = 0;
                 serveResult = deviceSvc.dispatch();
-                soap->error = deviceSvc.error;
-                soap->fault = deviceSvc.fault;
+                soap->error = deviceSvc.soap->error;
+                soap->fault = deviceSvc.soap->fault;
             }
         } else {
             serveResult = soap->error;
