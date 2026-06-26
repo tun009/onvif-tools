@@ -40,7 +40,7 @@ WSDD_SRC := $(wildcard $(EXT_DIR)/gsoap/plugin/wsddapi.cpp)
 GSP_SRCS += $(WSDD_SRC)
 
 # Detect any custom serializers copied to external/gsoap/custom (e.g. struct_timeval)
-CUSTOM_SRCS := $(wildcard $(EXT_DIR)/custom/*.cpp) $(wildcard $(EXT_DIR)/custom/*.c)
+CUSTOM_SRCS := $(wildcard $(EXT_DIR)/gsoap/custom/*.cpp) $(wildcard $(EXT_DIR)/gsoap/custom/*.c)
 
 FULL_SRCS := $(APP_SRCS) $(GEN_SRCS) $(GSP_SRCS) $(CUSTOM_SRCS)
 FULL_OBJS := $(patsubst %.cpp, $(BUILD_DIR)/%.o, $(patsubst %.c, $(BUILD_DIR)/%.o, $(FULL_SRCS)))
