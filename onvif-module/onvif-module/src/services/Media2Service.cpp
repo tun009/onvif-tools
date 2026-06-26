@@ -122,3 +122,73 @@ int Media2Service::GetSnapshotUri(
     std::cout << "[Media2Service] GetSnapshotUri [" << profileToken << "] → " << u.uri << std::endl;
     return SOAP_OK;
 }
+
+// ── GetVideoSourceConfigurations ─────────────────────────────────────────────
+int Media2Service::GetVideoSourceConfigurations(
+    ns1__GetConfiguration *req,
+    _ns1__GetVideoSourceConfigurationsResponse &resp)
+{
+    this->soap->mustUnderstand = 0;
+    if (!validateAuth()) {
+        return soap_sender_fault_subcode(this->soap, "ter:NotAuthorized", "Sender", "Not Authorized");
+    }
+    this->soap->header = nullptr;
+    auto soap = this->soap;
+
+    auto vsc = soap_new_tt__VideoSourceConfiguration(soap);
+    if (vsc) {
+        vsc->token = "video_source_config";
+        vsc->Name = "VideoSourceConfig";
+        vsc->SourceToken = "video_source_token";
+
+        vsc->Bounds = soap_new_tt__IntRectangle(soap);
+        if (vsc->Bounds) {
+            vsc->Bounds->x = 0;
+            vsc->Bounds->y = 0;
+            vsc->Bounds->width = 1920;
+            vsc->Bounds->height = 1080;
+        }
+        resp.Configurations.push_back(vsc);
+    }
+
+    std::cout << "[Media2Service] GetVideoSourceConfigurations → returned 1 configuration" << std::endl;
+    return SOAP_OK;
+}
+
+// ── GetVideoEncoderConfigurations ────────────────────────────────────────────
+int Media2Service::GetVideoEncoderConfigurations(
+    ns1__GetConfiguration *req,
+    _ns1__GetVideoEncoderConfigurationsResponse &resp)
+{
+    this->soap->mustUnderstand = 0;
+    if (!validateAuth()) {
+        return soap_sender_fault_subcode(this->soap, "ter:NotAuthorized", "Sender", "Not Authorized");
+    }
+    this->soap->header = nullptr;
+    auto soap = this->soap;
+
+    auto enc = soap_new_tt__VideoEncoder2Configuration(soap);
+    if (enc) {
+        enc->token = "video_encoder_config";
+        enc->Name = "VideoEncoderConfig";
+        enc->Encoding = "H264";
+        enc->Quality = 50.0f;
+
+        enc->Resolution = soap_new_tt__VideoResolution2(soap);
+        if (enc->Resolution) {
+            enc->Resolution->Width = 1920;
+            enc->Resolution->Height = 1080;
+        }
+
+        enc->RateControl = soap_new_tt__VideoRateControl2(soap);
+        if (enc->RateControl) {
+            enc->RateControl->FrameRateLimit = 30.0f;
+            enc->RateControl->BitrateLimit = 4096;
+        }
+        resp.Configurations.push_back(enc);
+    }
+
+    std::cout << "[Media2Service] GetVideoEncoderConfigurations → returned 1 configuration" << std::endl;
+    return SOAP_OK;
+}
+

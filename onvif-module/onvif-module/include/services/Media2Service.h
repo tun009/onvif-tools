@@ -27,9 +27,13 @@ public:
         _ns1__GetSnapshotUri *ns1__GetSnapshotUri,
         _ns1__GetSnapshotUriResponse &ns1__GetSnapshotUriResponse) override;
 
-    // NOTE: GetVideoEncoderConfigurations & SetVideoEncoderConfiguration
-    // are intentionally NOT overridden here. gSOAP (-DWITH_DEFAULT_VIRTUAL)
-    // provides default stubs returning SOAP_NO_METHOD for unimplemented methods.
+    virtual int GetVideoSourceConfigurations(
+        ns1__GetConfiguration *ns1__GetVideoSourceConfigurations,
+        _ns1__GetVideoSourceConfigurationsResponse &ns1__GetVideoSourceConfigurationsResponse) override;
+
+    virtual int GetVideoEncoderConfigurations(
+        ns1__GetConfiguration *ns1__GetVideoEncoderConfigurations,
+        _ns1__GetVideoEncoderConfigurationsResponse &ns1__GetVideoEncoderConfigurationsResponse) override;
 
 private:
     bool validateAuth();
