@@ -128,10 +128,6 @@ void OnvifServer::listenLoop() {
         DeviceService deviceSvc(soap, cfg_, backend_);
         Media2Service media2Svc(soap, cfg_, backend_);
 
-        // Gán namespaces cho các Service object (quan trọng khi compile với -DWITH_NONAMESPACES)
-        deviceSvc.namespaces = namespaces;
-        media2Svc.namespaces = namespaces;
-
         // Thiết lập cấu hình lại cho soap context sau khi bị Service constructors ghi đè/reset
         soap->namespaces = namespaces;
         soap->fheader = acceptMustUnderstandHeaders;
