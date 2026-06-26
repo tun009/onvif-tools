@@ -1,4 +1,5 @@
 #pragma once
+#include "soapH.h"
 #include "soapMedia2BindingService.h"
 #include "services/DeviceService.h"
 #include "interface/ICameraBackend.h"
