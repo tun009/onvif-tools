@@ -14,6 +14,7 @@ sudo apt-get install -y \
     nlohmann-json3-dev
 
 echo "[2] Copy nlohmann/json.hpp..."
+mkdir -p include/third_party/nlohmann
 cp /usr/include/nlohmann/json.hpp include/third_party/nlohmann/json.hpp \
   || wget -q -O include/third_party/nlohmann/json.hpp \
      https://github.com/nlohmann/json/releases/download/v3.11.3/json.hpp
@@ -23,7 +24,14 @@ gst-inspect-1.0 nvv4l2h264enc && echo "nvv4l2h264enc OK" || echo "WARN: not foun
 gst-inspect-1.0 nvv4l2h265enc && echo "nvv4l2h265enc OK" || echo "WARN: not found (JetPack needed)"
 
 echo "[4] Download MediaMTX..."
-ARCH="arm64v8"
+MACHINE=$(uname -m)
+if [ "$MACHINE" = "x86_64" ]; then
+  ARCH="amd64"
+elif [ "$MACHINE" = "aarch64" ]; then
+  ARCH="arm64v8"
+else
+  ARCH="arm64v8"
+fi
 VER="v1.9.1"
 mkdir -p bin
 wget -q -O /tmp/mediamtx.tar.gz \
