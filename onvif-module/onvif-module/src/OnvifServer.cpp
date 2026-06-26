@@ -99,6 +99,15 @@ void OnvifServer::listenLoop() {
             break;
         }
 
+        // ── Khởi tạo các Service trước để tránh constructor reset state của soap context ────────────────
+        DeviceService deviceSvc(soap, cfg_, backend_);
+        Media2Service media2Svc(soap, cfg_, backend_);
+
+        // Thiết lập cấu hình lại cho soap context sau khi bị Service constructors ghi đè/reset
+        soap->namespaces = namespaces;
+        soap->fheader = acceptMustUnderstandHeaders;
+        soap->mustUnderstand = 0;
+
         // ── Dispatch dựa trên URL path ────────────────────────────────
         int serveResult = SOAP_OK;
         if (soap_begin_serve(soap) == SOAP_OK) {
@@ -111,19 +120,11 @@ void OnvifServer::listenLoop() {
 
             if (path.find("/onvif/media") != std::string::npos) {
                 // Yêu cầu đến Media2Service
-                Media2Service media2Svc(soap, cfg_, backend_);
-                media2Svc.soap->fheader = acceptMustUnderstandHeaders;
-                media2Svc.soap->namespaces = namespaces;
-                media2Svc.soap->mustUnderstand = 0;
                 serveResult = media2Svc.dispatch();
                 soap->error = media2Svc.soap->error;
                 soap->fault = media2Svc.soap->fault;
             } else {
                 // Mặc định: DeviceService (/onvif/device hoặc /onvif/device_service)
-                DeviceService deviceSvc(soap, cfg_, backend_);
-                deviceSvc.soap->fheader = acceptMustUnderstandHeaders;
-                deviceSvc.soap->namespaces = namespaces;
-                deviceSvc.soap->mustUnderstand = 0;
                 serveResult = deviceSvc.dispatch();
                 soap->error = deviceSvc.soap->error;
                 soap->fault = deviceSvc.soap->fault;
