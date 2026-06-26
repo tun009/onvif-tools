@@ -107,10 +107,12 @@ void OnvifServer::listenLoop() {
             if (path.find("/onvif/media") != std::string::npos) {
                 // Yêu cầu đến Media2Service
                 Media2Service media2Svc(soap, cfg_, backend_);
+                soap->fheader = acceptMustUnderstandHeaders;
                 serveResult = media2Svc.dispatch();
             } else {
                 // Mặc định: DeviceService (/onvif/device hoặc /onvif/device_service)
                 DeviceService deviceSvc(soap, cfg_, backend_);
+                soap->fheader = acceptMustUnderstandHeaders;
                 serveResult = deviceSvc.dispatch();
             }
         } else {
