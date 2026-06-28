@@ -245,7 +245,7 @@ int DeviceService::GetServiceCapabilities(
     }
 
     // ── Security capabilities ────────────────────────────────────────────
-    // Profile T REQUIRES HTTPDigest = true
+    // Profile T REQUIRES HttpDigest = true
     caps->Security = soap_new_tds__SecurityCapabilities(soap);
     if (caps->Security) {
         // HTTP Digest authentication - MANDATORY for Profile T
@@ -255,14 +255,6 @@ int DeviceService::GetServiceCapabilities(
         // WS-UsernameToken - our current auth mechanism
         auto usernameToken = new bool(true);
         caps->Security->UsernameToken = usernameToken;
-
-        // TLS 1.2 - not supported in this mock
-        auto tls12 = new bool(false);
-        caps->Security->TLS12 = tls12;
-
-        // Onboard key generation - not supported
-        auto onboardKeyGen = new bool(false);
-        caps->Security->OnboardKeyGeneration = onboardKeyGen;
     }
 
     // ── System capabilities ──────────────────────────────────────────────
