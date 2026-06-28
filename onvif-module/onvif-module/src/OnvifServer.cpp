@@ -73,6 +73,26 @@ void OnvifServer::stop() {
     }
 }
 
+#include <vector>
+
+// Hàm tạo bảng namespace chứa cả "ter"
+static struct Namespace* get_custom_namespaces() {
+    static std::vector<struct Namespace> custom_ns;
+    if (custom_ns.empty()) {
+        // Copy từ bảng namespaces tĩnh extern
+        for (int i = 0; namespaces[i].id != nullptr || namespaces[i].ns != nullptr; ++i) {
+            custom_ns.push_back(namespaces[i]);
+        }
+        // Thêm namespace "ter" của ONVIF error
+        struct Namespace ter_ns = {"ter", "http://www.onvif.org/ver10/error", nullptr, nullptr};
+        custom_ns.push_back(ter_ns);
+        // Thêm phần tử đánh dấu kết thúc bảng (sentinel)
+        struct Namespace end_ns = {nullptr, nullptr, nullptr, nullptr};
+        custom_ns.push_back(end_ns);
+    }
+    return custom_ns.data();
+}
+
 void OnvifServer::listenLoop() {
     struct soap* soap = soap_new();
     if (!soap) {
@@ -87,14 +107,12 @@ void OnvifServer::listenLoop() {
     original_fsend = soap->fsend;
     soap->fsend = custom_fsend;
 
-    // Gán bảng ánh xạ namespace cho context
-    soap->namespaces = namespaces;
-    // Đăng ký namespace lỗi ONVIF để SOAP Fault Subcode/Value được serialize đúng chuẩn
-    soap_register_namespace(soap, "ter", "http://www.onvif.org/ver10/error");
+    // Gán bảng ánh xạ namespace tùy biến có chứa "ter"
+    soap->namespaces = get_custom_namespaces();
     std::cout << "[OnvifServer] Active namespaces:" << std::endl;
-    for (int i = 0; namespaces[i].id != nullptr; ++i) {
-        std::cout << "  " << namespaces[i].id << " -> " 
-                  << (namespaces[i].ns ? namespaces[i].ns : "NULL") << std::endl;
+    for (int i = 0; soap->namespaces[i].id != nullptr; ++i) {
+        std::cout << "  " << soap->namespaces[i].id << " -> " 
+                  << (soap->namespaces[i].ns ? soap->namespaces[i].ns : "NULL") << std::endl;
     }
 
     // Chấp nhận wsse:Security header (mustUnderstand="1") không bị fault
@@ -131,21 +149,19 @@ void OnvifServer::listenLoop() {
         Media2Service media2Svc(soap, cfg_, backend_);
 
         // Thiết lập cấu hình lại cho soap context sau khi bị Service constructors ghi đè/reset
-        soap->namespaces = namespaces;
-        // Re-register ter namespace mỗi request (soap_end() giải phóng namespaces đăng ký động)
-        soap_register_namespace(soap, "ter", "http://www.onvif.org/ver10/error");
+        soap->namespaces = get_custom_namespaces();
         soap->fheader = acceptMustUnderstandHeaders;
         soap->mustUnderstand = 0;
 
         if (deviceSvc.soap) {
-            deviceSvc.soap->namespaces = namespaces;
+            deviceSvc.soap->namespaces = get_custom_namespaces();
             deviceSvc.soap->fheader = acceptMustUnderstandHeaders;
             deviceSvc.soap->mustUnderstand = 0;
             deviceSvc.soap->frecv = custom_frecv;
             deviceSvc.soap->fsend = custom_fsend;
         }
         if (media2Svc.soap) {
-            media2Svc.soap->namespaces = namespaces;
+            media2Svc.soap->namespaces = get_custom_namespaces();
             media2Svc.soap->fheader = acceptMustUnderstandHeaders;
             media2Svc.soap->mustUnderstand = 0;
             media2Svc.soap->frecv = custom_frecv;
