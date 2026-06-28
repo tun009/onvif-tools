@@ -393,7 +393,7 @@ int Media2Service::GetServiceCapabilities(
     // Profile T requires RTP multicast/unicast/RTSP
     caps->ProfileCapabilities = soap_new_ns1__ProfileCapabilities(soap);
     if (caps->ProfileCapabilities) {
-        caps->ProfileCapabilities->MaximumNumberOfProfiles = 3;
+        caps->ProfileCapabilities->MaximumNumberOfProfiles = new int(3);
     }
 
     // Streaming capabilities
@@ -401,7 +401,7 @@ int Media2Service::GetServiceCapabilities(
     if (caps->StreamingCapabilities) {
         // RTP over RTSP/TCP - supported
         auto rtpOverRtsp = new bool(true);
-        caps->StreamingCapabilities->RTPOverRTSP = rtpOverRtsp;
+        caps->StreamingCapabilities->RTP_USCORERTSP_USCORETCP = rtpOverRtsp;
 
         // RTP multicast - not supported (requires multicast network setup)
         auto rtpMulticast = new bool(false);
