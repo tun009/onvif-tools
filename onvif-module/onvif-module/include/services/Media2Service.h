@@ -60,6 +60,10 @@ public:
         _ns1__SetVideoEncoderConfiguration *ns1__SetVideoEncoderConfiguration,
         ns1__SetConfigurationResponse &ns1__SetVideoEncoderConfigurationResponse) override;
 
+    virtual int GetServiceCapabilities(
+        _ns1__GetServiceCapabilities *ns1__GetServiceCapabilities,
+        _ns1__GetServiceCapabilitiesResponse &ns1__GetServiceCapabilitiesResponse) override;
+
 private:
     bool validateAuth();
     ServiceConfig cfg_;

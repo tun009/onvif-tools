@@ -211,3 +211,78 @@ int DeviceService::GetUsers(
 
     return SOAP_OK;
 }
+
+// ── GetServiceCapabilities ───────────────────────────────────────────────────
+// Profile T MANDATORY: Tool reads this (without credentials first) to determine
+// what security methods the device supports. HTTPDigest=true is required for
+// Profile T. If this returns NotAuthorized, the tool retries with credentials.
+int DeviceService::GetServiceCapabilities(
+    _tds__GetServiceCapabilities *tds__GetServiceCapabilities,
+    _tds__GetServiceCapabilitiesResponse &tds__GetServiceCapabilitiesResponse)
+{
+    (void)tds__GetServiceCapabilities;
+    this->soap->mustUnderstand = 0;
+    if (!validateAuth()) {
+        return soap_sender_fault_subcode(this->soap, "ter:NotAuthorized", "Sender", "Not Authorized");
+    }
+    this->soap->header = nullptr;
+    auto soap = this->soap;
+
+    auto caps = soap_new_tds__DeviceServiceCapabilities(soap);
+    if (!caps) return soap_receiver_fault(soap, "Memory allocation failed", nullptr);
+
+    // ── Network capabilities ─────────────────────────────────────────────
+    caps->Network = soap_new_tds__NetworkCapabilities(soap);
+    if (caps->Network) {
+        auto dynDNS = new bool(false);
+        caps->Network->DynDNS = dynDNS;
+        auto ipVersion6 = new bool(false);
+        caps->Network->IPVersion6 = ipVersion6;
+        auto zeroConf = new bool(false);
+        caps->Network->ZeroConfiguration = zeroConf;
+        auto ipFilter = new bool(false);
+        caps->Network->IPFilter = ipFilter;
+    }
+
+    // ── Security capabilities ────────────────────────────────────────────
+    // Profile T REQUIRES HTTPDigest = true
+    caps->Security = soap_new_tds__SecurityCapabilities(soap);
+    if (caps->Security) {
+        // HTTP Digest authentication - MANDATORY for Profile T
+        auto httpDigest = new bool(true);
+        caps->Security->HttpDigest = httpDigest;
+
+        // WS-UsernameToken - our current auth mechanism
+        auto usernameToken = new bool(true);
+        caps->Security->UsernameToken = usernameToken;
+
+        // TLS 1.2 - not supported in this mock
+        auto tls12 = new bool(false);
+        caps->Security->TLS12 = tls12;
+
+        // Onboard key generation - not supported
+        auto onboardKeyGen = new bool(false);
+        caps->Security->OnboardKeyGeneration = onboardKeyGen;
+    }
+
+    // ── System capabilities ──────────────────────────────────────────────
+    caps->System = soap_new_tds__SystemCapabilities(soap);
+    if (caps->System) {
+        auto discoveryBye = new bool(true);
+        caps->System->DiscoveryBye = discoveryBye;
+        auto discoveryResolve = new bool(true);
+        caps->System->DiscoveryResolve = discoveryResolve;
+        auto remoteDiscovery = new bool(false);
+        caps->System->RemoteDiscovery = remoteDiscovery;
+        auto systemBackup = new bool(false);
+        caps->System->SystemBackup = systemBackup;
+        auto systemLogging = new bool(false);
+        caps->System->SystemLogging = systemLogging;
+        auto firmwareUpgrade = new bool(false);
+        caps->System->FirmwareUpgrade = firmwareUpgrade;
+    }
+
+    tds__GetServiceCapabilitiesResponse.Capabilities = caps;
+    std::cout << "[DeviceService] GetServiceCapabilities → HTTPDigest=true, UsernameToken=true" << std::endl;
+    return SOAP_OK;
+}

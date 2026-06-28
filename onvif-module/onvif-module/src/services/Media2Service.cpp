@@ -366,4 +366,61 @@ int Media2Service::SetVideoEncoderConfiguration(
     return SOAP_OK;
 }
 
+// ── GetServiceCapabilities (Media2) ──────────────────────────────────────────
+// Profile T MANDATORY: Defines which Media2 streaming features this device supports.
+// Tool reads this during Define Features phase to decide which test cases to run.
+int Media2Service::GetServiceCapabilities(
+    _ns1__GetServiceCapabilities *req,
+    _ns1__GetServiceCapabilitiesResponse &resp)
+{
+    (void)req;
+    this->soap->mustUnderstand = 0;
+    if (!validateAuth()) {
+        return soap_sender_fault_subcode(this->soap, "ter:NotAuthorized", "Sender", "Not Authorized");
+    }
+    this->soap->header = nullptr;
+    auto soap = this->soap;
+
+    auto caps = soap_new_ns1__Capabilities(soap);
+    if (!caps) return soap_receiver_fault(soap, "Memory allocation failed", nullptr);
+
+    // ── Streaming capabilities ───────────────────────────────────────────
+    // RTSP Streaming - supported
+    auto rtsp = new bool(true);
+    caps->SnapshotUri = new bool(true);
+    caps->Rotation = new bool(false);
+    caps->VideoSourceMode = new bool(false);
+    caps->OSD = new bool(false);
+
+    // Profile T requires RTP multicast/unicast/RTSP
+    caps->ProfileCapabilities = soap_new_ns1__ProfileCapabilities(soap);
+    if (caps->ProfileCapabilities) {
+        caps->ProfileCapabilities->MaximumNumberOfProfiles = 3;
+    }
+
+    // Streaming capabilities
+    caps->StreamingCapabilities = soap_new_ns1__StreamingCapabilities(soap);
+    if (caps->StreamingCapabilities) {
+        // RTP over RTSP/TCP - supported
+        auto rtpOverRtsp = new bool(true);
+        caps->StreamingCapabilities->RTPOverRTSP = rtpOverRtsp;
+
+        // RTP multicast - not supported (requires multicast network setup)
+        auto rtpMulticast = new bool(false);
+        caps->StreamingCapabilities->RTPMulticast = rtpMulticast;
+
+        // No non-agg controls
+        auto noRtspStreaming = new bool(false);
+        caps->StreamingCapabilities->NonAggregateControl = noRtspStreaming;
+
+        // RTSP websockets - not supported
+        caps->StreamingCapabilities->RTSPWebSocketUri = nullptr;
+    }
+
+    resp.Capabilities = caps;
+    std::cout << "[Media2Service] GetServiceCapabilities → SnapshotUri=true, RTPOverRTSP=true" << std::endl;
+    return SOAP_OK;
+}
+
+
 

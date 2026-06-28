@@ -89,6 +89,8 @@ void OnvifServer::listenLoop() {
 
     // Gán bảng ánh xạ namespace cho context
     soap->namespaces = namespaces;
+    // Đăng ký namespace lỗi ONVIF để SOAP Fault Subcode/Value được serialize đúng chuẩn
+    soap_register_namespace(soap, "ter", "http://www.onvif.org/ver10/error");
     std::cout << "[OnvifServer] Active namespaces:" << std::endl;
     for (int i = 0; namespaces[i].id != nullptr; ++i) {
         std::cout << "  " << namespaces[i].id << " -> " 
@@ -130,6 +132,8 @@ void OnvifServer::listenLoop() {
 
         // Thiết lập cấu hình lại cho soap context sau khi bị Service constructors ghi đè/reset
         soap->namespaces = namespaces;
+        // Re-register ter namespace mỗi request (soap_end() giải phóng namespaces đăng ký động)
+        soap_register_namespace(soap, "ter", "http://www.onvif.org/ver10/error");
         soap->fheader = acceptMustUnderstandHeaders;
         soap->mustUnderstand = 0;
 
