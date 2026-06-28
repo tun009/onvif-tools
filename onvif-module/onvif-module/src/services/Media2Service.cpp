@@ -381,12 +381,10 @@ int Media2Service::GetServiceCapabilities(
     this->soap->header = nullptr;
     auto soap = this->soap;
 
-    auto caps = soap_new_ns1__Capabilities(soap);
+    auto caps = soap_new_ns1__Capabilities2(soap);
     if (!caps) return soap_receiver_fault(soap, "Memory allocation failed", nullptr);
 
     // ── Streaming capabilities ───────────────────────────────────────────
-    // RTSP Streaming - supported
-    auto rtsp = new bool(true);
     caps->SnapshotUri = new bool(true);
     caps->Rotation = new bool(false);
     caps->VideoSourceMode = new bool(false);
