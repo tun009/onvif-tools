@@ -60,6 +60,7 @@ struct Namespace namespaces[] = {
     {"tan","http://www.onvif.org/ver20/analytics/wsdl",NULL,NULL},
     {"tdn","http://www.onvif.org/ver10/network/wsdl",NULL,NULL},
     {"wsnt","http://docs.oasis-open.org/wsn/b-2",NULL,NULL},
+    {"ter","http://www.onvif.org/ver10/error",NULL,NULL},
     {NULL,NULL,NULL,NULL}
 };
 NSEOF
