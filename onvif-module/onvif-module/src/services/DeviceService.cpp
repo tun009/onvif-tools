@@ -10,8 +10,13 @@ DeviceBindingService* DeviceService::copy() {
     return new DeviceService(this->soap, cfg_, backend_);
 }
 
+extern thread_local bool g_http_digest_authenticated;
+
 // ── Authentication check ─────────────────────────────────────────────────────
 bool DeviceService::validateAuth() {
+    if (g_http_digest_authenticated) {
+        return true;
+    }
     WsSecurityHandler handler(cfg_.username, cfg_.password);
     return handler.validate(this->soap);
 }

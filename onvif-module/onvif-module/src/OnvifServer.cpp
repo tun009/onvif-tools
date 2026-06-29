@@ -18,6 +18,7 @@
 extern struct Namespace namespaces[];
 
 thread_local std::string g_current_headers;
+thread_local bool g_http_digest_authenticated = false;
 
 // ── Custom header handler ─────────────────────────────────────────────────────
 // gSOAP tự động fault khi nhận header có mustUnderstand="1" mà nó không
@@ -185,6 +186,7 @@ void OnvifServer::listenLoop() {
         }
         // ── Dispatch dựa trên URL path ────────────────────────────────
         g_current_headers.clear();
+        g_http_digest_authenticated = false;
         int serveResult = SOAP_OK;
         if (soap_begin_serve(soap) == SOAP_OK) {
             // Lấy path từ HTTP request (soap->path được gSOAP set sau soap_begin_serve)
@@ -212,7 +214,11 @@ void OnvifServer::listenLoop() {
                     soap_destroy(soap);
                     soap_end(soap);
                     continue;
+                } else {
+                    g_http_digest_authenticated = true;
                 }
+            } else {
+                g_http_digest_authenticated = true;
             }
 
             if (path.find("/onvif/event") != std::string::npos) {

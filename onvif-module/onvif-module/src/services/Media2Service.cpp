@@ -12,7 +12,12 @@ Media2BindingService* Media2Service::copy() {
     return new Media2Service(this->soap, cfg_, backend_);
 }
 
+extern thread_local bool g_http_digest_authenticated;
+
 bool Media2Service::validateAuth() {
+    if (g_http_digest_authenticated) {
+        return true;
+    }
     WsSecurityHandler handler(cfg_.username, cfg_.password);
     return handler.validate(this->soap);
 }
