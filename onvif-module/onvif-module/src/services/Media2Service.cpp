@@ -125,7 +125,11 @@ int Media2Service::GetStreamUri(
     this->soap->header = nullptr;
 
     std::string profileToken;
-    if (req) profileToken = req->ProfileToken;
+    std::string protocol;
+    if (req) {
+        profileToken = req->ProfileToken;
+        protocol = req->Protocol;
+    }
 
     StreamUri u;
     try {
@@ -143,8 +147,18 @@ int Media2Service::GetStreamUri(
     size_t pos = uri.find("127.0.0.1");
     if (pos != std::string::npos) uri.replace(pos, 9, cfg_.deviceIp);
 
+    // Hỗ trợ RTSP over HTTP tunneling theo yêu cầu của Test Tool
+    if (protocol == "RtspOverHttp" || protocol == "RtspOverHttps") {
+        std::string rtspPortStr = ":" + std::to_string(cfg_.rtspPort);
+        size_t portPos = uri.find(rtspPortStr);
+        if (portPos != std::string::npos) {
+            std::string httpPortStr = ":" + std::to_string(cfg_.httpPort);
+            uri.replace(portPos, rtspPortStr.length(), httpPortStr);
+        }
+    }
+
     resp.Uri = uri;
-    std::cout << "[Media2Service] GetStreamUri [" << profileToken << "] → " << uri << std::endl;
+    std::cout << "[Media2Service] GetStreamUri [" << profileToken << "] (protocol=" << protocol << ") → " << uri << std::endl;
     return SOAP_OK;
 }
 
@@ -322,9 +336,22 @@ int Media2Service::GetVideoEncoderConfigurationOptions(
     this->soap->header = nullptr;
     auto soap = this->soap;
 
-    auto opt = soap_new_tt__VideoEncoder2ConfigurationOptions(soap);
-    if (opt) {
-        opt->Encoding = "H264";
+    std::string configToken;
+    std::string profileToken;
+    if (req) {
+        if (req->ConfigurationToken) configToken = *req->ConfigurationToken;
+        if (req->ProfileToken) profileToken = *req->ProfileToken;
+    }
+
+    std::cout << "[Media2Service] GetVideoEncoderConfigurationOptions called for configToken=" 
+              << configToken << ", profileToken=" << profileToken << std::endl;
+
+    // Helper lambda để tạo Option cho một codec cụ thể
+    auto createOption = [&](const std::string& codecName) {
+        auto opt = soap_new_tt__VideoEncoder2ConfigurationOptions(soap);
+        if (!opt) return (tt__VideoEncoder2ConfigurationOptions*)nullptr;
+        
+        opt->Encoding = codecName;
         
         opt->QualityRange = soap_new_tt__FloatRange(soap);
         if (opt->QualityRange) {
@@ -332,23 +359,37 @@ int Media2Service::GetVideoEncoderConfigurationOptions(
             opt->QualityRange->Max = 100.0f;
         }
 
-        auto res = soap_new_tt__VideoResolution2(soap);
-        if (res) {
-            res->Width = 1920;
-            res->Height = 1080;
-            opt->ResolutionsAvailable.push_back(res);
+        // Cung cấp các độ phân giải khả dụng
+        std::vector<std::pair<int, int>> resolutions = {
+            {3840, 2160},
+            {1920, 1080},
+            {640, 480}
+        };
+        for (const auto& r : resolutions) {
+            auto res = soap_new_tt__VideoResolution2(soap);
+            if (res) {
+                res->Width = r.first;
+                res->Height = r.second;
+                opt->ResolutionsAvailable.push_back(res);
+            }
         }
 
         opt->BitrateRange = soap_new_tt__IntRange(soap);
         if (opt->BitrateRange) {
             opt->BitrateRange->Min = 64;
-            opt->BitrateRange->Max = 8192;
+            opt->BitrateRange->Max = 20000; // Bitrate tối đa cho 4K là 20000 kbps
         }
+        
+        return opt;
+    };
 
-        resp.Options.push_back(opt);
-    }
+    // Luôn trả về cả tùy chọn H264 và H265 để Test Tool có thể chọn lựa linh hoạt
+    auto optH264 = createOption("H264");
+    if (optH264) resp.Options.push_back(optH264);
 
-    std::cout << "[Media2Service] GetVideoEncoderConfigurationOptions called" << std::endl;
+    auto optH265 = createOption("H265");
+    if (optH265) resp.Options.push_back(optH265);
+
     return SOAP_OK;
 }
 
@@ -481,6 +522,22 @@ int Media2Service::GetServiceCapabilities(
 
     resp.Capabilities = caps;
     std::cout << "[Media2Service] GetServiceCapabilities → SnapshotUri=true, RTPOverRTSP=true" << std::endl;
+    return SOAP_OK;
+}
+
+// ── SetSynchronizationPoint ──────────────────────────────────────────────────
+int Media2Service::SetSynchronizationPoint(
+    _ns1__SetSynchronizationPoint *req,
+    _ns1__SetSynchronizationPointResponse &resp)
+{
+    (void)req;
+    (void)resp;
+    this->soap->mustUnderstand = 0;
+    if (!validateAuth()) {
+        return soap_sender_fault_subcode(this->soap, "ter:NotAuthorized", "Sender", "Not Authorized");
+    }
+    this->soap->header = nullptr;
+    std::cout << "[Media2Service] SetSynchronizationPoint called" << std::endl;
     return SOAP_OK;
 }
 

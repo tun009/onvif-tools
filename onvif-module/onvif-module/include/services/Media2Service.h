@@ -60,6 +60,10 @@ public:
         _ns1__SetVideoEncoderConfiguration *ns1__SetVideoEncoderConfiguration,
         ns1__SetConfigurationResponse &ns1__SetVideoEncoderConfigurationResponse) override;
 
+    virtual int SetSynchronizationPoint(
+        _ns1__SetSynchronizationPoint *ns1__SetSynchronizationPoint,
+        _ns1__SetSynchronizationPointResponse &ns1__SetSynchronizationPointResponse) override;
+
     virtual int GetServiceCapabilities(
         _ns1__GetServiceCapabilities *ns1__GetServiceCapabilities,
         _ns1__GetServiceCapabilitiesResponse &ns1__GetServiceCapabilitiesResponse) override;
