@@ -155,6 +155,12 @@ int Media2Service::GetStreamUri(
             std::string httpPortStr = ":" + std::to_string(cfg_.httpPort);
             uri.replace(portPos, rtspPortStr.length(), httpPortStr);
         }
+
+        // Thay đổi scheme từ rtsp:// thành http:// hoặc https:// tương ứng
+        if (uri.rfind("rtsp://", 0) == 0) {
+            std::string targetScheme = (protocol == "RtspOverHttps") ? "https://" : "http://";
+            uri.replace(0, 7, targetScheme);
+        }
     }
 
     resp.Uri = uri;
