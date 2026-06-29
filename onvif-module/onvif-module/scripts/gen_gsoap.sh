@@ -131,6 +131,27 @@ if [ ! -f "$EXT_DIR/plugin/wsddapi.cpp" ]; then
     fi
 fi
 
+# Ensure custom serializers exist in external/gsoap/custom/
+mkdir -p "$EXT_DIR/custom"
+rm -f "$EXT_DIR/custom"/*  # Dọn dẹp các file cũ gây lỗi compile
+if [ ! -f "$EXT_DIR/custom/struct_timeval.cpp" ] && [ ! -f "$EXT_DIR/custom/struct_timeval.c" ]; then
+    echo "[INFO] Copying required gSOAP custom serializers (struct_timeval) to external/gsoap/custom/..."
+    for candidate in \
+        /usr/share/gsoap/custom \
+        /usr/local/share/gsoap/custom \
+        "$CONDA_PREFIX/share/gsoap/custom"; do
+        if [ -d "$candidate" ]; then
+            for f in struct_timeval.c struct_timeval.cpp duration.c duration.cpp; do
+                if [ -f "$candidate/$f" ]; then
+                    cp "$candidate/$f" "$EXT_DIR/custom/"
+                fi
+            done
+            echo "  Copied required custom serializers from $candidate"
+            break
+        fi
+    done
+fi
+
 # Ensure imports exist in external/gsoap/import/
 mkdir -p "$EXT_DIR/import"
 if [ ! -f "$EXT_DIR/import/wsse.h" ]; then
