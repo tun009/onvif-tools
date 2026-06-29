@@ -13,6 +13,7 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <fcntl.h>
 #endif
 
 extern struct Namespace namespaces[];
@@ -24,6 +25,18 @@ thread_local bool g_http_digest_authenticated = false;
 #include <map>
 #include <mutex>
 #include <algorithm>
+
+static void setSocketBlocking(SOAP_SOCKET sock) {
+#ifdef _WIN32
+    u_long mode = 0;
+    ioctlsocket(sock, FIONBIO, &mode);
+#else
+    int flags = fcntl(sock, F_GETFL, 0);
+    if (flags != -1) {
+        fcntl(sock, F_SETFL, flags & ~O_NONBLOCK);
+    }
+#endif
+}
 
 static std::map<std::string, SOAP_SOCKET> g_get_sessions;
 static std::mutex g_sessions_mutex;
@@ -114,6 +127,8 @@ static std::string base64_decode(std::string const& encoded_string) {
 
 // Thread 1: Đọc Base64 từ POST socket, giải mã và gửi raw sang MediaMTX
 static void decodeAndForward(SOAP_SOCKET postSock, SOAP_SOCKET mtxSock) {
+    setSocketBlocking(postSock);
+    setSocketBlocking(mtxSock);
     std::cout << "[Proxy-POST] Thread started." << std::endl;
     char buf[8192];
     std::string headerAccumulator;
@@ -123,7 +138,8 @@ static void decodeAndForward(SOAP_SOCKET postSock, SOAP_SOCKET mtxSock) {
     while (true) {
         int n = recv(postSock, buf, sizeof(buf) - 1, 0);
         if (n <= 0) {
-            std::cout << "[Proxy-POST] Recv failed or closed in header reading, n=" << n << std::endl;
+            std::cout << "[Proxy-POST] Recv failed or closed in header reading, n=" << n 
+                      << ", errno=" << errno << " (" << strerror(errno) << ")" << std::endl;
 #ifdef _WIN32
             closesocket(postSock);
             closesocket(mtxSock);
@@ -195,7 +211,8 @@ static void decodeAndForward(SOAP_SOCKET postSock, SOAP_SOCKET mtxSock) {
     while (true) {
         int n = recv(postSock, buf, sizeof(buf), 0);
         if (n <= 0) {
-            std::cout << "[Proxy-POST] Recv body finished or connection closed, n=" << n << std::endl;
+            std::cout << "[Proxy-POST] Recv body finished or connection closed, n=" << n 
+                      << ", errno=" << errno << " (" << strerror(errno) << ")" << std::endl;
             break;
         }
         std::cout << "[Proxy-POST] Recv " << n << " Base64 bytes from client..." << std::endl;
@@ -241,12 +258,15 @@ static void decodeAndForward(SOAP_SOCKET postSock, SOAP_SOCKET mtxSock) {
 
 // Thread 2: Đọc raw từ MediaMTX, mã hóa Base64 và gửi sang GET socket
 static void encodeAndForward(SOAP_SOCKET mtxSock, SOAP_SOCKET getSock) {
+    setSocketBlocking(mtxSock);
+    setSocketBlocking(getSock);
     std::cout << "[Proxy-GET] Thread started." << std::endl;
     unsigned char buf[4096];
     while (true) {
         int n = recv(mtxSock, (char*)buf, sizeof(buf), 0);
         if (n <= 0) {
-            std::cout << "[Proxy-GET] Recv from MediaMTX finished or closed, n=" << n << std::endl;
+            std::cout << "[Proxy-GET] Recv from MediaMTX finished or closed, n=" << n 
+                      << ", errno=" << errno << " (" << strerror(errno) << ")" << std::endl;
             break;
         }
         std::cout << "[Proxy-GET] Recv " << n << " raw bytes from MediaMTX..." << std::endl;
