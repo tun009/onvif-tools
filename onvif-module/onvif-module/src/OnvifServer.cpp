@@ -20,60 +20,172 @@ extern struct Namespace namespaces[];
 thread_local std::string g_current_headers;
 thread_local bool g_http_digest_authenticated = false;
 
-// ── TCP Proxy Helpers for RTSP-over-HTTP Tunneling ──────────────────────────
-static void forwardSocketData(SOAP_SOCKET fromSock, SOAP_SOCKET toSock) {
+// ── Base64 Encoder / Decoder and RTSP-over-HTTP Tunnel Proxy ──────────────────
+#include <map>
+#include <mutex>
+#include <algorithm>
+
+static std::map<std::string, SOAP_SOCKET> g_get_sessions;
+static std::mutex g_sessions_mutex;
+
+static const std::string base64_chars = 
+             "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+             "abcdefghijklmnopqrstuvwxyz"
+             "0123456789+/";
+
+static inline bool is_base64(unsigned char c) {
+    return (isalnum(c) || (c == '+') || (c == '/'));
+}
+
+static std::string base64_encode(unsigned char const* bytes_to_encode, unsigned int in_len) {
+    std::string ret;
+    int i = 0;
+    int j = 0;
+    unsigned char char_array_3[3];
+    unsigned char char_array_4[4];
+
+    while (in_len--) {
+        char_array_3[i++] = *(bytes_to_encode++);
+        if (i == 3) {
+            char_array_4[0] = (char_array_3[0] & 0xfc) >> 2;
+            char_array_4[1] = ((char_array_3[0] & 0x03) << 4) + ((char_array_3[1] & 0xf0) >> 4);
+            char_array_4[2] = ((char_array_3[1] & 0x0f) << 2) + ((char_array_3[2] & 0xc0) >> 6);
+            char_array_4[3] = char_array_3[2] & 0x3f;
+
+            for(i = 0; (i < 4) ; i++)
+                ret += base64_chars[char_array_4[i]];
+            i = 0;
+        }
+    }
+
+    if (i) {
+        for(j = i; j < 3; j++)
+            char_array_3[j] = '\0';
+
+        char_array_4[0] = (char_array_3[0] & 0xfc) >> 2;
+        char_array_4[1] = ((char_array_3[0] & 0x03) << 4) + ((char_array_3[1] & 0xf0) >> 4);
+        char_array_4[2] = ((char_array_3[1] & 0x0f) << 2) + ((char_array_3[2] & 0xc0) >> 6);
+        char_array_4[3] = char_array_3[2] & 0x3f;
+
+        for (j = 0; (j < i + 1); j++)
+            ret += base64_chars[char_array_4[j]];
+
+        while((i++ < 3))
+            ret += '=';
+    }
+
+    return ret;
+}
+
+static std::string base64_decode(std::string const& encoded_string) {
+    int in_len = encoded_string.size();
+    int i = 0;
+    int j = 0;
+    int in_ = 0;
+    unsigned char char_array_4[4], char_array_3[3];
+    std::string ret;
+
+    while (in_len-- && (encoded_string[in_] != '=') && is_base64(encoded_string[in_])) {
+        char_array_4[i++] = encoded_string[in_]; in_++;
+        if (i == 4) {
+            for (i = 0; i < 4; i++)
+                char_array_4[i] = base64_chars.find(char_array_4[i]);
+
+            char_array_3[0] = (char_array_4[0] << 2) + ((char_array_4[1] & 0x30) >> 4);
+            char_array_3[1] = ((char_array_4[1] & 0xf) << 4) + ((char_array_4[2] & 0x3c) >> 2);
+            char_array_3[2] = ((char_array_4[2] & 0x3) << 6) + char_array_4[3];
+
+            for (i = 0; (i < 3); i++)
+                ret += char_array_3[i];
+            i = 0;
+        }
+    }
+
+    if (i) {
+        for (j = i; j < 4; j++)
+            char_array_4[j] = 0;
+
+        for (j = 0; j < 4; j++)
+            char_array_4[j] = base64_chars.find(char_array_4[j]);
+
+        char_array_3[0] = (char_array_4[0] << 2) + ((char_array_4[1] & 0x30) >> 4);
+        char_array_3[1] = ((char_array_4[1] & 0xf) << 4) + ((char_array_4[2] & 0x3c) >> 2);
+        char_array_3[2] = ((char_array_4[2] & 0x3) << 6) + char_array_4[3];
+
+        for (j = 0; (j < i - 1); j++) 
+            ret += char_array_3[j];
+    }
+
+    return ret;
+}
+
+// Thread 1: Đọc Base64 từ POST socket, giải mã và gửi raw sang MediaMTX
+static void decodeAndForward(SOAP_SOCKET postSock, SOAP_SOCKET mtxSock) {
     char buf[8192];
+    std::string accumulator;
     while (true) {
-        int n = recv(fromSock, buf, sizeof(buf), 0);
+        int n = recv(postSock, buf, sizeof(buf), 0);
         if (n <= 0) break;
-        int sent = 0;
-        while (sent < n) {
-            int w = send(toSock, buf + sent, n - sent, 0);
-            if (w <= 0) break;
-            sent += w;
+        
+        for (int i = 0; i < n; ++i) {
+            char c = buf[i];
+            if (is_base64(c) || c == '=') {
+                accumulator += c;
+            }
+        }
+        
+        size_t len = accumulator.length();
+        size_t processLen = len - (len % 4);
+        if (processLen > 0) {
+            std::string toDecode = accumulator.substr(0, processLen);
+            accumulator = accumulator.substr(processLen);
+            
+            std::string raw = base64_decode(toDecode);
+            if (!raw.empty()) {
+                int sent = 0;
+                int total = raw.size();
+                while (sent < total) {
+                    int w = send(mtxSock, raw.data() + sent, total - sent, 0);
+                    if (w <= 0) break;
+                    sent += w;
+                }
+            }
         }
     }
 #ifdef _WIN32
-    closesocket(fromSock);
-    closesocket(toSock);
+    closesocket(postSock);
+    closesocket(mtxSock);
 #else
-    close(fromSock);
-    close(toSock);
+    close(postSock);
+    close(mtxSock);
 #endif
 }
 
-static void handleHttpTunnelProxy(SOAP_SOCKET clientSocket, int rtspPort) {
-    SOAP_SOCKET mtxSocket = socket(AF_INET, SOCK_STREAM, 0);
-    if (mtxSocket == SOAP_INVALID_SOCKET) {
-#ifdef _WIN32
-        closesocket(clientSocket);
-#else
-        close(clientSocket);
-#endif
-        return;
+// Thread 2: Đọc raw từ MediaMTX, mã hóa Base64 và gửi sang GET socket
+static void encodeAndForward(SOAP_SOCKET mtxSock, SOAP_SOCKET getSock) {
+    unsigned char buf[4096];
+    while (true) {
+        int n = recv(mtxSock, (char*)buf, sizeof(buf), 0);
+        if (n <= 0) break;
+        
+        std::string b64 = base64_encode(buf, n);
+        if (!b64.empty()) {
+            int sent = 0;
+            int total = b64.size();
+            while (sent < total) {
+                int w = send(getSock, b64.data() + sent, total - sent, 0);
+                if (w <= 0) break;
+                sent += w;
+            }
+        }
     }
-
-    struct sockaddr_in addr;
-    std::memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(rtspPort);
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-
-    if (connect(mtxSocket, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
 #ifdef _WIN32
-        closesocket(clientSocket);
-        closesocket(mtxSocket);
+    closesocket(mtxSock);
+    closesocket(getSock);
 #else
-        close(clientSocket);
-        close(mtxSocket);
+    close(mtxSock);
+    close(getSock);
 #endif
-        return;
-    }
-
-    std::thread t1(forwardSocketData, clientSocket, mtxSocket);
-    std::thread t2(forwardSocketData, mtxSocket, clientSocket);
-    t1.detach();
-    t2.detach();
 }
 
 // ── Custom header handler ─────────────────────────────────────────────────────
@@ -226,12 +338,13 @@ void OnvifServer::listenLoop() {
         FD_SET(clientSocket, &rfds);
         
         bool isRtspTunnel = false;
+        std::string requestStr;
         if (select((int)clientSocket + 1, &rfds, nullptr, nullptr, &tv) > 0) {
             char peekBuf[1024];
             std::memset(peekBuf, 0, sizeof(peekBuf));
             int peekLen = recv(clientSocket, peekBuf, sizeof(peekBuf) - 1, MSG_PEEK);
             if (peekLen > 0) {
-                std::string requestStr(peekBuf, peekLen);
+                requestStr.assign(peekBuf, peekLen);
                 if (requestStr.find("x-rtsp-tunnelled") != std::string::npos ||
                     requestStr.find("application/x-rtsp-tunnelled") != std::string::npos ||
                     (requestStr.find("GET ") == 0 && requestStr.find("/onvif") == std::string::npos && requestStr.find("HTTP/") != std::string::npos) ||
@@ -242,9 +355,121 @@ void OnvifServer::listenLoop() {
         }
 
         if (isRtspTunnel) {
-            std::cout << "[OnvifServer] Detected RTSP-over-HTTP tunnel request. Proxying to MediaMTX on port " << cfg_.rtspPort << "..." << std::endl;
-            handleHttpTunnelProxy(clientSocket, cfg_.rtspPort);
-            // Hijack socket thành công, giải phóng khỏi gSOAP
+            // Trích xuất x-sessioncookie từ request header
+            std::string cookie;
+            size_t cookiePos = requestStr.find("x-sessioncookie:");
+            if (cookiePos == std::string::npos) {
+                cookiePos = requestStr.find("X-SessionCookie:");
+            }
+            if (cookiePos != std::string::npos) {
+                size_t start = cookiePos + 16;
+                while (start < requestStr.length() && (requestStr[start] == ' ' || requestStr[start] == '\t')) {
+                    start++;
+                }
+                size_t end = start;
+                while (end < requestStr.length() && requestStr[end] != '\r' && requestStr[end] != '\n') {
+                    end++;
+                }
+                cookie = requestStr.substr(start, end - start);
+            }
+
+            bool isGet = (requestStr.find("GET ") == 0);
+            bool isPost = (requestStr.find("POST ") == 0);
+
+            if (!cookie.empty()) {
+                if (isGet) {
+                    std::cout << "[OnvifServer] RTSP-over-HTTP GET tunnel request. Cookie=" << cookie << std::endl;
+                    
+                    // Trả về HTTP 200 OK Content-Type: application/x-rtsp-tunnelled
+                    std::string resp = "HTTP/1.1 200 OK\r\n"
+                                       "Server: MockONVIF\r\n"
+                                       "Connection: close\r\n"
+                                       "Cache-Control: no-store\r\n"
+                                       "Pragma: no-cache\r\n"
+                                       "Content-Type: application/x-rtsp-tunnelled\r\n\r\n";
+                    send(clientSocket, resp.data(), resp.size(), 0);
+
+                    // Lưu GET socket vào session map
+                    {
+                        std::lock_guard<std::mutex> lock(g_sessions_mutex);
+                        g_get_sessions[cookie] = clientSocket;
+                    }
+                    
+                    // Giải phóng khỏi gSOAP mà không đóng socket
+                    soap->socket = SOAP_INVALID_SOCKET;
+                    soap_destroy(soap);
+                    soap_end(soap);
+                    continue;
+                }
+                else if (isPost) {
+                    std::cout << "[OnvifServer] RTSP-over-HTTP POST tunnel request. Cookie=" << cookie << std::endl;
+                    
+                    SOAP_SOCKET getSock = SOAP_INVALID_SOCKET;
+                    {
+                        std::lock_guard<std::mutex> lock(g_sessions_mutex);
+                        auto it = g_get_sessions.find(cookie);
+                        if (it != g_get_sessions.end()) {
+                            getSock = it->second;
+                            g_get_sessions.erase(it);
+                        }
+                    }
+
+                    if (getSock != SOAP_INVALID_SOCKET) {
+                        // Kết nối tới MediaMTX (localhost:8554)
+                        SOAP_SOCKET mtxSocket = socket(AF_INET, SOCK_STREAM, 0);
+                        bool connected = false;
+                        if (mtxSocket != SOAP_INVALID_SOCKET) {
+                            struct sockaddr_in addr;
+                            std::memset(&addr, 0, sizeof(addr));
+                            addr.sin_family = AF_INET;
+                            addr.sin_port = htons(cfg_.rtspPort);
+                            addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+
+                            if (connect(mtxSocket, (struct sockaddr*)&addr, sizeof(addr)) >= 0) {
+                                connected = true;
+                            }
+                        }
+
+                        if (connected) {
+                            // Trả về HTTP 200 OK cho POST request
+                            std::string resp = "HTTP/1.1 200 OK\r\n"
+                                               "Server: MockONVIF\r\n"
+                                               "Connection: close\r\n"
+                                               "Content-Length: 0\r\n\r\n";
+                            send(clientSocket, resp.data(), resp.size(), 0);
+
+                            std::cout << "[OnvifServer] Successfully paired GET & POST sockets. Starting Base64 Proxy to MediaMTX on port " << cfg_.rtspPort << "..." << std::endl;
+                            // Chạy 2 thread chuyển tiếp Base64 <-> Raw
+                            std::thread(decodeAndForward, clientSocket, mtxSocket).detach();
+                            std::thread(encodeAndForward, mtxSocket, getSock).detach();
+                            
+                            // Cả 2 socket đã giao cho thread quản lý
+                            soap->socket = SOAP_INVALID_SOCKET;
+                            soap_destroy(soap);
+                            soap_end(soap);
+                            continue;
+                        } else {
+                            std::cerr << "[OnvifServer] Failed to connect to MediaMTX on port " << cfg_.rtspPort << std::endl;
+                            if (mtxSocket != SOAP_INVALID_SOCKET) {
+#ifdef _WIN32
+                                closesocket(mtxSocket);
+#else
+                                close(mtxSocket);
+#endif
+                            }
+                        }
+                    } else {
+                        std::cerr << "[OnvifServer] Received POST tunnel but no matching GET tunnel found for cookie=" << cookie << std::endl;
+                    }
+                }
+            }
+
+            // Nếu cookie trống hoặc xử lý lỗi, đóng client socket
+#ifdef _WIN32
+            closesocket(clientSocket);
+#else
+            close(clientSocket);
+#endif
             soap->socket = SOAP_INVALID_SOCKET;
             soap_destroy(soap);
             soap_end(soap);
