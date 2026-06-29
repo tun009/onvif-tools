@@ -145,6 +145,23 @@ if [ ! -f "$EXT_DIR/import/wsse.h" ]; then
     fi
 fi
 
+# Ensure custom serializers exist in external/gsoap/custom/
+mkdir -p "$EXT_DIR/custom"
+if [ ! -f "$EXT_DIR/custom/struct_timeval.cpp" ] && [ ! -f "$EXT_DIR/custom/struct_timeval.c" ]; then
+    echo "[INFO] Copying gSOAP custom serializers to external/gsoap/custom/..."
+    for candidate in \
+        /usr/share/gsoap/custom \
+        /usr/local/share/gsoap/custom \
+        "$CONDA_PREFIX/share/gsoap/custom"; do
+        if [ -d "$candidate" ]; then
+            cp "$candidate"/*.cpp "$EXT_DIR/custom/" 2>/dev/null || true
+            cp "$candidate"/*.c "$EXT_DIR/custom/" 2>/dev/null || true
+            echo "  Copied custom serializers from $candidate"
+            break
+        fi
+    done
+fi
+
 # Patch wsa5.h: gSOAP 2.8.91's wsa5.h has #import "wsa.h" internally.
 # Both define SOAP_ENV__Fault → soapcpp2 semantic error.
 # Copy wsa5.h to our import dir (independent of wsse.h check above) then patch it.
