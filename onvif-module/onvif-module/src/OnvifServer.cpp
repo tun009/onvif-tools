@@ -20,6 +20,62 @@ extern struct Namespace namespaces[];
 thread_local std::string g_current_headers;
 thread_local bool g_http_digest_authenticated = false;
 
+// ── TCP Proxy Helpers for RTSP-over-HTTP Tunneling ──────────────────────────
+static void forwardSocketData(SOAP_SOCKET fromSock, SOAP_SOCKET toSock) {
+    char buf[8192];
+    while (true) {
+        int n = recv(fromSock, buf, sizeof(buf), 0);
+        if (n <= 0) break;
+        int sent = 0;
+        while (sent < n) {
+            int w = send(toSock, buf + sent, n - sent, 0);
+            if (w <= 0) break;
+            sent += w;
+        }
+    }
+#ifdef _WIN32
+    closesocket(fromSock);
+    closesocket(toSock);
+#else
+    close(fromSock);
+    close(toSock);
+#endif
+}
+
+static void handleHttpTunnelProxy(SOAP_SOCKET clientSocket, int rtspPort) {
+    SOAP_SOCKET mtxSocket = socket(AF_INET, SOCK_STREAM, 0);
+    if (mtxSocket == SOAP_INVALID_SOCKET) {
+#ifdef _WIN32
+        closesocket(clientSocket);
+#else
+        close(clientSocket);
+#endif
+        return;
+    }
+
+    struct sockaddr_in addr;
+    std::memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(rtspPort);
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+
+    if (connect(mtxSocket, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+#ifdef _WIN32
+        closesocket(clientSocket);
+        closesocket(mtxSocket);
+#else
+        close(clientSocket);
+        close(mtxSocket);
+#endif
+        return;
+    }
+
+    std::thread t1(forwardSocketData, clientSocket, mtxSocket);
+    std::thread t2(forwardSocketData, mtxSocket, clientSocket);
+    t1.detach();
+    t2.detach();
+}
+
 // ── Custom header handler ─────────────────────────────────────────────────────
 // gSOAP tự động fault khi nhận header có mustUnderstand="1" mà nó không
 // nhận ra. ONVIF tool luôn gửi wsse:Security với mustUnderstand="1".
@@ -153,12 +209,46 @@ void OnvifServer::listenLoop() {
     std::cout << "[OnvifServer] Listening on port " << cfg_.httpPort << std::endl;
 
     while (running_) {
-        int clientSocket = soap_accept(soap);
-        if (clientSocket < 0) {
+        SOAP_SOCKET clientSocket = soap_accept(soap);
+        if (clientSocket == SOAP_INVALID_SOCKET) {
             if (soap->errnum == 0) continue; // Hết timeout, lặp lại
             if (!running_) break;            // Đã dừng
             std::cerr << "[OnvifServer] soap_accept failed" << std::endl;
             break;
+        }
+
+        // Kiểm tra xem có phải là RTSP over HTTP tunnel request không
+        struct timeval tv;
+        tv.tv_sec = 0;
+        tv.tv_usec = 100000; // Đợi tối đa 100ms
+        fd_set rfds;
+        FD_ZERO(&rfds);
+        FD_SET(clientSocket, &rfds);
+        
+        bool isRtspTunnel = false;
+        if (select((int)clientSocket + 1, &rfds, nullptr, nullptr, &tv) > 0) {
+            char peekBuf[1024];
+            std::memset(peekBuf, 0, sizeof(peekBuf));
+            int peekLen = recv(clientSocket, peekBuf, sizeof(peekBuf) - 1, MSG_PEEK);
+            if (peekLen > 0) {
+                std::string requestStr(peekBuf, peekLen);
+                if (requestStr.find("x-rtsp-tunnelled") != std::string::npos ||
+                    requestStr.find("application/x-rtsp-tunnelled") != std::string::npos ||
+                    (requestStr.find("GET ") == 0 && requestStr.find("/onvif") == std::string::npos && requestStr.find("HTTP/") != std::string::npos) ||
+                    (requestStr.find("POST ") == 0 && requestStr.find("/onvif") == std::string::npos && requestStr.find("HTTP/") != std::string::npos)) {
+                    isRtspTunnel = true;
+                }
+            }
+        }
+
+        if (isRtspTunnel) {
+            std::cout << "[OnvifServer] Detected RTSP-over-HTTP tunnel request. Proxying to MediaMTX on port " << cfg_.rtspPort << "..." << std::endl;
+            handleHttpTunnelProxy(clientSocket, cfg_.rtspPort);
+            // Hijack socket thành công, giải phóng khỏi gSOAP
+            soap->socket = SOAP_INVALID_SOCKET;
+            soap_destroy(soap);
+            soap_end(soap);
+            continue;
         }
 
         // ── Khởi tạo các Service trước để tránh constructor reset state của soap context ────────────────
