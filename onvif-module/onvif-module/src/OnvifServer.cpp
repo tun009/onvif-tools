@@ -114,6 +114,7 @@ static std::string base64_decode(std::string const& encoded_string) {
 
 // Thread 1: Đọc Base64 từ POST socket, giải mã và gửi raw sang MediaMTX
 static void decodeAndForward(SOAP_SOCKET postSock, SOAP_SOCKET mtxSock) {
+    std::cout << "[Proxy-POST] Thread started." << std::endl;
     char buf[8192];
     std::string headerAccumulator;
     size_t bodyStartPos = std::string::npos;
@@ -122,6 +123,7 @@ static void decodeAndForward(SOAP_SOCKET postSock, SOAP_SOCKET mtxSock) {
     while (true) {
         int n = recv(postSock, buf, sizeof(buf) - 1, 0);
         if (n <= 0) {
+            std::cout << "[Proxy-POST] Recv failed or closed in header reading, n=" << n << std::endl;
 #ifdef _WIN32
             closesocket(postSock);
             closesocket(mtxSock);
@@ -137,11 +139,13 @@ static void decodeAndForward(SOAP_SOCKET postSock, SOAP_SOCKET mtxSock) {
         size_t pos = headerAccumulator.find("\r\n\r\n");
         if (pos != std::string::npos) {
             bodyStartPos = pos + 4;
+            std::cout << "[Proxy-POST] Found end of HTTP header. Total header bytes read: " << bodyStartPos << std::endl;
             break;
         }
         
         // Đề phòng header quá lớn bất thường
         if (headerAccumulator.length() > 16384) {
+            std::cout << "[Proxy-POST] Header too large, aborting." << std::endl;
 #ifdef _WIN32
             closesocket(postSock);
             closesocket(mtxSock);
@@ -157,6 +161,7 @@ static void decodeAndForward(SOAP_SOCKET postSock, SOAP_SOCKET mtxSock) {
     std::string accumulator;
     if (bodyStartPos != std::string::npos && bodyStartPos < headerAccumulator.length()) {
         std::string initialBody = headerAccumulator.substr(bodyStartPos);
+        std::cout << "[Proxy-POST] Found leftover body in header packet, size=" << initialBody.size() << " bytes." << std::endl;
         for (char c : initialBody) {
             if (is_base64(c) || c == '=') {
                 accumulator += c;
@@ -171,11 +176,15 @@ static void decodeAndForward(SOAP_SOCKET postSock, SOAP_SOCKET mtxSock) {
             
             std::string raw = base64_decode(toDecode);
             if (!raw.empty()) {
+                std::cout << "[Proxy-POST] Decoded & sending leftover body raw size=" << raw.size() << " bytes to MediaMTX..." << std::endl;
                 int sent = 0;
                 int total = raw.size();
                 while (sent < total) {
                     int w = send(mtxSock, raw.data() + sent, total - sent, 0);
-                    if (w <= 0) break;
+                    if (w <= 0) {
+                        std::cout << "[Proxy-POST] Send leftover to MediaMTX failed, w=" << w << std::endl;
+                        break;
+                    }
                     sent += w;
                 }
             }
@@ -185,7 +194,11 @@ static void decodeAndForward(SOAP_SOCKET postSock, SOAP_SOCKET mtxSock) {
     // 3. Tiếp tục đọc body và giải mã Base64 sang raw gửi tới MediaMTX
     while (true) {
         int n = recv(postSock, buf, sizeof(buf), 0);
-        if (n <= 0) break;
+        if (n <= 0) {
+            std::cout << "[Proxy-POST] Recv body finished or connection closed, n=" << n << std::endl;
+            break;
+        }
+        std::cout << "[Proxy-POST] Recv " << n << " Base64 bytes from client..." << std::endl;
         
         for (int i = 0; i < n; ++i) {
             char c = buf[i];
@@ -202,16 +215,21 @@ static void decodeAndForward(SOAP_SOCKET postSock, SOAP_SOCKET mtxSock) {
             
             std::string raw = base64_decode(toDecode);
             if (!raw.empty()) {
+                std::cout << "[Proxy-POST] Decoded & sending raw size=" << raw.size() << " bytes to MediaMTX..." << std::endl;
                 int sent = 0;
                 int total = raw.size();
                 while (sent < total) {
                     int w = send(mtxSock, raw.data() + sent, total - sent, 0);
-                    if (w <= 0) break;
+                    if (w <= 0) {
+                        std::cout << "[Proxy-POST] Send to MediaMTX failed, w=" << w << std::endl;
+                        break;
+                    }
                     sent += w;
                 }
             }
         }
     }
+    std::cout << "[Proxy-POST] Thread exiting." << std::endl;
 #ifdef _WIN32
     closesocket(postSock);
     closesocket(mtxSock);
@@ -223,22 +241,32 @@ static void decodeAndForward(SOAP_SOCKET postSock, SOAP_SOCKET mtxSock) {
 
 // Thread 2: Đọc raw từ MediaMTX, mã hóa Base64 và gửi sang GET socket
 static void encodeAndForward(SOAP_SOCKET mtxSock, SOAP_SOCKET getSock) {
+    std::cout << "[Proxy-GET] Thread started." << std::endl;
     unsigned char buf[4096];
     while (true) {
         int n = recv(mtxSock, (char*)buf, sizeof(buf), 0);
-        if (n <= 0) break;
+        if (n <= 0) {
+            std::cout << "[Proxy-GET] Recv from MediaMTX finished or closed, n=" << n << std::endl;
+            break;
+        }
+        std::cout << "[Proxy-GET] Recv " << n << " raw bytes from MediaMTX..." << std::endl;
         
         std::string b64 = base64_encode(buf, n);
         if (!b64.empty()) {
+            std::cout << "[Proxy-GET] Encoded & sending " << b64.size() << " Base64 bytes to GET client..." << std::endl;
             int sent = 0;
             int total = b64.size();
             while (sent < total) {
                 int w = send(getSock, b64.data() + sent, total - sent, 0);
-                if (w <= 0) break;
+                if (w <= 0) {
+                    std::cout << "[Proxy-GET] Send to GET client failed, w=" << w << std::endl;
+                    break;
+                }
                 sent += w;
             }
         }
     }
+    std::cout << "[Proxy-GET] Thread exiting." << std::endl;
 #ifdef _WIN32
     closesocket(mtxSock);
     closesocket(getSock);
