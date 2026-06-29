@@ -160,13 +160,31 @@ static void decodeAndForward(SOAP_SOCKET postSock, SOAP_SOCKET mtxSock) {
         }
     }
     
-    // 2. Lấy phần body thừa đã lỡ đọc được ở bước 1
+    // 2. Lấy phần body thừa đã lỡ đọc được ở bước 1 và giải mã/gửi đi ngay
     std::string accumulator;
     if (bodyStartPos != std::string::npos && bodyStartPos < headerAccumulator.length()) {
         std::string initialBody = headerAccumulator.substr(bodyStartPos);
         for (char c : initialBody) {
             if (is_base64(c) || c == '=') {
                 accumulator += c;
+            }
+        }
+        
+        size_t len = accumulator.length();
+        size_t processLen = len - (len % 4);
+        if (processLen > 0) {
+            std::string toDecode = accumulator.substr(0, processLen);
+            accumulator = accumulator.substr(processLen);
+            
+            std::string raw = base64_decode(toDecode);
+            if (!raw.empty()) {
+                int sent = 0;
+                int total = raw.size();
+                while (sent < total) {
+                    int w = send(mtxSock, raw.data() + sent, total - sent, 0);
+                    if (w <= 0) break;
+                    sent += w;
+                }
             }
         }
     }
