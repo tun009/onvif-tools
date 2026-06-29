@@ -1,6 +1,8 @@
 #include "OnvifServer.h"
 #include "services/Media2Service.h"
 #include "soapH.h"
+#include "auth/DigestAuthHandler.h"
+#include "services/MockSubscriptionManager.h"
 #include <iostream>
 #include <cstring>
 #include <string>
@@ -15,6 +17,8 @@
 
 extern struct Namespace namespaces[];
 
+thread_local std::string g_current_headers;
+
 // ── Custom header handler ─────────────────────────────────────────────────────
 // gSOAP tự động fault khi nhận header có mustUnderstand="1" mà nó không
 // nhận ra. ONVIF tool luôn gửi wsse:Security với mustUnderstand="1".
@@ -24,12 +28,24 @@ static int acceptMustUnderstandHeaders(struct soap* soap) {
     return SOAP_OK; // Mark all headers as "understood"
 }
 
+static bool isAuthRequired(const std::string& headers) {
+    // Các API được phép bypass xác thực theo đặc tả ONVIF
+    if (headers.find("GetSystemDateAndTime") != std::string::npos ||
+        headers.find("GetServices") != std::string::npos ||
+        headers.find("GetServiceCapabilities") != std::string::npos ||
+        headers.find("GetCapabilities") != std::string::npos) {
+        return false;
+    }
+    return true;
+}
+
 static size_t (*original_frecv)(struct soap*, char*, size_t) = nullptr;
 static int (*original_fsend)(struct soap*, const char*, size_t) = nullptr;
 
 static size_t custom_frecv(struct soap *soap, char *buf, size_t len) {
     size_t n = original_frecv ? original_frecv(soap, buf, len) : 0;
     if (n > 0) {
+        g_current_headers.append(buf, n);
         std::string data(buf, n);
         std::cout << "[DEBUG RECV] " << data << std::endl;
     }
@@ -167,24 +183,8 @@ void OnvifServer::listenLoop() {
             media2Svc.soap->frecv = custom_frecv;
             media2Svc.soap->fsend = custom_fsend;
         }
-
-#include "auth/DigestAuthHandler.h"
-
-static bool isAuthRequired(const char* http_headers) {
-    if (!http_headers) return true;
-    std::string headers(http_headers);
-    
-    // Các API được phép bypass xác thực theo đặc tả ONVIF
-    if (headers.find("GetSystemDateAndTime") != std::string::npos ||
-        headers.find("GetServices") != std::string::npos ||
-        headers.find("GetServiceCapabilities") != std::string::npos ||
-        headers.find("GetCapabilities") != std::string::npos) {
-        return false;
-    }
-    return true;
-}
-
         // ── Dispatch dựa trên URL path ────────────────────────────────
+        g_current_headers.clear();
         int serveResult = SOAP_OK;
         if (soap_begin_serve(soap) == SOAP_OK) {
             // Lấy path từ HTTP request (soap->path được gSOAP set sau soap_begin_serve)
@@ -197,17 +197,17 @@ static bool isAuthRequired(const char* http_headers) {
             if (media2Svc.soap) media2Svc.soap->mustUnderstand = 0;
 
             // Kiểm tra xác thực HTTP Digest
-            if (isAuthRequired(soap->http_headers)) {
+            if (isAuthRequired(g_current_headers)) {
                 DigestAuthHandler digestAuth(cfg_.username, cfg_.password);
                 std::string method = "POST";
                 
-                if (!digestAuth.validate(soap->http_headers ? soap->http_headers : "", method)) {
+                if (!digestAuth.validate(g_current_headers, method)) {
                     static std::string challenge;
                     challenge = digestAuth.generateChallenge();
                     
                     soap->http_extra_header = challenge.c_str();
                     soap->error = 401;
-                    soap_send_empty_response(soap, 401, 0);
+                    soap_send_empty_response(soap, 401);
                     
                     soap_destroy(soap);
                     soap_end(soap);
@@ -215,10 +215,8 @@ static bool isAuthRequired(const char* http_headers) {
                 }
             }
 
-#include "services/MockSubscriptionManager.h"
-
             if (path.find("/onvif/event") != std::string::npos) {
-                std::string headers = soap->http_headers ? soap->http_headers : "";
+                std::string headers = g_current_headers;
                 std::string responseXml = "";
                 
                 std::string subId = "";
