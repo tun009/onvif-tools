@@ -122,7 +122,56 @@ static std::string base64_decode(std::string const& encoded_string) {
 // Thread 1: Đọc Base64 từ POST socket, giải mã và gửi raw sang MediaMTX
 static void decodeAndForward(SOAP_SOCKET postSock, SOAP_SOCKET mtxSock) {
     char buf[8192];
+    std::string headerAccumulator;
+    size_t bodyStartPos = std::string::npos;
+    
+    // 1. Đọc và bỏ qua HTTP Header (kết thúc bởi \r\n\r\n)
+    while (true) {
+        int n = recv(postSock, buf, sizeof(buf) - 1, 0);
+        if (n <= 0) {
+#ifdef _WIN32
+            closesocket(postSock);
+            closesocket(mtxSock);
+#else
+            close(postSock);
+            close(mtxSock);
+#endif
+            return;
+        }
+        buf[n] = '\0';
+        headerAccumulator.append(buf, n);
+        
+        size_t pos = headerAccumulator.find("\r\n\r\n");
+        if (pos != std::string::npos) {
+            bodyStartPos = pos + 4;
+            break;
+        }
+        
+        // Đề phòng header quá lớn bất thường
+        if (headerAccumulator.length() > 16384) {
+#ifdef _WIN32
+            closesocket(postSock);
+            closesocket(mtxSock);
+#else
+            close(postSock);
+            close(mtxSock);
+#endif
+            return;
+        }
+    }
+    
+    // 2. Lấy phần body thừa đã lỡ đọc được ở bước 1
     std::string accumulator;
+    if (bodyStartPos != std::string::npos && bodyStartPos < headerAccumulator.length()) {
+        std::string initialBody = headerAccumulator.substr(bodyStartPos);
+        for (char c : initialBody) {
+            if (is_base64(c) || c == '=') {
+                accumulator += c;
+            }
+        }
+    }
+    
+    // 3. Tiếp tục đọc body và giải mã Base64 sang raw gửi tới MediaMTX
     while (true) {
         int n = recv(postSock, buf, sizeof(buf), 0);
         if (n <= 0) break;
@@ -505,7 +554,7 @@ void OnvifServer::listenLoop() {
         int serveResult = SOAP_OK;
         if (soap_begin_serve(soap) == SOAP_OK) {
             // Lấy path từ HTTP request (soap->path được gSOAP set sau soap_begin_serve)
-            const char* rawPath = soap->path ? soap->path : "";
+            const char* rawPath = soap->path;
             std::string path(rawPath);
 
             // Bỏ qua lỗi MustUnderstand check
