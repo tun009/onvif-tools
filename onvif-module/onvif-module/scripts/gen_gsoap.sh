@@ -141,7 +141,7 @@ if [ ! -f "$EXT_DIR/custom/struct_timeval.cpp" ] && [ ! -f "$EXT_DIR/custom/stru
         /usr/local/share/gsoap/custom \
         "$CONDA_PREFIX/share/gsoap/custom"; do
         if [ -d "$candidate" ]; then
-            for f in struct_timeval.c struct_timeval.cpp duration.c duration.cpp; do
+            for f in struct_timeval.c struct_timeval.cpp; do
                 if [ -f "$candidate/$f" ]; then
                     cp "$candidate/$f" "$EXT_DIR/custom/"
                 fi
