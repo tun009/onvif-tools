@@ -125,11 +125,12 @@ static std::string base64_decode(std::string const& encoded_string) {
     return ret;
 }
 
+
 // Thread 1: Đọc Base64 từ POST socket, giải mã và gửi raw sang MediaMTX
 static void decodeAndForward(SOAP_SOCKET postSock, SOAP_SOCKET mtxSock) {
     setSocketBlocking(postSock);
     setSocketBlocking(mtxSock);
-    std::cout << "[Proxy-POST] Thread started." << std::endl;
+    std::cout << "[Proxy-POST] Thread started. Sockets set to BLOCKING mode." << std::endl;
     char buf[8192];
     std::string headerAccumulator;
     size_t bodyStartPos = std::string::npos;
@@ -260,7 +261,7 @@ static void decodeAndForward(SOAP_SOCKET postSock, SOAP_SOCKET mtxSock) {
 static void encodeAndForward(SOAP_SOCKET mtxSock, SOAP_SOCKET getSock) {
     setSocketBlocking(mtxSock);
     setSocketBlocking(getSock);
-    std::cout << "[Proxy-GET] Thread started." << std::endl;
+    std::cout << "[Proxy-GET] Thread started. Sockets set to BLOCKING mode." << std::endl;
     unsigned char buf[4096];
     while (true) {
         int n = recv(mtxSock, (char*)buf, sizeof(buf), 0);
