@@ -95,8 +95,9 @@ if [ ! -f "$EXT_DIR/stdsoap2.cpp" ] || [ ! -f "$EXT_DIR/stdsoap2.h" ]; then
         fi
     else
         # Try finding via dpkg
-        GSOAP_SRC=$(dpkg -L libgsoap-dev 2>/dev/null | grep stdsoap2.h | head -1 | xargs dirname)
-        if [ -n "$GSOAP_SRC" ] && [ -f "$GSOAP_SRC/stdsoap2.cpp" ]; then
+        GSOAP_SRC_FILE=$(dpkg -L libgsoap-dev 2>/dev/null | grep stdsoap2.h | head -1 || true)
+        if [ -n "$GSOAP_SRC_FILE" ]; then
+            GSOAP_SRC=$(dirname "$GSOAP_SRC_FILE")
             cp "$GSOAP_SRC/stdsoap2.h"   "$EXT_DIR/" 2>/dev/null || true
             cp "$GSOAP_SRC/stdsoap2.cpp" "$EXT_DIR/" 2>/dev/null || true
             echo "  Copied from dpkg package path: $GSOAP_SRC"
