@@ -158,6 +158,15 @@ int DeviceService::GetServices(
     mediaSvc->Version->Minor = 12;
     tds__GetServicesResponse.Service.push_back(mediaSvc);
 
+    // 3. Event Service (Mandatory for Profile T)
+    auto eventSvc = soap_new_tds__Service(soap);
+    eventSvc->Namespace = "http://www.onvif.org/ver10/events/wsdl";
+    eventSvc->XAddr = "http://" + cfg_.deviceIp + ":" + std::to_string(cfg_.httpPort) + "/onvif/event";
+    eventSvc->Version = soap_new_tt__OnvifVersion(soap);
+    eventSvc->Version->Major = 21;
+    eventSvc->Version->Minor = 12;
+    tds__GetServicesResponse.Service.push_back(eventSvc);
+
     return SOAP_OK;
 }
 

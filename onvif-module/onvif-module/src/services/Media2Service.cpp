@@ -221,28 +221,37 @@ int Media2Service::GetVideoEncoderConfigurations(
     this->soap->header = nullptr;
     auto soap = this->soap;
 
-    auto enc = soap_new_tt__VideoEncoder2Configuration(soap);
-    if (enc) {
-        enc->token = "video_encoder_config";
-        enc->Name = "VideoEncoderConfig";
-        enc->Encoding = "H264";
-        enc->Quality = 50.0f;
-
-        enc->Resolution = soap_new_tt__VideoResolution2(soap);
-        if (enc->Resolution) {
-            enc->Resolution->Width = 1920;
-            enc->Resolution->Height = 1080;
-        }
-
-        enc->RateControl = soap_new_tt__VideoRateControl2(soap);
-        if (enc->RateControl) {
-            enc->RateControl->FrameRateLimit = 30.0f;
-            enc->RateControl->BitrateLimit = 4096;
-        }
-        resp.Configurations.push_back(enc);
+    std::vector<StreamProfile> profiles;
+    try {
+        profiles = backend_->getProfiles();
+    } catch (const std::exception& e) {
+        std::cerr << "[Media2Service] GetVideoEncoderConfigurations backend error: " << e.what() << std::endl;
     }
 
-    std::cout << "[Media2Service] GetVideoEncoderConfigurations → returned 1 configuration" << std::endl;
+    for (const auto& p : profiles) {
+        auto enc = soap_new_tt__VideoEncoder2Configuration(soap);
+        if (enc) {
+            enc->token = p.token == "profile_main" ? "video_encoder_config" : ("video_encoder_config_" + p.token);
+            enc->Name = p.token == "profile_main" ? "VideoEncoderConfig" : ("VideoEncoderConfig_" + p.token);
+            enc->Encoding = p.videoConfig.codec == Codec::H265 ? "H265" : "H264";
+            enc->Quality = 50.0f;
+
+            enc->Resolution = soap_new_tt__VideoResolution2(soap);
+            if (enc->Resolution) {
+                enc->Resolution->Width = p.videoConfig.resolution.width;
+                enc->Resolution->Height = p.videoConfig.resolution.height;
+            }
+
+            enc->RateControl = soap_new_tt__VideoRateControl2(soap);
+            if (enc->RateControl) {
+                enc->RateControl->FrameRateLimit = (float)p.videoConfig.framerate;
+                enc->RateControl->BitrateLimit = p.videoConfig.bitrate;
+            }
+            resp.Configurations.push_back(enc);
+        }
+    }
+
+    std::cout << "[Media2Service] GetVideoEncoderConfigurations → returned " << resp.Configurations.size() << " configurations" << std::endl;
     return SOAP_OK;
 }
 
@@ -362,7 +371,57 @@ int Media2Service::SetVideoEncoderConfiguration(
         return soap_sender_fault_subcode(this->soap, "ter:NotAuthorized", "Sender", "Not Authorized");
     }
     this->soap->header = nullptr;
-    std::cout << "[Media2Service] SetVideoEncoderConfiguration called" << std::endl;
+
+    if (!req || !req->Configuration) {
+        return soap_sender_fault(this->soap, "Invalid configuration request", nullptr);
+    }
+
+    auto newEnc = req->Configuration;
+    std::string configToken = newEnc->token;
+    
+    // Ánh xạ configToken về profileToken tương ứng
+    std::string profileToken = "profile_main";
+    if (configToken.find("profile_sub1") != std::string::npos) profileToken = "profile_sub1";
+    else if (configToken.find("profile_sub2") != std::string::npos) profileToken = "profile_sub2";
+    
+    // Lấy cấu hình cũ làm gốc
+    std::vector<StreamProfile> profiles;
+    try {
+        profiles = backend_->getProfiles();
+    } catch (...) {}
+    
+    VideoEncoderConfig vecConfig;
+    for (const auto& p : profiles) {
+        if (p.token == profileToken) {
+            vecConfig = p.videoConfig;
+            break;
+        }
+    }
+
+    // Cập nhật các trường mới nhận được từ request
+    if (!newEnc->Encoding.empty()) {
+        if (newEnc->Encoding == "H265") vecConfig.codec = Codec::H265;
+        else vecConfig.codec = Codec::H264;
+    }
+    
+    if (newEnc->Resolution) {
+        vecConfig.resolution.width = newEnc->Resolution->Width;
+        vecConfig.resolution.height = newEnc->Resolution->Height;
+    }
+    
+    if (newEnc->RateControl) {
+        vecConfig.framerate = (int)newEnc->RateControl->FrameRateLimit;
+        vecConfig.bitrate = newEnc->RateControl->BitrateLimit;
+    }
+
+    try {
+        backend_->setVideoEncoderConfig(profileToken, vecConfig);
+        std::cout << "[Media2Service] SetVideoEncoderConfiguration successful for token " << profileToken << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "[Media2Service] SetVideoEncoderConfiguration backend error: " << e.what() << std::endl;
+        return soap_receiver_fault(this->soap, "Backend error", nullptr);
+    }
+
     return SOAP_OK;
 }
 

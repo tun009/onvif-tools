@@ -168,6 +168,22 @@ void OnvifServer::listenLoop() {
             media2Svc.soap->fsend = custom_fsend;
         }
 
+#include "auth/DigestAuthHandler.h"
+
+static bool isAuthRequired(const char* http_headers) {
+    if (!http_headers) return true;
+    std::string headers(http_headers);
+    
+    // Các API được phép bypass xác thực theo đặc tả ONVIF
+    if (headers.find("GetSystemDateAndTime") != std::string::npos ||
+        headers.find("GetServices") != std::string::npos ||
+        headers.find("GetServiceCapabilities") != std::string::npos ||
+        headers.find("GetCapabilities") != std::string::npos) {
+        return false;
+    }
+    return true;
+}
+
         // ── Dispatch dựa trên URL path ────────────────────────────────
         int serveResult = SOAP_OK;
         if (soap_begin_serve(soap) == SOAP_OK) {
@@ -179,6 +195,61 @@ void OnvifServer::listenLoop() {
             soap->mustUnderstand = 0;
             if (deviceSvc.soap) deviceSvc.soap->mustUnderstand = 0;
             if (media2Svc.soap) media2Svc.soap->mustUnderstand = 0;
+
+            // Kiểm tra xác thực HTTP Digest
+            if (isAuthRequired(soap->http_headers)) {
+                DigestAuthHandler digestAuth(cfg_.username, cfg_.password);
+                std::string method = "POST";
+                
+                if (!digestAuth.validate(soap->http_headers ? soap->http_headers : "", method)) {
+                    static std::string challenge;
+                    challenge = digestAuth.generateChallenge();
+                    
+                    soap->http_extra_header = challenge.c_str();
+                    soap->error = 401;
+                    soap_send_empty_response(soap, 401, 0);
+                    
+                    soap_destroy(soap);
+                    soap_end(soap);
+                    continue;
+                }
+            }
+
+#include "services/MockSubscriptionManager.h"
+
+            if (path.find("/onvif/event") != std::string::npos) {
+                std::string headers = soap->http_headers ? soap->http_headers : "";
+                std::string responseXml = "";
+                
+                std::string subId = "";
+                size_t subPos = path.find("/onvif/event/");
+                if (subPos != std::string::npos) {
+                    subId = path.substr(subPos + 13);
+                }
+
+                auto& manager = MockSubscriptionManager::getInstance();
+
+                if (headers.find("CreatePullPointSubscription") != std::string::npos) {
+                    responseXml = manager.handleCreateSubscription(cfg_.deviceIp, cfg_.httpPort, headers);
+                } else if (headers.find("PullMessages") != std::string::npos) {
+                    responseXml = manager.handlePullMessages(subId, headers);
+                } else if (headers.find("Renew") != std::string::npos) {
+                    responseXml = manager.handleRenew(subId, headers);
+                } else if (headers.find("Unsubscribe") != std::string::npos) {
+                    responseXml = manager.handleUnsubscribe(subId, headers);
+                }
+
+                if (!responseXml.empty()) {
+                    soap->error = SOAP_OK;
+                    soap_response(soap, SOAP_OK);
+                    soap_send_raw(soap, responseXml.c_str(), responseXml.size());
+                    soap_end_send(soap);
+                    
+                    soap_destroy(soap);
+                    soap_end(soap);
+                    continue;
+                }
+            }
 
             if (path.find("/onvif/media") != std::string::npos) {
                 // Yêu cầu đến Media2Service
