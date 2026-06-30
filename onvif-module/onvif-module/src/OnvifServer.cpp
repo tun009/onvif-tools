@@ -119,7 +119,13 @@ static std::string base64_decode(std::string const& encoded_string) {
             if (valb >= 0) {
                 ret.push_back(char((val >> valb) & 0xFF));
                 valb -= 8;
-          static std::string extractHostHeader(const std::string& requestStr) {
+            }
+        }
+    }
+    return ret;
+}
+
+static std::string extractHostHeader(const std::string& requestStr) {
     size_t pos = requestStr.find("Host:");
     if (pos == std::string::npos) {
         pos = requestStr.find("host:");
