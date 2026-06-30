@@ -25,6 +25,7 @@ struct Config {
     std::string deviceIp    = "192.168.1.100";
     int         httpPort    = 8080;
     int         rtspPort    = 8554;
+    int         publicHttpPort = 8080;
     std::string username    = "admin";
     std::string password    = "admin123";
     std::string ctrlSocket  = "/tmp/mock-camera.sock";
@@ -46,11 +47,16 @@ Config loadConfig(const std::string& path) {
         if (!strcmp(key, "device_ip"))    cfg.deviceIp   = val;
         if (!strcmp(key, "http_port"))    cfg.httpPort   = atoi(val);
         if (!strcmp(key, "rtsp_port"))    cfg.rtspPort   = atoi(val);
+        if (!strcmp(key, "public_http_port")) cfg.publicHttpPort = atoi(val);
         if (!strcmp(key, "username"))     cfg.username   = val;
         if (!strcmp(key, "password"))     cfg.password   = val;
         if (!strcmp(key, "ctrl_socket"))  cfg.ctrlSocket = val;
         if (!strcmp(key, "evt_socket"))   cfg.evtSocket  = val;
         if (!strcmp(key, "device_uuid"))  cfg.deviceUuid = val;
+    }
+    // Default publicHttpPort to httpPort if not specified or set to 0
+    if (cfg.publicHttpPort == 0) {
+        cfg.publicHttpPort = cfg.httpPort;
     }
     fclose(f);
     return cfg;
@@ -136,6 +142,7 @@ int main(int argc, char* argv[]) {
     svcCfg.deviceIp = cfg.deviceIp;
     svcCfg.httpPort = cfg.httpPort;
     svcCfg.rtspPort = cfg.rtspPort;
+    svcCfg.publicHttpPort = cfg.publicHttpPort;
     svcCfg.deviceUuid = cfg.deviceUuid;
     svcCfg.username = cfg.username;
     svcCfg.password = cfg.password;

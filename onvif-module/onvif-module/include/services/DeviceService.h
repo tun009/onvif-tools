@@ -8,6 +8,7 @@ struct ServiceConfig {
     std::string deviceIp;
     int         httpPort   = 8080;
     int         rtspPort   = 8554;
+    int         publicHttpPort = 8080;
     std::string deviceUuid;
     std::string username;
     std::string password;

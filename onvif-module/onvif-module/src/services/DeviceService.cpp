@@ -120,15 +120,15 @@ int DeviceService::GetCapabilities(
 
     // Device capabilities
     caps->Device = soap_new_tt__DeviceCapabilities(soap);
-    caps->Device->XAddr = "http://" + cfg_.deviceIp + ":" + std::to_string(cfg_.httpPort) + "/onvif/device";
+    caps->Device->XAddr = "http://" + cfg_.deviceIp + ":" + std::to_string(cfg_.publicHttpPort) + "/onvif/device";
     
     // Media capabilities (VMS expects media capability even if implemented partially/postponed)
     caps->Media = soap_new_tt__MediaCapabilities(soap);
-    caps->Media->XAddr = "http://" + cfg_.deviceIp + ":" + std::to_string(cfg_.httpPort) + "/onvif/media";
+    caps->Media->XAddr = "http://" + cfg_.deviceIp + ":" + std::to_string(cfg_.publicHttpPort) + "/onvif/media";
     
     // PTZ capabilities
     caps->PTZ = soap_new_tt__PTZCapabilities(soap);
-    caps->PTZ->XAddr = "http://" + cfg_.deviceIp + ":" + std::to_string(cfg_.httpPort) + "/onvif/ptz";
+    caps->PTZ->XAddr = "http://" + cfg_.deviceIp + ":" + std::to_string(cfg_.publicHttpPort) + "/onvif/ptz";
 
     tds__GetCapabilitiesResponse.Capabilities = caps;
 
@@ -148,7 +148,7 @@ int DeviceService::GetServices(
     // 1. Device Service
     auto deviceSvc = soap_new_tds__Service(soap);
     deviceSvc->Namespace = "http://www.onvif.org/ver10/device/wsdl";
-    deviceSvc->XAddr = "http://" + cfg_.deviceIp + ":" + std::to_string(cfg_.httpPort) + "/onvif/device";
+    deviceSvc->XAddr = "http://" + cfg_.deviceIp + ":" + std::to_string(cfg_.publicHttpPort) + "/onvif/device";
     deviceSvc->Version = soap_new_tt__OnvifVersion(soap);
     deviceSvc->Version->Major = 21;
     deviceSvc->Version->Minor = 12;
@@ -157,7 +157,7 @@ int DeviceService::GetServices(
     // 2. Media Service (VMS might query this)
     auto mediaSvc = soap_new_tds__Service(soap);
     mediaSvc->Namespace = "http://www.onvif.org/ver20/media/wsdl";
-    mediaSvc->XAddr = "http://" + cfg_.deviceIp + ":" + std::to_string(cfg_.httpPort) + "/onvif/media";
+    mediaSvc->XAddr = "http://" + cfg_.deviceIp + ":" + std::to_string(cfg_.publicHttpPort) + "/onvif/media";
     mediaSvc->Version = soap_new_tt__OnvifVersion(soap);
     mediaSvc->Version->Major = 20;
     mediaSvc->Version->Minor = 12;
@@ -166,7 +166,7 @@ int DeviceService::GetServices(
     // 3. Event Service (Mandatory for Profile T)
     auto eventSvc = soap_new_tds__Service(soap);
     eventSvc->Namespace = "http://www.onvif.org/ver10/events/wsdl";
-    eventSvc->XAddr = "http://" + cfg_.deviceIp + ":" + std::to_string(cfg_.httpPort) + "/onvif/event";
+    eventSvc->XAddr = "http://" + cfg_.deviceIp + ":" + std::to_string(cfg_.publicHttpPort) + "/onvif/event";
     eventSvc->Version = soap_new_tt__OnvifVersion(soap);
     eventSvc->Version->Major = 21;
     eventSvc->Version->Minor = 12;
