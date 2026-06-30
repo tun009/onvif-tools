@@ -539,6 +539,12 @@ void OnvifServer::listenLoop() {
                         }
 
                         if (connected) {
+                            // Trả về HTTP 200 OK cho POST request (Keep connection open)
+                            std::string resp = "HTTP/1.1 200 OK\r\n"
+                                               "Server: MockONVIF\r\n"
+                                               "Connection: keep-alive\r\n"
+                                               "Content-Type: application/x-rtsp-tunnelled\r\n\r\n";
+                            send(clientSocket, resp.data(), resp.size(), 0);
 
                             std::cout << "[OnvifServer] Successfully paired GET & POST sockets. Starting Base64 Proxy to MediaMTX on port " << cfg_.rtspPort << "..." << std::endl;
                             // Chạy 2 thread chuyển tiếp Base64 <-> Raw
