@@ -125,7 +125,7 @@ static std::string base64_decode(std::string const& encoded_string) {
     return ret;
 }
 
-static std::string extractHostHeader(const std::string& requestStr) {
+static std::string extractHostHeader(const std::string& requestStr, int httpPort = 8080) {
     size_t pos = requestStr.find("Host:");
     if (pos == std::string::npos) {
         pos = requestStr.find("host:");
@@ -139,7 +139,11 @@ static std::string extractHostHeader(const std::string& requestStr) {
         while (end < requestStr.length() && requestStr[end] != '\r' && requestStr[end] != '\n') {
             end++;
         }
-        return requestStr.substr(start, end - start);
+        std::string host = requestStr.substr(start, end - start);
+        if (host.find(':') == std::string::npos) {
+            host += ":" + std::to_string(httpPort);
+        }
+        return host;
     }
     return "";
 }
@@ -151,6 +155,41 @@ static void stringReplaceAll(std::string& str, const std::string& from, const st
         str.replace(start_pos, from.length(), to);
         start_pos += to.length();
     }
+}
+
+static void rewriteRtspUriInRequest(std::string& raw, int targetPort) {
+    size_t pos = 0;
+    while ((pos = raw.find("rtsp://", pos)) != std::string::npos) {
+        size_t authStart = pos + 7;
+        size_t nextSlash = raw.find('/', authStart);
+        size_t nextSpace = raw.find(' ', authStart);
+        size_t end = nextSlash;
+        if (end == std::string::npos || (nextSpace != std::string::npos && nextSpace < end)) {
+            end = nextSpace;
+        }
+        if (end != std::string::npos) {
+            std::string target = "127.0.0.1:" + std::to_string(targetPort);
+            raw.replace(authStart, end - authStart, target);
+            pos = authStart + target.length();
+        } else {
+            pos += 7;
+        }
+    }
+}
+
+static void rewriteRtspUriInResponse(std::string& raw, const std::string& hostHeader, int rtspPort) {
+    if (hostHeader.empty()) return;
+    
+    // 1. Rewrite rtsp://127.0.0.1:8554 thành rtsp://hostHeader
+    stringReplaceAll(raw, "rtsp://127.0.0.1:" + std::to_string(rtspPort), "rtsp://" + hostHeader);
+    
+    // 2. Rewrite 127.0.0.1:8554 thành hostHeader
+    stringReplaceAll(raw, "127.0.0.1:" + std::to_string(rtspPort), hostHeader);
+    
+    // 3. Rewrite 127.0.0.1 trong SDP thành IP của Host
+    size_t colonPos = hostHeader.find(':');
+    std::string hostIP = (colonPos != std::string::npos) ? hostHeader.substr(0, colonPos) : hostHeader;
+    stringReplaceAll(raw, "127.0.0.1", hostIP);
 }
 
 // Thread 1: Đọc Base64 từ POST socket, giải mã và gửi raw sang MediaMTX
@@ -229,9 +268,7 @@ static void decodeAndForward(SOAP_SOCKET postSock, SOAP_SOCKET mtxSock, std::str
             std::string raw = base64_decode(toDecode);
             if (!raw.empty()) {
                 // Rewrite URI
-                if (!hostHeader.empty()) {
-                    stringReplaceAll(raw, "rtsp://" + hostHeader, "rtsp://127.0.0.1:" + std::to_string(rtspPort));
-                }
+                rewriteRtspUriInRequest(raw, rtspPort);
                 std::cout << "[Proxy-POST] Decoded raw content sent to MediaMTX:\n" << raw << std::endl;
                 std::cout << "[Proxy-POST] Decoded & sending leftover body raw size=" << raw.size() << " bytes to MediaMTX..." << std::endl;
                 int sent = 0;
@@ -274,9 +311,7 @@ static void decodeAndForward(SOAP_SOCKET postSock, SOAP_SOCKET mtxSock, std::str
             std::string raw = base64_decode(toDecode);
             if (!raw.empty()) {
                 // Rewrite URI
-                if (!hostHeader.empty()) {
-                    stringReplaceAll(raw, "rtsp://" + hostHeader, "rtsp://127.0.0.1:" + std::to_string(rtspPort));
-                }
+                rewriteRtspUriInRequest(raw, rtspPort);
                 std::cout << "[Proxy-POST] Decoded raw content sent to MediaMTX:\n" << raw << std::endl;
                 int sent = 0;
                 int total = raw.size();
@@ -324,14 +359,7 @@ static void encodeAndForward(SOAP_SOCKET mtxSock, SOAP_SOCKET getSock, std::stri
         std::cout << "[Proxy-GET] Recv content from MediaMTX:\n" << raw << std::endl;
         
         // Rewrite IP/Port và URI
-        if (!hostHeader.empty()) {
-            stringReplaceAll(raw, "rtsp://127.0.0.1:" + std::to_string(rtspPort), "rtsp://" + hostHeader);
-            stringReplaceAll(raw, "127.0.0.1:" + std::to_string(rtspPort), hostHeader);
-            
-            size_t colonPos = hostHeader.find(':');
-            std::string hostIP = (colonPos != std::string::npos) ? hostHeader.substr(0, colonPos) : hostHeader;
-            stringReplaceAll(raw, "127.0.0.1", hostIP);
-        }
+        rewriteRtspUriInResponse(raw, hostHeader, rtspPort);
         
         std::string b64 = base64_encode(reinterpret_cast<const unsigned char*>(raw.data()), raw.size());
         if (!b64.empty()) {
