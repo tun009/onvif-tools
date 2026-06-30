@@ -142,9 +142,13 @@ static void decodeAndForward(SOAP_SOCKET postSock, SOAP_SOCKET mtxSock) {
             std::cout << "[Proxy-POST] Recv failed or closed in header reading, n=" << n 
                       << ", errno=" << errno << " (" << strerror(errno) << ")" << std::endl;
 #ifdef _WIN32
+            shutdown(postSock, SD_BOTH);
+            shutdown(mtxSock, SD_BOTH);
             closesocket(postSock);
             closesocket(mtxSock);
 #else
+            shutdown(postSock, SHUT_RDWR);
+            shutdown(mtxSock, SHUT_RDWR);
             close(postSock);
             close(mtxSock);
 #endif
@@ -164,9 +168,13 @@ static void decodeAndForward(SOAP_SOCKET postSock, SOAP_SOCKET mtxSock) {
         if (headerAccumulator.length() > 16384) {
             std::cout << "[Proxy-POST] Header too large, aborting." << std::endl;
 #ifdef _WIN32
+            shutdown(postSock, SD_BOTH);
+            shutdown(mtxSock, SD_BOTH);
             closesocket(postSock);
             closesocket(mtxSock);
 #else
+            shutdown(postSock, SHUT_RDWR);
+            shutdown(mtxSock, SHUT_RDWR);
             close(postSock);
             close(mtxSock);
 #endif
@@ -250,9 +258,13 @@ static void decodeAndForward(SOAP_SOCKET postSock, SOAP_SOCKET mtxSock) {
     }
     std::cout << "[Proxy-POST] Thread exiting." << std::endl;
 #ifdef _WIN32
+    shutdown(postSock, SD_BOTH);
+    shutdown(mtxSock, SD_BOTH);
     closesocket(postSock);
     closesocket(mtxSock);
 #else
+    shutdown(postSock, SHUT_RDWR);
+    shutdown(mtxSock, SHUT_RDWR);
     close(postSock);
     close(mtxSock);
 #endif
@@ -290,9 +302,13 @@ static void encodeAndForward(SOAP_SOCKET mtxSock, SOAP_SOCKET getSock) {
     }
     std::cout << "[Proxy-GET] Thread exiting." << std::endl;
 #ifdef _WIN32
+    shutdown(mtxSock, SD_BOTH);
+    shutdown(getSock, SD_BOTH);
     closesocket(mtxSock);
     closesocket(getSock);
 #else
+    shutdown(mtxSock, SHUT_RDWR);
+    shutdown(getSock, SHUT_RDWR);
     close(mtxSock);
     close(getSock);
 #endif
