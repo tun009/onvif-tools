@@ -1,4 +1,5 @@
 rtspAddress:  :8554
+protocols:    [udp, multicast, tcp, http]
 rtmpAddress:  :1935
 hlsAddress:   :8888
 api:          yes
