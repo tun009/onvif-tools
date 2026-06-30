@@ -119,15 +119,36 @@ static std::string base64_decode(std::string const& encoded_string) {
             if (valb >= 0) {
                 ret.push_back(char((val >> valb) & 0xFF));
                 valb -= 8;
-            }
-        }
+          static std::string extractHostHeader(const std::string& requestStr) {
+    size_t pos = requestStr.find("Host:");
+    if (pos == std::string::npos) {
+        pos = requestStr.find("host:");
     }
-    return ret;
+    if (pos != std::string::npos) {
+        size_t start = pos + 5;
+        while (start < requestStr.length() && (requestStr[start] == ' ' || requestStr[start] == '\t')) {
+            start++;
+        }
+        size_t end = start;
+        while (end < requestStr.length() && requestStr[end] != '\r' && requestStr[end] != '\n') {
+            end++;
+        }
+        return requestStr.substr(start, end - start);
+    }
+    return "";
 }
 
+static void stringReplaceAll(std::string& str, const std::string& from, const std::string& to) {
+    if (from.empty()) return;
+    size_t start_pos = 0;
+    while ((start_pos = str.find(from, start_pos)) != std::string::npos) {
+        str.replace(start_pos, from.length(), to);
+        start_pos += to.length();
+    }
+}
 
 // Thread 1: Đọc Base64 từ POST socket, giải mã và gửi raw sang MediaMTX
-static void decodeAndForward(SOAP_SOCKET postSock, SOAP_SOCKET mtxSock) {
+static void decodeAndForward(SOAP_SOCKET postSock, SOAP_SOCKET mtxSock, std::string hostHeader, int rtspPort) {
     setSocketBlocking(postSock);
     setSocketBlocking(mtxSock);
     std::cout << "[Proxy-POST] Thread started. Sockets set to BLOCKING mode." << std::endl;
@@ -201,6 +222,10 @@ static void decodeAndForward(SOAP_SOCKET postSock, SOAP_SOCKET mtxSock) {
             
             std::string raw = base64_decode(toDecode);
             if (!raw.empty()) {
+                // Rewrite URI
+                if (!hostHeader.empty()) {
+                    stringReplaceAll(raw, "rtsp://" + hostHeader, "rtsp://127.0.0.1:" + std::to_string(rtspPort));
+                }
                 std::cout << "[Proxy-POST] Decoded raw content sent to MediaMTX:\n" << raw << std::endl;
                 std::cout << "[Proxy-POST] Decoded & sending leftover body raw size=" << raw.size() << " bytes to MediaMTX..." << std::endl;
                 int sent = 0;
@@ -227,7 +252,7 @@ static void decodeAndForward(SOAP_SOCKET postSock, SOAP_SOCKET mtxSock) {
         }
         std::cout << "[Proxy-POST] Recv " << n << " Base64 bytes from client..." << std::endl;
         
-        for (int i = 0; i < n; ++i) {
+        for (int i = 0; i < n; i++) {
             char c = buf[i];
             if (is_base64(c) || c == '=') {
                 accumulator += c;
@@ -242,7 +267,11 @@ static void decodeAndForward(SOAP_SOCKET postSock, SOAP_SOCKET mtxSock) {
             
             std::string raw = base64_decode(toDecode);
             if (!raw.empty()) {
-                std::cout << "[Proxy-POST] Decoded & sending raw size=" << raw.size() << " bytes to MediaMTX..." << std::endl;
+                // Rewrite URI
+                if (!hostHeader.empty()) {
+                    stringReplaceAll(raw, "rtsp://" + hostHeader, "rtsp://127.0.0.1:" + std::to_string(rtspPort));
+                }
+                std::cout << "[Proxy-POST] Decoded raw content sent to MediaMTX:\n" << raw << std::endl;
                 int sent = 0;
                 int total = raw.size();
                 while (sent < total) {
@@ -271,7 +300,7 @@ static void decodeAndForward(SOAP_SOCKET postSock, SOAP_SOCKET mtxSock) {
 }
 
 // Thread 2: Đọc raw từ MediaMTX, mã hóa Base64 và gửi sang GET socket
-static void encodeAndForward(SOAP_SOCKET mtxSock, SOAP_SOCKET getSock) {
+static void encodeAndForward(SOAP_SOCKET mtxSock, SOAP_SOCKET getSock, std::string hostHeader, int rtspPort) {
     setSocketBlocking(mtxSock);
     setSocketBlocking(getSock);
     std::cout << "[Proxy-GET] Thread started. Sockets set to BLOCKING mode." << std::endl;
@@ -285,7 +314,20 @@ static void encodeAndForward(SOAP_SOCKET mtxSock, SOAP_SOCKET getSock) {
         }
         std::cout << "[Proxy-GET] Recv " << n << " raw bytes from MediaMTX..." << std::endl;
         
-        std::string b64 = base64_encode(buf, n);
+        std::string raw(reinterpret_cast<char*>(buf), n);
+        std::cout << "[Proxy-GET] Recv content from MediaMTX:\n" << raw << std::endl;
+        
+        // Rewrite IP/Port và URI
+        if (!hostHeader.empty()) {
+            stringReplaceAll(raw, "rtsp://127.0.0.1:" + std::to_string(rtspPort), "rtsp://" + hostHeader);
+            stringReplaceAll(raw, "127.0.0.1:" + std::to_string(rtspPort), hostHeader);
+            
+            size_t colonPos = hostHeader.find(':');
+            std::string hostIP = (colonPos != std::string::npos) ? hostHeader.substr(0, colonPos) : hostHeader;
+            stringReplaceAll(raw, "127.0.0.1", hostIP);
+        }
+        
+        std::string b64 = base64_encode(reinterpret_cast<const unsigned char*>(raw.data()), raw.size());
         if (!b64.empty()) {
             std::cout << "[Proxy-GET] Encoded & sending " << b64.size() << " Base64 bytes to GET client..." << std::endl;
             int sent = 0;
@@ -557,9 +599,10 @@ void OnvifServer::listenLoop() {
 
                         if (connected) {
                             std::cout << "[OnvifServer] Successfully paired GET & POST sockets. Starting Base64 Proxy to MediaMTX on port " << cfg_.rtspPort << "..." << std::endl;
+                            std::string hostHeader = extractHostHeader(requestStr);
                             // Chạy 2 thread chuyển tiếp Base64 <-> Raw
-                            std::thread(decodeAndForward, clientSocket, mtxSocket).detach();
-                            std::thread(encodeAndForward, mtxSocket, getSock).detach();
+                            std::thread(decodeAndForward, clientSocket, mtxSocket, hostHeader, cfg_.rtspPort).detach();
+                            std::thread(encodeAndForward, mtxSocket, getSock, hostHeader, cfg_.rtspPort).detach();
                             
                             // Cả 2 socket đã giao cho thread quản lý
                             soap->socket = SOAP_INVALID_SOCKET;

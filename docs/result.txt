@@ -29,14 +29,14 @@ Server: gSOAP/2.8
 X-Frame-Options: SAMEORIGIN
 Content-Type: application/soap+xml; charset=utf-8
 Content-Length: 0
-WWW-Authenticate: Digest realm="onvif", qop="auth", nonce="a62e3075672e8ee929e43fb81d2cc3ce", opaque="15c7e1d555c8869ab831b5ed17007606"
+WWW-Authenticate: Digest realm="onvif", qop="auth", nonce="fa23ff570e62eeb7f7166941d7282ae2", opaque="15c7e1d555c8869ab831b5ed17007606"
 Connection: close
 
 
 [DEBUG RECV] POST /onvif/media HTTP/1.1
 Host: 192.168.254.119:8080
 Content-Type: application/soap+xml; charset=utf-8
-Authorization: Digest username="admin",realm="onvif",qop="auth",algorithm=MD5,uri="/onvif/media",nonce="a62e3075672e8ee929e43fb81d2cc3ce",nc=00000001,cnonce="9CE4746F8D5770827560F17139EAE006",opaque="15c7e1d555c8869ab831b5ed17007606",response="6d1fdb57f0894653aa44feaabb6efef4"
+Authorization: Digest username="admin",realm="onvif",qop="auth",algorithm=MD5,uri="/onvif/media",nonce="fa23ff570e62eeb7f7166941d7282ae2",nc=00000001,cnonce="74192EB9A9E9C52753508C125F8B5CF6",opaque="15c7e1d555c8869ab831b5ed17007606",response="a4b65c6c6c67980b551f02685ab00b9a"
 Content-Length: 351
 
 <?xml version="1.0" encoding="utf-8"?><s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"><GetProfiles xmlns="http://www.onvif.org/ver20/media/wsdl"><Type>VideoSource</Type><Type>VideoEncoder</Type></GetProfiles></s:Body></s:Envelope>
@@ -54,7 +54,7 @@ Connection: close
 [DEBUG RECV] POST /onvif/media HTTP/1.1
 Host: 192.168.254.119:8080
 Content-Type: application/soap+xml; charset=utf-8
-Authorization: Digest username="admin",realm="onvif",qop="auth",algorithm=MD5,uri="/onvif/media",nonce="a62e3075672e8ee929e43fb81d2cc3ce",nc=00000002,cnonce="BC476784C3A218733ED14221698CDEBB",opaque="15c7e1d555c8869ab831b5ed17007606",response="436a24ac06fd1a7a523030e91e7c6b6c"
+Authorization: Digest username="admin",realm="onvif",qop="auth",algorithm=MD5,uri="/onvif/media",nonce="fa23ff570e62eeb7f7166941d7282ae2",nc=00000002,cnonce="9DE065DAEF0AE1E7BE9023F34E5AED69",opaque="15c7e1d555c8869ab831b5ed17007606",response="d928fa6bb85cde59009ff6e922b11b7d"
 Content-Length: 452
 
 <?xml version="1.0" encoding="utf-8"?><s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"><GetVideoEncoderConfigurationOptions xmlns="http://www.onvif.org/ver20/media/wsdl"><ConfigurationToken>video_encoder_config</ConfigurationToken><ProfileToken>profile_main</ProfileToken></GetVideoEncoderConfigurationOptions></s:Body></s:Envelope>
@@ -72,7 +72,7 @@ Connection: close
 [DEBUG RECV] POST /onvif/media HTTP/1.1
 Host: 192.168.254.119:8080
 Content-Type: application/soap+xml; charset=utf-8
-Authorization: Digest username="admin",realm="onvif",qop="auth",algorithm=MD5,uri="/onvif/media",nonce="a62e3075672e8ee929e43fb81d2cc3ce",nc=00000003,cnonce="41D7AF9A817718D405CF9015A92DC105",opaque="15c7e1d555c8869ab831b5ed17007606",response="3e7720499ae7cbb04840a8cb01b85e4b"
+Authorization: Digest username="admin",realm="onvif",qop="auth",algorithm=MD5,uri="/onvif/media",nonce="fa23ff570e62eeb7f7166941d7282ae2",nc=00000003,cnonce="17FC0D77C413E2BD9771184FD9D0FD54",opaque="15c7e1d555c8869ab831b5ed17007606",response="fdf2f6bf6a1bae35f793d32a2f65d4aa"
 Content-Length: 905
 
 <?xml version="1.0" encoding="utf-8"?><s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"><SetVideoEncoderConfiguration xmlns="http://www.onvif.org/ver20/media/wsdl"><Configuration token="video_encoder_config"><Name xmlns="http://www.onvif.org/ver10/schema">VideoEncoderConfig</Name><UseCount xmlns="http://www.onvif.org/ver10/schema">0</UseCount><Encoding xmlns="http://www.onvif.org/ver10/schema">H264</Encoding><Resolution xmlns="http://www.onvif.org/ver10/schema"><Width>640</Width><Height>480</Height></Resolution><RateControl xmlns="http://www.onvif.org/ver10/schema"><FrameRateLimit>30</FrameRateLimit><BitrateLimit>20000</BitrateLimit></RateControl><Quality xmlns="http://www.onvif.org/ver10/schema">0</Quality></Configuration></SetVideoEncoderConfiguration></s:Body></s:Envelope>
@@ -90,7 +90,7 @@ Connection: close
 [DEBUG RECV] POST /onvif/media HTTP/1.1
 Host: 192.168.254.119:8080
 Content-Type: application/soap+xml; charset=utf-8
-Authorization: Digest username="admin",realm="onvif",qop="auth",algorithm=MD5,uri="/onvif/media",nonce="a62e3075672e8ee929e43fb81d2cc3ce",nc=00000004,cnonce="F3C0B5AF93A4B29C735410A45B92E43D",opaque="15c7e1d555c8869ab831b5ed17007606",response="b92339fbd62f42a7f486a9478e0be1ef"
+Authorization: Digest username="admin",realm="onvif",qop="auth",algorithm=MD5,uri="/onvif/media",nonce="fa23ff570e62eeb7f7166941d7282ae2",nc=00000004,cnonce="ED5025CEA266D40E11F21D060986E9D2",opaque="15c7e1d555c8869ab831b5ed17007606",response="aed7f0a54ff29ae6b8c6ecc7977ef1b3"
 Content-Length: 378
 
 <?xml version="1.0" encoding="utf-8"?><s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"><GetStreamUri xmlns="http://www.onvif.org/ver20/media/wsdl"><Protocol>RtspOverHttp</Protocol><ProfileToken>profile_main</ProfileToken></GetStreamUri></s:Body></s:Envelope>
@@ -105,22 +105,27 @@ Connection: close
 <?xml version="1.0" encoding="UTF-8"?>
 <SOAP-ENV:Envelope xmlns:SOAP-ENV="http://www.w3.org/2003/05/soap-envelope" xmlns:SOAP-ENC="http://www.w3.org/2003/05/soap-encoding" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:c14n="http://www.w3.org/2001/10/xml-exc-c14n#" xmlns:ds="http://www.w3.org/2000/09/xmldsig#" xmlns:saml1="urn:oasis:names:tc:SAML:1.0:assertion" xmlns:saml2="urn:oasis:names:tc:SAML:2.0:assertion" xmlns:wsu="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd" xmlns:xenc="http://www.w3.org/2001/04/xmlenc#" xmlns:wsc="http://docs.oasis-open.org/ws-sx/ws-secureconversation/200512" xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd" xmlns:wsa="http://schemas.xmlsoap.org/ws/2004/08/addressing" xmlns:wsdd="http://schemas.xmlsoap.org/ws/2005/04/discovery" xmlns:chan="http://schemas.microsoft.com/ws/2005/02/duplex" xmlns:wsdd10="http://tempuri.org/wsdd10.xsd" xmlns:wsa5="http://www.w3.org/2005/08/addressing" xmlns:wsrfr="http://docs.oasis-open.org/wsrf/r-2" xmlns:ns2="http://www.onvif.org/ver20/analytics/humanface" xmlns:ns3="http://www.onvif.org/ver20/analytics/humanbody" xmlns:xmime="http://tempuri.org/xmime.xsd" xmlns:xop="http://www.w3.org/2004/08/xop/include" xmlns:tt="http://www.onvif.org/ver10/schema" xmlns:wsrfbf="http://docs.oasis-open.org/wsrf/bf-2" xmlns:wstop="http://docs.oasis-open.org/wsn/t-1" xmlns:ns1="http://www.onvif.org/ver20/media/wsdl" xmlns:tan="http://www.onvif.org/ver20/analytics/wsdl" xmlns:tdn="http://www.onvif.org/ver10/network/wsdl" xmlns:tds="http://www.onvif.org/ver10/device/wsdl" xmlns:tev="http://www.onvif.org/ver10/events/wsdl" xmlns:wsnt="http://docs.oasis-open.org/wsn/b-2" xmlns:timg="http://www.onvif.org/ver20/imaging/wsdl" xmlns:tptz="http://www.onvif.org/ver20/ptz/wsdl"><SOAP-ENV:Body><ns1:GetStreamUriResponse><ns1:Uri>http://192.168.254.119:8080/main</ns1:Uri></ns1:GetStreamUriResponse></SOAP-ENV:Body></SOAP-ENV:Envelope>
 
-[OnvifServer] RTSP-over-HTTP GET tunnel request. Cookie=52fa1874c77f6420a63cd2c
-[OnvifServer] RTSP-over-HTTP POST tunnel request. Cookie=52fa1874c77f6420a63cd2c
+[OnvifServer] RTSP-over-HTTP GET tunnel request. Cookie=7adadf2ff1b2a147b81e93c
+[OnvifServer] RTSP-over-HTTP POST tunnel request. Cookie=7adadf2ff1b2a147b81e93c
 [OnvifServer] Successfully paired GET & POST sockets. Starting Base64 Proxy to MediaMTX on port 8554...
 [Proxy-POST] Thread started. Sockets set to BLOCKING mode.
-[Proxy-POST] Found end of HTTP header. Total header bytes read: 284
 [Proxy-GET] Thread started. Sockets set to BLOCKING mode.
-[Proxy-POST] Recv 168 Base64 bytes from client...
-[Proxy-POST] Decoded & sending raw size=125 bytes to MediaMTX...
+[Proxy-POST] Found end of HTTP header. Total header bytes read: 284
+[Proxy-POST] Found leftover body in header packet, size=168 bytes.
+[Proxy-POST] Decoded raw content sent to MediaMTX:
+DESCRIBE rtsp://192.168.254.119:8080/main RTSP/1.0
+CSeq: 1
+User-Agent: ONVIF RTSP Client 24.12
+Accept: application/sdp
+
+
+[Proxy-POST] Decoded & sending leftover body raw size=125 bytes to MediaMTX...
 [Proxy-GET] Recv 407 raw bytes from MediaMTX...
 [Proxy-GET] Encoded & sending 544 Base64 bytes to GET client...
-[Proxy-POST] Recv body finished or connection closed, n=0, errno=0 (Success)
-[Proxy-POST] Thread exiting.
 [DEBUG RECV] POST /onvif/media HTTP/1.1
 Host: 192.168.254.119:8080
 Content-Type: application/soap+xml; charset=utf-8
-Authorization: Digest username="admin",realm="onvif",qop="auth",algorithm=MD5,uri="/onvif/media",nonce="a62e3075672e8ee929e43fb81d2cc3ce",nc=00000005,cnonce="073FFDF641327E33A1119F65AE1F25AA",opaque="15c7e1d555c8869ab831b5ed17007606",response="d9e7fcad94f688d8ab8e1a211980d927"
+Authorization: Digest username="admin",realm="onvif",qop="auth",algorithm=MD5,uri="/onvif/media",nonce="fa23ff570e62eeb7f7166941d7282ae2",nc=00000005,cnonce="AFC80C6B38C7094EEDDE57A21CA070A8",opaque="15c7e1d555c8869ab831b5ed17007606",response="ebb83e8e51686ff53298e84dbadc3944"
 Content-Length: 908
 
 <?xml version="1.0" encoding="utf-8"?><s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"><SetVideoEncoderConfiguration xmlns="http://www.onvif.org/ver20/media/wsdl"><Configuration token="video_encoder_config"><Name xmlns="http://www.onvif.org/ver10/schema">VideoEncoderConfig</Name><UseCount xmlns="http://www.onvif.org/ver10/schema">0</UseCount><Encoding xmlns="http://www.onvif.org/ver10/schema">H264</Encoding><Resolution xmlns="http://www.onvif.org/ver10/schema"><Width>3840</Width><Height>2160</Height></Resolution><RateControl xmlns="http://www.onvif.org/ver10/schema"><FrameRateLimit>30</FrameRateLimit><BitrateLimit>20000</BitrateLimit></RateControl><Quality xmlns="http://www.onvif.org/ver10/schema">50</Quality></Configuration></SetVideoEncoderConfiguration></s:Body></s:Envelope>
@@ -135,10 +140,12 @@ Connection: close
 <?xml version="1.0" encoding="UTF-8"?>
 <SOAP-ENV:Envelope xmlns:SOAP-ENV="http://www.w3.org/2003/05/soap-envelope" xmlns:SOAP-ENC="http://www.w3.org/2003/05/soap-encoding" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:c14n="http://www.w3.org/2001/10/xml-exc-c14n#" xmlns:ds="http://www.w3.org/2000/09/xmldsig#" xmlns:saml1="urn:oasis:names:tc:SAML:1.0:assertion" xmlns:saml2="urn:oasis:names:tc:SAML:2.0:assertion" xmlns:wsu="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd" xmlns:xenc="http://www.w3.org/2001/04/xmlenc#" xmlns:wsc="http://docs.oasis-open.org/ws-sx/ws-secureconversation/200512" xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd" xmlns:wsa="http://schemas.xmlsoap.org/ws/2004/08/addressing" xmlns:wsdd="http://schemas.xmlsoap.org/ws/2005/04/discovery" xmlns:chan="http://schemas.microsoft.com/ws/2005/02/duplex" xmlns:wsdd10="http://tempuri.org/wsdd10.xsd" xmlns:wsa5="http://www.w3.org/2005/08/addressing" xmlns:wsrfr="http://docs.oasis-open.org/wsrf/r-2" xmlns:ns2="http://www.onvif.org/ver20/analytics/humanface" xmlns:ns3="http://www.onvif.org/ver20/analytics/humanbody" xmlns:xmime="http://tempuri.org/xmime.xsd" xmlns:xop="http://www.w3.org/2004/08/xop/include" xmlns:tt="http://www.onvif.org/ver10/schema" xmlns:wsrfbf="http://docs.oasis-open.org/wsrf/bf-2" xmlns:wstop="http://docs.oasis-open.org/wsn/t-1" xmlns:ns1="http://www.onvif.org/ver20/media/wsdl" xmlns:tan="http://www.onvif.org/ver20/analytics/wsdl" xmlns:tdn="http://www.onvif.org/ver10/network/wsdl" xmlns:tds="http://www.onvif.org/ver10/device/wsdl" xmlns:tev="http://www.onvif.org/ver10/events/wsdl" xmlns:wsnt="http://docs.oasis-open.org/wsn/b-2" xmlns:timg="http://www.onvif.org/ver20/imaging/wsdl" xmlns:tptz="http://www.onvif.org/ver20/ptz/wsdl"><SOAP-ENV:Body><ns1:SetVideoEncoderConfigurationResponse xsi:type="ns1:SetConfigurationResponse"></ns1:SetVideoEncoderConfigurationResponse></SOAP-ENV:Body></SOAP-ENV:Envelope>
 
+[Proxy-POST] Recv body finished or connection closed, n=0, errno=0 (Success)
+[Proxy-POST] Thread exiting.
 [DEBUG RECV] POST /onvif/media HTTP/1.1
 Host: 192.168.254.119:8080
 Content-Type: application/soap+xml; charset=utf-8
-Authorization: Digest username="admin",realm="onvif",qop="auth",algorithm=MD5,uri="/onvif/media",nonce="a62e3075672e8ee929e43fb81d2cc3ce",nc=00000006,cnonce="585C74B02FD1DA18A69028611BDF9E0F",opaque="15c7e1d555c8869ab831b5ed17007606",response="4d12c5ca29c45026a319aa1ceaf580b3"
+Authorization: Digest username="admin",realm="onvif",qop="auth",algorithm=MD5,uri="/onvif/media",nonce="fa23ff570e62eeb7f7166941d7282ae2",nc=00000006,cnonce="52BA548237DD939FC648887F07C65C9B",opaque="15c7e1d555c8869ab831b5ed17007606",response="1c88572fd112efbbd289d1249408ad40"
 Content-Length: 378
 
 <?xml version="1.0" encoding="utf-8"?><s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"><GetProfiles xmlns="http://www.onvif.org/ver20/media/wsdl"><Token>profile_main</Token><Type>VideoSource</Type><Type>VideoEncoder</Type></GetProfiles></s:Body></s:Envelope>
