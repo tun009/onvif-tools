@@ -193,6 +193,7 @@ static void decodeAndForward(SOAP_SOCKET postSock, SOAP_SOCKET mtxSock) {
             
             std::string raw = base64_decode(toDecode);
             if (!raw.empty()) {
+                std::cout << "[Proxy-POST] Decoded raw content sent to MediaMTX:\n" << raw << std::endl;
                 std::cout << "[Proxy-POST] Decoded & sending leftover body raw size=" << raw.size() << " bytes to MediaMTX..." << std::endl;
                 int sent = 0;
                 int total = raw.size();
@@ -539,13 +540,6 @@ void OnvifServer::listenLoop() {
                         }
 
                         if (connected) {
-                            // Trả về HTTP 200 OK cho POST request (Keep connection open)
-                            std::string resp = "HTTP/1.1 200 OK\r\n"
-                                               "Server: MockONVIF\r\n"
-                                               "Connection: keep-alive\r\n"
-                                               "Content-Type: application/x-rtsp-tunnelled\r\n\r\n";
-                            send(clientSocket, resp.data(), resp.size(), 0);
-
                             std::cout << "[OnvifServer] Successfully paired GET & POST sockets. Starting Base64 Proxy to MediaMTX on port " << cfg_.rtspPort << "..." << std::endl;
                             // Chạy 2 thread chuyển tiếp Base64 <-> Raw
                             std::thread(decodeAndForward, clientSocket, mtxSocket).detach();
