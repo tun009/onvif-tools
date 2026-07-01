@@ -1,5 +1,6 @@
 #include "OnvifServer.h"
 #include "services/Media2Service.h"
+#include "services/ImagingService.h"
 #include "soapH.h"
 #include "auth/DigestAuthHandler.h"
 #include "services/MockSubscriptionManager.h"
@@ -181,26 +182,24 @@ void OnvifServer::listenLoop() {
         // ── Khởi tạo các Service trước để tránh constructor reset state của soap context ────────────────
         DeviceService deviceSvc(soap, cfg_, backend_);
         Media2Service media2Svc(soap, cfg_, backend_);
+        ImagingService imagingSvc(soap, cfg_, backend_);
 
         // Thiết lập cấu hình lại cho soap context sau khi bị Service constructors ghi đè/reset
         soap->namespaces = get_custom_namespaces();
         soap->fheader = acceptMustUnderstandHeaders;
         soap->mustUnderstand = 0;
 
-        if (deviceSvc.soap) {
-            deviceSvc.soap->namespaces = get_custom_namespaces();
-            deviceSvc.soap->fheader = acceptMustUnderstandHeaders;
-            deviceSvc.soap->mustUnderstand = 0;
-            deviceSvc.soap->frecv = custom_frecv;
-            deviceSvc.soap->fsend = custom_fsend;
-        }
-        if (media2Svc.soap) {
-            media2Svc.soap->namespaces = get_custom_namespaces();
-            media2Svc.soap->fheader = acceptMustUnderstandHeaders;
-            media2Svc.soap->mustUnderstand = 0;
-            media2Svc.soap->frecv = custom_frecv;
-            media2Svc.soap->fsend = custom_fsend;
-        }
+        auto reconfigure = [&](struct soap* s) {
+            if (!s) return;
+            s->namespaces = get_custom_namespaces();
+            s->fheader = acceptMustUnderstandHeaders;
+            s->mustUnderstand = 0;
+            s->frecv = custom_frecv;
+            s->fsend = custom_fsend;
+        };
+        reconfigure(deviceSvc.soap);
+        reconfigure(media2Svc.soap);
+        reconfigure(imagingSvc.soap);
         // ── Dispatch dựa trên URL path ────────────────────────────────
         g_current_headers.clear();
         g_http_digest_authenticated = false;
@@ -268,6 +267,11 @@ void OnvifServer::listenLoop() {
                 serveResult = media2Svc.dispatch();
                 soap->error = media2Svc.soap->error;
                 soap->fault = media2Svc.soap->fault;
+            } else if (path.find("/onvif/imaging") != std::string::npos) {
+                // Yêu cầu đến ImagingService
+                serveResult = imagingSvc.dispatch();
+                soap->error = imagingSvc.soap->error;
+                soap->fault = imagingSvc.soap->fault;
             } else {
                 // Mặc định: DeviceService (/onvif/device hoặc /onvif/device_service)
                 serveResult = deviceSvc.dispatch();
