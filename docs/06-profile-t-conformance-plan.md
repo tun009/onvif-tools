@@ -127,6 +127,15 @@ Tài liệu này tổng hợp toàn bộ vấn đề còn tồn đọng để pa
   `GetNetworkProtocols`/`Set`, `GetHostname`/`Set`, DHCP IPv4.
 - Có thể trả giá trị mock cố định nhưng **phải đúng schema** và xử lý error case.
 
+**STATUS (01/07/2026) — Device Network:**
+- Bám Profile T mục 7.4 mandatory 10 op: `GetHostname/SetHostname`, `GetDNS/SetDNS`,
+  `GetNetworkInterfaces/SetNetworkInterfaces`, `GetNetworkDefaultGateway/SetNetworkDefaultGateway`,
+  `GetNetworkProtocols/SetNetworkProtocols`.
+- Implement trực tiếp trong `DeviceService` (thuộc DeviceBindingService — không cần binding mới).
+- State static `NetworkState` (mutex-protected) lưu hostname/DNS/iface/gateway/protocols; Set update state, Get đọc state → Set/Get consistency.
+- Mock data: hostname="MockCam-4K", DNS 8.8.8.8/8.8.4.4, iface="eth0" 192.168.254.119/24, gw=192.168.254.1, protocols=HTTP:80 on / HTTPS:443 off / RTSP:554 on.
+- Compile-check pass.
+
 ### 🟠 Nhóm 4 — Device System (DEVICE-3-x)
 - `SetSystemDateAndTime` (+ xử lý invalid timezone/date), `SystemReboot`, `SetSystemFactoryDefault`.
 

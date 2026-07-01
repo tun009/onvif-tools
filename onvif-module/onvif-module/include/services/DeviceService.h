@@ -3,6 +3,8 @@
 #include "interface/ICameraBackend.h"
 #include <memory>
 #include <string>
+#include <vector>
+#include <mutex>
 
 struct ServiceConfig {
     std::string deviceIp;
@@ -29,9 +31,52 @@ public:
     virtual int GetUsers(_tds__GetUsers *tds__GetUsers, _tds__GetUsersResponse &tds__GetUsersResponse) override;
     virtual int GetServiceCapabilities(_tds__GetServiceCapabilities *tds__GetServiceCapabilities, _tds__GetServiceCapabilitiesResponse &tds__GetServiceCapabilitiesResponse) override;
 
+    // ── Network config (Profile T mandatory 7.4) ─────────────────────────
+    virtual int GetHostname(_tds__GetHostname *req, _tds__GetHostnameResponse &resp) override;
+    virtual int SetHostname(_tds__SetHostname *req, _tds__SetHostnameResponse &resp) override;
+    virtual int GetDNS(_tds__GetDNS *req, _tds__GetDNSResponse &resp) override;
+    virtual int SetDNS(_tds__SetDNS *req, _tds__SetDNSResponse &resp) override;
+    virtual int GetNetworkInterfaces(_tds__GetNetworkInterfaces *req, _tds__GetNetworkInterfacesResponse &resp) override;
+    virtual int SetNetworkInterfaces(_tds__SetNetworkInterfaces *req, _tds__SetNetworkInterfacesResponse &resp) override;
+    virtual int GetNetworkDefaultGateway(_tds__GetNetworkDefaultGateway *req, _tds__GetNetworkDefaultGatewayResponse &resp) override;
+    virtual int SetNetworkDefaultGateway(_tds__SetNetworkDefaultGateway *req, _tds__SetNetworkDefaultGatewayResponse &resp) override;
+    virtual int GetNetworkProtocols(_tds__GetNetworkProtocols *req, _tds__GetNetworkProtocolsResponse &resp) override;
+    virtual int SetNetworkProtocols(_tds__SetNetworkProtocols *req, _tds__SetNetworkProtocolsResponse &resp) override;
+
 private:
     bool validateAuth();
 
     ServiceConfig cfg_;
     std::shared_ptr<ICameraBackend> backend_;
+
+    // Network state (static, persist across requests trong 1 phiên process).
+    struct NetworkState {
+        std::string hostname = "MockCam-4K";
+        bool hostnameFromDHCP = false;
+        bool dnsFromDHCP = false;
+        std::vector<std::string> searchDomain = {"local"};
+        std::vector<std::string> dnsManual   = {"8.8.8.8", "8.8.4.4"};
+
+        std::string ifaceToken = "eth0";
+        bool        ifaceEnabled = true;
+        std::string ifaceName    = "eth0";
+        std::string hwAddress    = "00:11:22:33:44:55";
+        int         mtu          = 1500;
+
+        // IPv4 config
+        bool        ipv4DhcpEnabled = false;
+        std::string ipv4Manual      = "192.168.254.119";
+        int         prefixLength    = 24;
+
+        std::vector<std::string> gatewayIPv4 = {"192.168.254.1"};
+
+        struct Protocol { int type; bool enabled; int port; };
+        std::vector<Protocol> protocols = {
+            {0, true, 80},     // HTTP
+            {1, false, 443},   // HTTPS
+            {2, true, 554},    // RTSP
+        };
+    };
+    static std::mutex netMtx_;
+    static NetworkState net_;
 };
