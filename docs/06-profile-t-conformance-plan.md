@@ -75,6 +75,12 @@ Tài liệu này tổng hợp toàn bộ vấn đề còn tồn đọng để pa
 - **Còn tồn:** `_tds__Service_Capabilities` là xsd:any (class rỗng) → chưa populate được capabilities lồng trong GetServices khi `IncludeCapability=true` → **DEVICE-1-1-19 (GetServices↔GetServiceCapabilities consistency) có thể vẫn fail**; cần thao tác DOM, để vòng sau.
 - **Chưa làm:** DeviceIO service (cần WSDL binding riêng); Analytics capability.
 
+**STATUS (01/07/2026) — bổ sung lọc Category (theo test spec 7.1):**
+- `GetCapabilities` giờ **lọc theo Category**: hỏi riêng Device/Media/Events/Imaging → chỉ trả đúng cái đó (sửa DEVICE-1-1-3/4/5/10).
+- PTZ/Analytics (không hỗ trợ) → trả SOAP fault `env:Receiver/ter:ActionNotSupported/ter:NoSuchService` (DEVICE-1-1-6, 1-1-11).
+- Đã thêm `SupportedVersions` (bắt buộc) trong System.
+- Đã compile-check trên server (pass).
+
 ### 🟡 Nhóm 7 — Media2 (MEDIA2-x)
 - Bổ sung **OSD** (mandatory Profile T: `GetOSDs`, `GetOSDOptions`, `CreateOSD`, `SetOSD`, `DeleteOSD`).
 - **Metadata configuration** + **Media2 Events** (ProfileChanged, ConfigurationChanged).

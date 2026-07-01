@@ -111,7 +111,6 @@ int DeviceService::GetCapabilities(
     _tds__GetCapabilities *tds__GetCapabilities, 
     _tds__GetCapabilitiesResponse &tds__GetCapabilitiesResponse) 
 {
-    (void)tds__GetCapabilities;
     this->soap->mustUnderstand = 0;
     this->soap->header = nullptr;
     auto soap = this->soap;
@@ -120,9 +119,44 @@ int DeviceService::GetCapabilities(
     auto B = [&](bool v) { bool* p = (bool*)soap_malloc(soap, sizeof(bool)); *p = v; return p; };
     const std::string base = "http://" + cfg_.deviceIp + ":" + std::to_string(cfg_.httpPort);
 
+    // Lọc theo Category yêu cầu. Khi client hỏi 1 category cụ thể, PHẢI chỉ trả
+    // đúng category đó (test DEVICE-1-1-3/4/5/10). Rỗng hoặc All → trả tất cả.
+    bool wantAll = false, wantDevice = false, wantEvents = false,
+         wantMedia = false, wantImaging = false, reqPTZ = false, reqAnalytics = false;
+    if (!tds__GetCapabilities || tds__GetCapabilities->Category.empty()) {
+        wantAll = true;
+    } else {
+        for (auto cat : tds__GetCapabilities->Category) {
+            switch (cat) {
+                case tt__CapabilityCategory::All:       wantAll = true; break;
+                case tt__CapabilityCategory::Device:    wantDevice = true; break;
+                case tt__CapabilityCategory::Events:    wantEvents = true; break;
+                case tt__CapabilityCategory::Media:     wantMedia = true; break;
+                case tt__CapabilityCategory::Imaging:   wantImaging = true; break;
+                case tt__CapabilityCategory::PTZ:       reqPTZ = true; break;
+                case tt__CapabilityCategory::Analytics: reqAnalytics = true; break;
+            }
+        }
+    }
+
+    // PTZ / Analytics KHÔNG hỗ trợ → SOAP 1.2 fault env:Receiver /
+    // ter:ActionNotSupported / ter:NoSuchService (test DEVICE-1-1-6, 1-1-11).
+    if (!wantAll && (reqPTZ || reqAnalytics)) {
+        soap_receiver_fault_subcode(soap, "ter:ActionNotSupported",
+                                    "No such service", nullptr);
+        if (soap->fault && soap->fault->SOAP_ENV__Code &&
+            soap->fault->SOAP_ENV__Code->SOAP_ENV__Subcode) {
+            auto sub2 = soap_new_SOAP_ENV__Code(soap);
+            sub2->SOAP_ENV__Value = soap_strdup(soap, "ter:NoSuchService");
+            soap->fault->SOAP_ENV__Code->SOAP_ENV__Subcode->SOAP_ENV__Subcode = sub2;
+        }
+        return SOAP_FAULT;
+    }
+
     auto caps = soap_new_tt__Capabilities(soap);
 
     // ── Device ────────────────────────────────────────────────────────────
+    if (wantAll || wantDevice) {
     caps->Device = soap_new_tt__DeviceCapabilities(soap);
     caps->Device->XAddr = base + "/onvif/device_service";
 
@@ -156,25 +190,32 @@ int DeviceService::GetCapabilities(
     caps->Device->Security->SAMLToken          = false;
     caps->Device->Security->KerberosToken      = false;
     caps->Device->Security->RELToken           = false;
+    } // end Device
 
     // ── Media (Profile T: streaming RTP/RTSP/TCP) ─────────────────────────
-    caps->Media = soap_new_tt__MediaCapabilities(soap);
-    caps->Media->XAddr = base + "/onvif/media";
-    caps->Media->StreamingCapabilities = soap_new_tt__RealTimeStreamingCapabilities(soap);
-    caps->Media->StreamingCapabilities->RTPMulticast              = B(false);
-    caps->Media->StreamingCapabilities->RTP_USCORETCP             = B(true);
-    caps->Media->StreamingCapabilities->RTP_USCORERTSP_USCORETCP  = B(true);
+    if (wantAll || wantMedia) {
+        caps->Media = soap_new_tt__MediaCapabilities(soap);
+        caps->Media->XAddr = base + "/onvif/media";
+        caps->Media->StreamingCapabilities = soap_new_tt__RealTimeStreamingCapabilities(soap);
+        caps->Media->StreamingCapabilities->RTPMulticast              = B(false);
+        caps->Media->StreamingCapabilities->RTP_USCORETCP             = B(true);
+        caps->Media->StreamingCapabilities->RTP_USCORERTSP_USCORETCP  = B(true);
+    }
 
     // ── Events (Profile T mandatory: PullPoint) ───────────────────────────
-    caps->Events = soap_new_tt__EventCapabilities(soap);
-    caps->Events->XAddr = base + "/onvif/event";
-    caps->Events->WSSubscriptionPolicySupport                    = true;
-    caps->Events->WSPullPointSupport                             = true;
-    caps->Events->WSPausableSubscriptionManagerInterfaceSupport  = false;
+    if (wantAll || wantEvents) {
+        caps->Events = soap_new_tt__EventCapabilities(soap);
+        caps->Events->XAddr = base + "/onvif/event";
+        caps->Events->WSSubscriptionPolicySupport                    = true;
+        caps->Events->WSPullPointSupport                             = true;
+        caps->Events->WSPausableSubscriptionManagerInterfaceSupport  = false;
+    }
 
     // ── Imaging (Profile T mandatory) ─────────────────────────────────────
-    caps->Imaging = soap_new_tt__ImagingCapabilities(soap);
-    caps->Imaging->XAddr = base + "/onvif/imaging";
+    if (wantAll || wantImaging) {
+        caps->Imaging = soap_new_tt__ImagingCapabilities(soap);
+        caps->Imaging->XAddr = base + "/onvif/imaging";
+    }
 
     // PTZ KHÔNG quảng bá: đây là Fixed Camera, không hỗ trợ PTZ trong Profile T.
 
