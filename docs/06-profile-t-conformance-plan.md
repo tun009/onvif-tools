@@ -136,6 +136,12 @@ Tài liệu này tổng hợp toàn bộ vấn đề còn tồn đọng để pa
 - Mock data: hostname="MockCam-4K", DNS 8.8.8.8/8.8.4.4, iface="eth0" 192.168.254.119/24, gw=192.168.254.1, protocols=HTTP:80 on / HTTPS:443 off / RTSP:554 on.
 - Compile-check pass.
 
+**STATUS (01/07/2026) — Device Network kết quả test (result13.xml):**
+- ✅ Pass 4/31: `DEVICE-2-1-1` (Get Hostname), `2-1-4/5/6` (Get DNS, Set DNS SearchDomain, Set DNS Manual IPv4).
+- 🔴 Fail 27/31: **KHÔNG phải bug code**, mà là **subnet mismatch WS-Discovery** giống nhóm DISCOVERY. Các test này có step "Waiting for Hello from DUT" — vì test tool ở subnet 192.168.8.x, server ở 192.168.254.x, Hello không tới tool. Tool cache Hello từ device khác (Windows WSDAPI `192.168.8.48:5357`) và gửi request tới đó → response "Microsoft-HTTPAPI/2.0" / "Root element is missing".
+- **Fix code (DEVICE-2-1-3)**: SetHostname với hostname invalid trả nested fault `ter:InvalidArgVal/ter:InvalidHostname` — refactor helper `devSendOnvifFault` (giống pattern Imaging).
+- Còn lại chỉ có thể pass khi test tool + server cùng subnet.
+
 ### 🟠 Nhóm 4 — Device System (DEVICE-3-x)
 - `SetSystemDateAndTime` (+ xử lý invalid timezone/date), `SystemReboot`, `SetSystemFactoryDefault`.
 

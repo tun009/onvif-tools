@@ -8,6 +8,49 @@
 std::mutex DeviceService::netMtx_;
 DeviceService::NetworkState DeviceService::net_;
 
+// ONVIF fault XML thủ công — gSOAP không tự declare xmlns:ter cho prefix trong
+// subcode Value. Copy pattern từ ImagingService (đã pass ở IMAGING-1-1-8).
+static int devSendOnvifFault(struct soap* soap,
+                             const char* code,       // "SOAP-ENV:Sender"
+                             const char* subcode,    // "ter:InvalidArgVal"
+                             const char* subSubcode, // "ter:InvalidHostname" hoặc nullptr
+                             const char* reason) {
+    std::ostringstream os;
+    os << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+       << "<SOAP-ENV:Envelope"
+       << " xmlns:SOAP-ENV=\"http://www.w3.org/2003/05/soap-envelope\""
+       << " xmlns:ter=\"http://www.onvif.org/ver10/error\">"
+       << "<SOAP-ENV:Body><SOAP-ENV:Fault>"
+       << "<SOAP-ENV:Code><SOAP-ENV:Value>" << code << "</SOAP-ENV:Value>"
+       << "<SOAP-ENV:Subcode><SOAP-ENV:Value>" << subcode << "</SOAP-ENV:Value>";
+    if (subSubcode && *subSubcode) {
+        os << "<SOAP-ENV:Subcode><SOAP-ENV:Value>" << subSubcode
+           << "</SOAP-ENV:Value></SOAP-ENV:Subcode>";
+    }
+    os << "</SOAP-ENV:Subcode></SOAP-ENV:Code>"
+       << "<SOAP-ENV:Reason><SOAP-ENV:Text xml:lang=\"en\">"
+       << reason << "</SOAP-ENV:Text></SOAP-ENV:Reason>"
+       << "</SOAP-ENV:Fault></SOAP-ENV:Body></SOAP-ENV:Envelope>";
+    std::string xml = os.str();
+    soap->http_content = "application/soap+xml; charset=utf-8";
+    soap_response(soap, SOAP_FILE);
+    soap_send_raw(soap, xml.data(), xml.size());
+    soap_end_send(soap);
+    return SOAP_STOP;
+}
+
+// Kiểm tra hostname theo RFC 952/1123 tối giản: chỉ letter/digit/hyphen,
+// không được rỗng, không được bắt đầu/kết thúc bằng '-'.
+static bool isValidHostname(const std::string& h) {
+    if (h.empty() || h.size() > 63) return false;
+    if (h.front() == '-' || h.back() == '-') return false;
+    for (char c : h) {
+        if (!(std::isalnum((unsigned char)c) || c == '-' || c == '.'))
+            return false;
+    }
+    return true;
+}
+
 DeviceService::DeviceService(struct soap* soap, const ServiceConfig& cfg, std::shared_ptr<ICameraBackend> backend)
     : DeviceBindingService(soap), cfg_(cfg), backend_(std::move(backend)) {}
 
@@ -423,9 +466,11 @@ int DeviceService::SetHostname(_tds__SetHostname* req,
     (void)resp;
     this->soap->mustUnderstand = 0;
     this->soap->header = nullptr;
-    if (!req || req->Name.empty()) {
-        return soap_sender_fault_subcode(this->soap, "ter:InvalidArgVal",
-                                         "Sender", "Hostname cannot be empty");
+    if (!req || !isValidHostname(req->Name)) {
+        // DEVICE-2-1-3 yêu cầu nested subcode: Sender/InvalidArgVal/InvalidHostname
+        return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                 "ter:InvalidArgVal", "ter:InvalidHostname",
+                                 "Invalid hostname");
     }
     std::lock_guard<std::mutex> lk(netMtx_);
     net_.hostname = req->Name;
