@@ -177,7 +177,7 @@ int DeviceService::GetCapabilities(
     // Được hỗ trợ (legacy GetCapabilities): Device, Events, Imaging.
     // KHÔNG hỗ trợ: Media (chỉ có Media2/ver20), PTZ, Analytics → phải trả fault.
     bool wantAll = false, wantDevice = false, wantEvents = false,
-         wantImaging = false, reqUnsupported = false;
+         wantMedia = false, wantImaging = false, reqUnsupported = false;
     if (!tds__GetCapabilities || tds__GetCapabilities->Category.empty()) {
         wantAll = true;
     } else {
@@ -187,7 +187,7 @@ int DeviceService::GetCapabilities(
                 case tt__CapabilityCategory::Device:    wantDevice = true; break;
                 case tt__CapabilityCategory::Events:    wantEvents = true; break;
                 case tt__CapabilityCategory::Imaging:   wantImaging = true; break;
-                case tt__CapabilityCategory::Media:     reqUnsupported = true; break;
+                case tt__CapabilityCategory::Media:     wantMedia = true; break;
                 case tt__CapabilityCategory::PTZ:       reqUnsupported = true; break;
                 case tt__CapabilityCategory::Analytics: reqUnsupported = true; break;
             }
@@ -260,8 +260,17 @@ int DeviceService::GetCapabilities(
     }
     } // end Device
 
-    // Media (ver10) KHÔNG hỗ trợ — thiết bị dùng Media2 (ver20). Không đưa vào
-    // legacy GetCapabilities; hỏi Category=Media sẽ nhận fault ở trên.
+    // ── Media (Profile T: streaming RTP/RTSP/TCP) ─────────────────────────
+    // Test tool check "Media capabilities not found" khi Category=All hoặc =Media
+    // (DEVICE-1-1-2, 1-1-4). Trỏ về /onvif/media (Media2 sẽ xử lý các op ver20).
+    if (wantAll || wantMedia) {
+        caps->Media = soap_new_tt__MediaCapabilities(soap);
+        caps->Media->XAddr = base + "/onvif/media";
+        caps->Media->StreamingCapabilities = soap_new_tt__RealTimeStreamingCapabilities(soap);
+        caps->Media->StreamingCapabilities->RTPMulticast              = B(false);
+        caps->Media->StreamingCapabilities->RTP_USCORETCP             = B(true);
+        caps->Media->StreamingCapabilities->RTP_USCORERTSP_USCORETCP  = B(true);
+    }
 
     // ── Events (Profile T mandatory: PullPoint) ───────────────────────────
     if (wantAll || wantEvents) {
@@ -287,17 +296,111 @@ int DeviceService::GetCapabilities(
 
 // ── GetServices ──────────────────────────────────────────────────────────────
 int DeviceService::GetServices(
-    _tds__GetServices *tds__GetServices, 
-    _tds__GetServicesResponse &tds__GetServicesResponse) 
+    _tds__GetServices *tds__GetServices,
+    _tds__GetServicesResponse &tds__GetServicesResponse)
 {
-    (void)tds__GetServices;
     this->soap->mustUnderstand = 0;
     this->soap->header = nullptr;
     auto soap = this->soap;
 
+    const bool includeCaps = tds__GetServices && tds__GetServices->IncludeCapability;
     const std::string base = "http://" + cfg_.deviceIp + ":" + std::to_string(cfg_.httpPort);
 
-    // Danh sách service phải NHẤT QUÁN với GetCapabilities (test consistency)
+    // Khi IncludeCapability=true, tool đòi Capabilities inline trong tds:Service
+    // (DEVICE-1-1-13/14/16/17/19/30). tds:Service.Capabilities là xsd:any nên
+    // gSOAP class rỗng — build response XML thủ công.
+    if (includeCaps) {
+        std::ostringstream os;
+        os << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+           << "<SOAP-ENV:Envelope"
+           << " xmlns:SOAP-ENV=\"http://www.w3.org/2003/05/soap-envelope\""
+           << " xmlns:tds=\"http://www.onvif.org/ver10/device/wsdl\""
+           << " xmlns:tt=\"http://www.onvif.org/ver10/schema\""
+           << " xmlns:trt=\"http://www.onvif.org/ver10/media/wsdl\""
+           << " xmlns:tr2=\"http://www.onvif.org/ver20/media/wsdl\""
+           << " xmlns:tev=\"http://www.onvif.org/ver10/events/wsdl\""
+           << " xmlns:timg=\"http://www.onvif.org/ver20/imaging/wsdl\""
+           << ">"
+           << "<SOAP-ENV:Body><tds:GetServicesResponse>";
+
+        auto svc = [&](const char* ns, const std::string& path,
+                       int maj, int min, const std::string& capsXml) {
+            os << "<tds:Service>"
+               << "<tds:Namespace>" << ns << "</tds:Namespace>"
+               << "<tds:XAddr>" << base << path << "</tds:XAddr>"
+               << "<tds:Capabilities>" << capsXml << "</tds:Capabilities>"
+               << "<tds:Version><tt:Major>" << maj << "</tt:Major>"
+               << "<tt:Minor>" << min << "</tt:Minor></tds:Version>"
+               << "</tds:Service>";
+        };
+
+        // Device — khớp GetServiceCapabilities response
+        std::string devCaps =
+            "<tds:Capabilities>"
+              "<tds:Network IPFilter=\"false\" ZeroConfiguration=\"false\" "
+                "IPVersion6=\"false\" DynDNS=\"false\"/>"
+              "<tds:Security TLS1.1=\"false\" TLS1.2=\"false\" "
+                "OnboardKeyGeneration=\"false\" AccessPolicyConfig=\"false\" "
+                "X.509Token=\"false\" SAMLToken=\"false\" KerberosToken=\"false\" "
+                "RELToken=\"false\" HttpDigest=\"true\" UsernameToken=\"true\"/>"
+              "<tds:System DiscoveryResolve=\"true\" DiscoveryBye=\"true\" "
+                "RemoteDiscovery=\"false\" SystemBackup=\"false\" "
+                "SystemLogging=\"false\" FirmwareUpgrade=\"false\"/>"
+            "</tds:Capabilities>";
+        svc("http://www.onvif.org/ver10/device/wsdl", "/onvif/device_service",
+            21, 12, devCaps);
+
+        // Media (ver10 legacy) — trỏ Media2 endpoint
+        std::string mediaCaps =
+            "<trt:Capabilities SnapshotUri=\"true\" Rotation=\"false\" "
+             "VideoSourceMode=\"false\" OSD=\"false\">"
+              "<trt:ProfileCapabilities MaximumNumberOfProfiles=\"3\"/>"
+              "<trt:StreamingCapabilities RTPMulticast=\"false\" "
+               "RTP_TCP=\"true\" RTP_RTSP_TCP=\"true\" NonAggregateControl=\"false\"/>"
+            "</trt:Capabilities>";
+        svc("http://www.onvif.org/ver10/media/wsdl", "/onvif/media",
+            21, 12, mediaCaps);
+
+        // Media2 (ver20 - Profile T mandatory)
+        std::string media2Caps =
+            "<tr2:Capabilities SnapshotUri=\"true\" Rotation=\"false\" "
+             "VideoSourceMode=\"false\" OSD=\"false\">"
+              "<tr2:ProfileCapabilities MaximumNumberOfProfiles=\"3\" "
+               "ConfigurationsSupported=\"VideoSource VideoEncoder\"/>"
+              "<tr2:StreamingCapabilities RTPMulticast=\"false\" "
+               "RTP_TCP=\"true\" RTP_RTSP_TCP=\"true\" NonAggregateControl=\"false\"/>"
+            "</tr2:Capabilities>";
+        svc("http://www.onvif.org/ver20/media/wsdl", "/onvif/media",
+            21, 12, media2Caps);
+
+        // Events (Profile T mandatory)
+        std::string evtCaps =
+            "<tev:Capabilities WSSubscriptionPolicySupport=\"true\" "
+             "WSPullPointSupport=\"true\" "
+             "WSPausableSubscriptionManagerInterfaceSupport=\"false\" "
+             "MaxNotificationProducers=\"10\" MaxPullPoints=\"2\" "
+             "PersistentNotificationStorage=\"false\"/>";
+        svc("http://www.onvif.org/ver10/events/wsdl", "/onvif/event",
+            21, 12, evtCaps);
+
+        // Imaging (Profile T mandatory)
+        std::string imgCaps =
+            "<timg:Capabilities ImageStabilization=\"false\" "
+             "Presets=\"false\" AdaptablePreset=\"false\"/>";
+        svc("http://www.onvif.org/ver20/imaging/wsdl", "/onvif/imaging",
+            21, 12, imgCaps);
+
+        os << "</tds:GetServicesResponse></SOAP-ENV:Body></SOAP-ENV:Envelope>";
+        std::string xml = os.str();
+        soap->http_content = "application/soap+xml; charset=utf-8";
+        soap_response(soap, SOAP_FILE);
+        soap_send_raw(soap, xml.data(), xml.size());
+        soap_end_send(soap);
+        return SOAP_STOP;
+    }
+
+    // IncludeCapability=false → dùng gSOAP struct sinh XML bình thường
+    // (Capabilities để trống theo spec).
     auto add = [&](const char* ns, const std::string& path, int major, int minor) {
         auto s = soap_new_tds__Service(soap);
         s->Namespace = ns;
@@ -305,7 +408,6 @@ int DeviceService::GetServices(
         s->Version = soap_new_tt__OnvifVersion(soap);
         s->Version->Major = major;
         s->Version->Minor = minor;
-        // Capabilities (xsd:any) để trống — populate cần thao tác DOM, làm ở vòng sau.
         tds__GetServicesResponse.Service.push_back(s);
     };
 

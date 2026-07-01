@@ -196,6 +196,13 @@ Tài liệu này tổng hợp toàn bộ vấn đề còn tồn đọng để pa
 - Đã thêm `SupportedVersions` (bắt buộc) trong System.
 - Đã compile-check trên server (pass).
 
+**STATUS (02/07/2026) — Conformance test vòng 3 (result22.xml):**
+- Fix 3 vấn đề impact 10+ test:
+  1. **Khôi phục `Media` element trong GetCapabilities** — trước đó bỏ với comment "Media2 dùng /onvif/media", nhưng test tool cần Media capability (DEVICE-1-1-2). XAddr trỏ chung `/onvif/media`.
+  2. **GetServices IncludeCapability=true** — build response XML thủ công với Capabilities inline cho Device, Media(v10), Media2, Events, Imaging (DEVICE-1-1-13/14/16/17/19/30). tds:Service.Capabilities là xsd:any → gSOAP không handle được, phải manual XML + SOAP_STOP.
+  3. **DeleteProfile fault** — dùng manual XML `m2SendOnvifFault` với xmlns:ter khai báo rõ (giống ImagingService).
+- Compile-check pass.
+
 **STATUS (01/07/2026) — Media2 vòng 2 (theo result20.xml conformance test):**
 - Fix 4 lỗi mandatory Profile T:
   1. `MEDIA2-1-1-3` DeleteProfile: thêm override, validate token.

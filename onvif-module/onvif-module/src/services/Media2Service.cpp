@@ -2,6 +2,8 @@
 #include "auth/WsSecurityHandler.h"
 #include <iostream>
 #include <string>
+#include <sstream>
+#include <cstring>
 
 Media2Service::Media2Service(struct soap* soap,
                              const ServiceConfig& cfg,
@@ -556,6 +558,37 @@ int Media2Service::SetSynchronizationPoint(
     return SOAP_OK;
 }
 
+// Fault XML thủ công (giống ImagingService::sendOnvifFault) — gSOAP không tự
+// declare xmlns:ter cho prefix trong subcode Value.
+static int m2SendOnvifFault(struct soap* soap,
+                            const char* code,
+                            const char* subcode,
+                            const char* subSubcode,
+                            const char* reason) {
+    std::ostringstream os;
+    os << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+       << "<SOAP-ENV:Envelope"
+       << " xmlns:SOAP-ENV=\"http://www.w3.org/2003/05/soap-envelope\""
+       << " xmlns:ter=\"http://www.onvif.org/ver10/error\">"
+       << "<SOAP-ENV:Body><SOAP-ENV:Fault>"
+       << "<SOAP-ENV:Code><SOAP-ENV:Value>" << code << "</SOAP-ENV:Value>"
+       << "<SOAP-ENV:Subcode><SOAP-ENV:Value>" << subcode << "</SOAP-ENV:Value>";
+    if (subSubcode && *subSubcode) {
+        os << "<SOAP-ENV:Subcode><SOAP-ENV:Value>" << subSubcode
+           << "</SOAP-ENV:Value></SOAP-ENV:Subcode>";
+    }
+    os << "</SOAP-ENV:Subcode></SOAP-ENV:Code>"
+       << "<SOAP-ENV:Reason><SOAP-ENV:Text xml:lang=\"en\">"
+       << reason << "</SOAP-ENV:Text></SOAP-ENV:Reason>"
+       << "</SOAP-ENV:Fault></SOAP-ENV:Body></SOAP-ENV:Envelope>";
+    std::string xml = os.str();
+    soap->http_content = "application/soap+xml; charset=utf-8";
+    soap_response(soap, SOAP_FILE);
+    soap_send_raw(soap, xml.data(), xml.size());
+    soap_end_send(soap);
+    return SOAP_STOP;
+}
+
 // ── CreateProfile / DeleteProfile (Profile T mục 7.8) ──────────────────────
 int Media2Service::CreateProfile(
     _ns1__CreateProfile *req,
@@ -564,8 +597,8 @@ int Media2Service::CreateProfile(
     this->soap->mustUnderstand = 0;
     this->soap->header = nullptr;
     if (!req || req->Name.empty()) {
-        return soap_sender_fault_subcode(this->soap, "ter:InvalidArgVal",
-                                         "Sender", "Missing Name");
+        return m2SendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                "ter:InvalidArgVal", nullptr, "Missing Name");
     }
     // Mock: sinh token từ Name (không thực tạo profile trong backend).
     resp.Token = "profile_" + req->Name;
@@ -581,8 +614,8 @@ int Media2Service::DeleteProfile(
     this->soap->mustUnderstand = 0;
     this->soap->header = nullptr;
     if (!req || req->Token.empty()) {
-        return soap_sender_fault_subcode(this->soap, "ter:InvalidArgVal",
-                                         "Sender", "Missing Token");
+        return m2SendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                "ter:InvalidArgVal", nullptr, "Missing Token");
     }
     // Không xóa profile fixed từ backend — chỉ ack nếu token khớp danh sách.
     std::vector<StreamProfile> profiles;
@@ -592,8 +625,9 @@ int Media2Service::DeleteProfile(
         if (p.token == req->Token) { found = true; break; }
     }
     if (!found) {
-        return soap_sender_fault_subcode(this->soap, "ter:NoProfile",
-                                         "Sender", "Profile not found");
+        return m2SendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                "ter:InvalidArgVal", "ter:NoProfile",
+                                "Profile not found");
     }
     // Fixed profiles không xóa thực — trả OK để tool không dừng flow test.
     std::cout << "[Media2Service] DeleteProfile [" << req->Token
