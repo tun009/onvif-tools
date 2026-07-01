@@ -87,6 +87,10 @@ Tài liệu này tổng hợp toàn bộ vấn đề còn tồn đọng để pa
 - Route `/onvif/imaging` trong OnvifServer; Makefile thêm `soapImagingBindingService.cpp` vào GEN_SRCS.
 - Compile-check trên server: pass.
 
+**STATUS (01/07/2026) — Imaging vòng 2 (theo result7.xml):**
+- Test IMAGING-1-1-* fail toàn bộ ở STEP 4 "Neither media, nor I/O supported" vì tool tìm Media ver**10** namespace nhưng ta chỉ khai báo ver20.
+- **Fix:** thêm khai báo `http://www.onvif.org/ver10/media/wsdl` trong GetServices (endpoint dùng chung `/onvif/media` — Media2 xử lý). Chỉ khai báo, không implement Media ver10 (Profile T dùng Media2). Compile-check pass.
+
 ### 🟠 Nhóm 3 — Device Network (DEVICE-2-x, IPCONFIG)
 - `GetNetworkInterfaces`/`Set`, `GetDNS`/`Set`, `GetNetworkDefaultGateway`/`Set`,
   `GetNetworkProtocols`/`Set`, `GetHostname`/`Set`, DHCP IPv4.

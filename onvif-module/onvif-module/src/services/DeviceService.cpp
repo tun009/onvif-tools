@@ -257,6 +257,10 @@ int DeviceService::GetServices(
     };
 
     add("http://www.onvif.org/ver10/device/wsdl",  "/onvif/device_service", 21, 12); // Device
+    // Khai báo cả Media ver10 (legacy) + Media2 ver20 (Profile T). Test tool
+    // Imaging tìm Media ver10 để phát hiện VideoSource; nếu thiếu → fail
+    // "Neither media, nor I/O supported".
+    add("http://www.onvif.org/ver10/media/wsdl",   "/onvif/media",          21, 12); // Media (legacy)
     add("http://www.onvif.org/ver20/media/wsdl",   "/onvif/media",          21, 12); // Media2 (Profile T)
     add("http://www.onvif.org/ver10/events/wsdl",  "/onvif/event",          21, 12); // Events (Profile T)
     add("http://www.onvif.org/ver20/imaging/wsdl", "/onvif/imaging",        21, 12); // Imaging (Profile T)
