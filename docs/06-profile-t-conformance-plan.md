@@ -96,6 +96,18 @@ Tài liệu này tổng hợp toàn bộ vấn đề còn tồn đọng để pa
 - **Fix:** tạo `MediaLegacyHandler` (XML thủ công) intercept request Media ver10 trong OnvifServer trước khi dispatch Media2. Trả `GetVideoSourcesResponse` với 1 VideoSource `token=video_source_token` (khớp Media2Service), 1920x1080@30fps.
 - Compile-check pass. Chỉ implement 1 op Media ver10 duy nhất (GetVideoSources) — vừa đủ cho test IMAGING; các op Media2 khác vẫn qua binding gSOAP.
 
+**STATUS (01/07/2026) — Imaging vòng 4 (theo result9.xml):**
+- ✅ Đã pass: IMAGING-1-1-1/3/15, IMAGING-2-1-11/13/17/18 (status/stop/invalid token cho Move — được coi là negative pass).
+- **Fix 4 nguyên nhân:**
+  1. `GetServiceCapabilities`: set explicit `false` cho 3 attribute (ImageStabilization/Presets/AdaptablePreset) → tool deserialize được (IMAGING-3-1-1).
+  2. Validate `VideoSourceToken` — chỉ chấp nhận `"video_source_token"`, khác → fault `ter:NoSource` (IMAGING-1-1-10/11/12).
+  3. Validate range 0..100 cho settings → fault `ter:SettingsInvalid` (IMAGING-1-1-8).
+  4. Cache riêng trong ImagingService (`static map` + `mutex`) — backend mock không persist BLC/WDR, cache đảm bảo Get sau Set trả đúng giá trị (IMAGING-1-1-14, 1-1-16).
+- **Skip (không thuộc Profile T bắt buộc):**
+  - IMAGING-2-1-* Focus Move (Move/Stop/GetStatus/GetMoveOptions) — Fixed Camera, không hỗ trợ.
+  - IMAGING-3-1-2 (GetServices consistency) — cần xsd:any Capabilities (đã note ở nhóm 6).
+  - IMAGING-4-1-* Events tampering (ImageTooBlurry/Dark/Bright/MotionAlarm) — cần backend phát event thật, ngoài scope mock.
+
 ### 🟠 Nhóm 3 — Device Network (DEVICE-2-x, IPCONFIG)
 - `GetNetworkInterfaces`/`Set`, `GetDNS`/`Set`, `GetNetworkDefaultGateway`/`Set`,
   `GetNetworkProtocols`/`Set`, `GetHostname`/`Set`, DHCP IPv4.

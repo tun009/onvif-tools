@@ -5,10 +5,24 @@
 #include "services/ImagingService.h"
 #include <iostream>
 
+std::mutex ImagingService::cacheMtx_;
+std::map<std::string, ImagingSettings> ImagingService::cache_;
+
 ImagingService::ImagingService(struct soap* soap,
                                const ServiceConfig& cfg,
                                std::shared_ptr<ICameraBackend> backend)
     : ImagingBindingService(soap), cfg_(cfg), backend_(std::move(backend)) {}
+
+// Token hợp lệ khớp với MediaLegacyHandler + Media2Service.
+bool ImagingService::isValidToken(const std::string& tok) {
+    return tok == "video_source_token";
+}
+
+bool ImagingService::isValidSettings(const ImagingSettings& s) {
+    auto in = [](float v) { return v >= 0.0f && v <= 100.0f; };
+    return in(s.brightness) && in(s.contrast)
+        && in(s.saturation) && in(s.sharpness);
+}
 
 ImagingBindingService* ImagingService::copy() {
     return new ImagingService(this->soap, cfg_, backend_);
@@ -34,7 +48,12 @@ int ImagingService::GetServiceCapabilities(
     auto soap = this->soap;
 
     auto caps = soap_new_timg__Capabilities(soap);
-    // Không hỗ trợ ImageStabilization / Presets — không set (mặc định null = false).
+    // Set explicit false — nếu để null, XML sinh ra thiếu attribute, tool báo
+    // "Error in deserializing body" (IMAGING-3-1-1).
+    auto B = [&](bool v) { bool* p = (bool*)soap_malloc(soap, sizeof(bool)); *p = v; return p; };
+    caps->ImageStabilization = B(false);
+    caps->Presets            = B(false);
+    caps->AdaptablePreset    = B(false);
     resp.Capabilities = caps;
     return SOAP_OK;
 }
@@ -48,12 +67,25 @@ int ImagingService::GetImagingSettings(
     this->soap->header = nullptr;
     auto soap = this->soap;
 
+    const std::string tok = req ? req->VideoSourceToken : "";
+    if (!isValidToken(tok)) {
+        return soap_sender_fault_subcode(soap, "ter:NoSource",
+                                         "Sender", "Invalid VideoSourceToken");
+    }
+
+    // Đọc từ cache trước, fallback backend nếu chưa có.
     ImagingSettings s;
-    try {
-        s = backend_->getImagingSettings(req ? req->VideoSourceToken : "");
-    } catch (const std::exception& e) {
-        std::cerr << "[ImagingService] backend error: " << e.what() << "\n";
-        // fallback dùng giá trị mặc định của struct
+    {
+        std::lock_guard<std::mutex> lk(cacheMtx_);
+        auto it = cache_.find(tok);
+        if (it != cache_.end()) s = it->second;
+        else {
+            try { s = backend_->getImagingSettings(tok); }
+            catch (const std::exception& e) {
+                std::cerr << "[ImagingService] backend error: " << e.what() << "\n";
+            }
+            cache_[tok] = s;
+        }
     }
 
     auto out = soap_new_tt__ImagingSettings20(soap);
@@ -108,11 +140,21 @@ int ImagingService::SetImagingSettings(
         return soap_sender_fault_subcode(this->soap, "ter:InvalidArgVal",
                                          "Sender", "Missing ImagingSettings");
     }
+    if (!isValidToken(req->VideoSourceToken)) {
+        return soap_sender_fault_subcode(this->soap, "ter:NoSource",
+                                         "Sender", "Invalid VideoSourceToken");
+    }
 
     ImagingSettings s;
-    // Đọc giá trị hiện tại làm baseline, chỉ ghi đè trường được gửi
-    try { s = backend_->getImagingSettings(req->VideoSourceToken); }
-    catch (...) { /* dùng default */ }
+    {
+        std::lock_guard<std::mutex> lk(cacheMtx_);
+        auto it = cache_.find(req->VideoSourceToken);
+        if (it != cache_.end()) s = it->second;
+        else {
+            try { s = backend_->getImagingSettings(req->VideoSourceToken); }
+            catch (...) {}
+        }
+    }
 
     if (req->ImagingSettings->Brightness)      s.brightness  = *req->ImagingSettings->Brightness;
     if (req->ImagingSettings->ColorSaturation) s.saturation  = *req->ImagingSettings->ColorSaturation;
@@ -127,15 +169,22 @@ int ImagingService::SetImagingSettings(
             (req->ImagingSettings->WideDynamicRange->Mode ==
              tt__WideDynamicMode::ON);
 
-    try {
-        if (!backend_->setImagingSettings(req->VideoSourceToken, s)) {
-            return soap_receiver_fault_subcode(
-                this->soap, "ter:Failed", "Receiver",
-                "Backend rejected imaging settings");
-        }
-    } catch (const std::exception& e) {
-        std::cerr << "[ImagingService] setImagingSettings error: " << e.what() << "\n";
-        return soap_receiver_fault(this->soap, "Backend error", nullptr);
+    // Validate range — settings ngoài [0,100] → fault (IMAGING-1-1-8).
+    if (!isValidSettings(s)) {
+        return soap_sender_fault_subcode(this->soap, "ter:SettingsInvalid",
+                                         "Sender",
+                                         "Imaging settings out of range");
+    }
+
+    // Ghi cache + best-effort push xuống backend.
+    {
+        std::lock_guard<std::mutex> lk(cacheMtx_);
+        cache_[req->VideoSourceToken] = s;
+    }
+    try { backend_->setImagingSettings(req->VideoSourceToken, s); }
+    catch (const std::exception& e) {
+        std::cerr << "[ImagingService] setImagingSettings backend err: "
+                  << e.what() << " (cache still updated)\n";
     }
     return SOAP_OK;
 }
@@ -145,10 +194,14 @@ int ImagingService::GetOptions(
     _timg__GetOptions *req,
     _timg__GetOptionsResponse &resp)
 {
-    (void)req;
     this->soap->mustUnderstand = 0;
     this->soap->header = nullptr;
     auto soap = this->soap;
+
+    if (!req || !isValidToken(req->VideoSourceToken)) {
+        return soap_sender_fault_subcode(soap, "ter:NoSource",
+                                         "Sender", "Invalid VideoSourceToken");
+    }
 
     auto opts = soap_new_tt__ImagingOptions20(soap);
 
