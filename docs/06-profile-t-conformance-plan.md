@@ -145,6 +145,21 @@ Tài liệu này tổng hợp toàn bộ vấn đề còn tồn đọng để pa
 ### 🟠 Nhóm 4 — Device System (DEVICE-3-x)
 - `SetSystemDateAndTime` (+ xử lý invalid timezone/date), `SystemReboot`, `SetSystemFactoryDefault`.
 
+**STATUS (01/07/2026) — Device System + User:**
+- Bám Profile T mục 7.5 (System) + 7.6 (User handling). Mandatory 7 op mới:
+  - System: `SetSystemDateAndTime`, `SetSystemFactoryDefault`, `SystemReboot`.
+  - User: `CreateUsers`, `DeleteUsers`, `SetUser` (`GetUsers` đã có, cập nhật đọc cache).
+- Implement trong `DeviceService` — không cần binding mới.
+- State static `SystemState` (mutex-protected) với danh sách users; mặc định 1 admin (admin/admin123).
+- **Fault đầy đủ nested subcode** dùng `devSendOnvifFault`:
+  - Invalid timezone/date → `ter:InvalidArgVal/ter:InvalidTimeZone|ter:InvalidDateTime`.
+  - Empty username → `ter:InvalidArgVal/ter:UsernameMissing`.
+  - Missing password → `ter:InvalidArgVal/ter:PasswordMissing`.
+  - Trùng username → `ter:OperationProhibited/ter:UsernameClash`.
+  - Xóa admin cuối → `ter:OperationProhibited/ter:FixedUser`.
+- `GetUsers` giờ đọc từ cache thay vì hardcode (SetUser/CreateUsers/DeleteUsers thay đổi phản ánh ngay).
+- Compile-check pass.
+
 ### 🟠 Nhóm 5 — User/Security (DEVICE-4-x, SECURITY-1)
 - `GetUsers` / `CreateUsers` / `SetUser` / `DeleteUsers` + error case.
 - `USER TOKEN PROFILE`: WS-Security UsernameToken đúng chuẩn → **bỏ `mustUnderstand` bypass** trong `OnvifServer`.

@@ -43,6 +43,16 @@ public:
     virtual int GetNetworkProtocols(_tds__GetNetworkProtocols *req, _tds__GetNetworkProtocolsResponse &resp) override;
     virtual int SetNetworkProtocols(_tds__SetNetworkProtocols *req, _tds__SetNetworkProtocolsResponse &resp) override;
 
+    // ── System (Profile T mandatory 7.5) ─────────────────────────────────
+    virtual int SetSystemDateAndTime(_tds__SetSystemDateAndTime *req, _tds__SetSystemDateAndTimeResponse &resp) override;
+    virtual int SetSystemFactoryDefault(_tds__SetSystemFactoryDefault *req, _tds__SetSystemFactoryDefaultResponse &resp) override;
+    virtual int SystemReboot(_tds__SystemReboot *req, _tds__SystemRebootResponse &resp) override;
+
+    // ── User handling (Profile T mandatory 7.6) ──────────────────────────
+    virtual int CreateUsers(_tds__CreateUsers *req, _tds__CreateUsersResponse &resp) override;
+    virtual int DeleteUsers(_tds__DeleteUsers *req, _tds__DeleteUsersResponse &resp) override;
+    virtual int SetUser(_tds__SetUser *req, _tds__SetUserResponse &resp) override;
+
 private:
     bool validateAuth();
 
@@ -79,4 +89,20 @@ private:
     };
     static std::mutex netMtx_;
     static NetworkState net_;
+
+    // System + User state (Profile T 7.5 & 7.6)
+    struct MockUser {
+        std::string username;
+        std::string password;
+        int level = 0;   // 0=Admin, 1=Operator, 2=User, 3=Anonymous, 4=Extended
+    };
+    struct SystemState {
+        // Time
+        bool ntpEnabled = false;
+        int  tzOffsetMin = 0;
+        // Users
+        std::vector<MockUser> users = {{"admin", "admin123", 0}};
+    };
+    static std::mutex sysMtx_;
+    static SystemState sys_;
 };

@@ -4,9 +4,12 @@
 #include <ctime>
 #include <cstring>
 #include <sstream>
+#include <algorithm>
 
 std::mutex DeviceService::netMtx_;
 DeviceService::NetworkState DeviceService::net_;
+std::mutex DeviceService::sysMtx_;
+DeviceService::SystemState DeviceService::sys_;
 
 // ONVIF fault XML thủ công — gSOAP không tự declare xmlns:ter cho prefix trong
 // subcode Value. Copy pattern từ ImagingService (đã pass ở IMAGING-1-1-8).
@@ -359,11 +362,15 @@ int DeviceService::GetUsers(
 
     auto soap = this->soap;
 
-    auto user = soap_new_tt__User(soap);
-    user->Username = cfg_.username;
-    user->UserLevel = tt__UserLevel::Administrator;
-    tds__GetUsersResponse.User.push_back(user);
-
+    // Đọc từ user cache (Set/Delete/Create update state này).
+    std::lock_guard<std::mutex> lk(sysMtx_);
+    for (const auto& mu : sys_.users) {
+        auto user = soap_new_tt__User(soap);
+        user->Username = mu.username;
+        // Không trả Password (schema — Password là secret, không expose).
+        user->UserLevel = static_cast<tt__UserLevel>(mu.level);
+        tds__GetUsersResponse.User.push_back(user);
+    }
     return SOAP_OK;
 }
 
@@ -640,6 +647,186 @@ int DeviceService::SetNetworkProtocols(_tds__SetNetworkProtocols* req,
                 if (!p->Port.empty()) cur.port = p->Port[0];
             }
         }
+    }
+    return SOAP_OK;
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// System (Profile T mục 7.5)
+// ══════════════════════════════════════════════════════════════════════════
+
+int DeviceService::SetSystemDateAndTime(_tds__SetSystemDateAndTime* req,
+                                        _tds__SetSystemDateAndTimeResponse& resp) {
+    (void)resp;
+    this->soap->mustUnderstand = 0;
+    this->soap->header = nullptr;
+    if (!req) {
+        return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                 "ter:InvalidArgVal", nullptr,
+                                 "Missing request");
+    }
+    // Validate: nếu Manual, UTCDateTime bắt buộc.
+    if (req->DateTimeType == tt__SetDateTimeType::Manual && !req->UTCDateTime) {
+        return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                 "ter:InvalidArgVal", "ter:MissingAttribute",
+                                 "UTCDateTime required for Manual");
+    }
+    // Validate timezone (nếu có) — check ký tự bậy đơn giản.
+    if (req->TimeZone) {
+        const std::string& tz = req->TimeZone->TZ;
+        // POSIX TZ format tối giản: các ký tự cho phép [A-Za-z0-9+\-:]
+        for (char c : tz) {
+            if (!(std::isalnum((unsigned char)c) || c=='+'||c=='-'||c==':'||c=='/'))
+                return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                         "ter:InvalidArgVal", "ter:InvalidTimeZone",
+                                         "Invalid timezone format");
+        }
+    }
+    // Validate date (nếu Manual)
+    if (req->DateTimeType == tt__SetDateTimeType::Manual && req->UTCDateTime
+        && req->UTCDateTime->Date) {
+        auto* d = req->UTCDateTime->Date;
+        if (d->Month < 1 || d->Month > 12 || d->Day < 1 || d->Day > 31
+            || d->Year < 1970 || d->Year > 2099) {
+            return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                     "ter:InvalidArgVal", "ter:InvalidDateTime",
+                                     "Invalid date");
+        }
+    }
+    std::lock_guard<std::mutex> lk(sysMtx_);
+    sys_.ntpEnabled = (req->DateTimeType == tt__SetDateTimeType::NTP);
+    // Không thực sự set system clock (mock).
+    return SOAP_OK;
+}
+
+int DeviceService::SetSystemFactoryDefault(_tds__SetSystemFactoryDefault* req,
+                                           _tds__SetSystemFactoryDefaultResponse& resp) {
+    (void)req; (void)resp;
+    this->soap->mustUnderstand = 0;
+    this->soap->header = nullptr;
+    // Không thực sự reset — chỉ ack. Có thể clear cache trong tương lai.
+    std::cout << "[DeviceService] SetSystemFactoryDefault ack (mock)\n";
+    return SOAP_OK;
+}
+
+int DeviceService::SystemReboot(_tds__SystemReboot* req,
+                                _tds__SystemRebootResponse& resp) {
+    (void)req;
+    this->soap->mustUnderstand = 0;
+    this->soap->header = nullptr;
+    resp.Message = "Rebooting in 5 seconds";
+    std::cout << "[DeviceService] SystemReboot ack (mock)\n";
+    return SOAP_OK;
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// User handling (Profile T mục 7.6)
+// ══════════════════════════════════════════════════════════════════════════
+
+int DeviceService::CreateUsers(_tds__CreateUsers* req,
+                               _tds__CreateUsersResponse& resp) {
+    (void)resp;
+    this->soap->mustUnderstand = 0;
+    this->soap->header = nullptr;
+    if (!req || req->User.empty()) {
+        return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                 "ter:InvalidArgVal", nullptr,
+                                 "No users provided");
+    }
+    std::lock_guard<std::mutex> lk(sysMtx_);
+    for (auto* u : req->User) {
+        if (!u || u->Username.empty()) {
+            return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                     "ter:InvalidArgVal", "ter:UsernameMissing",
+                                     "Empty username");
+        }
+        // Password bắt buộc trong ONVIF (trừ Anonymous)
+        if (u->UserLevel != tt__UserLevel::Anonymous && !u->Password) {
+            return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                     "ter:InvalidArgVal", "ter:PasswordMissing",
+                                     "Password required");
+        }
+        // Kiểm tra trùng
+        for (const auto& ex : sys_.users) {
+            if (ex.username == u->Username) {
+                return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                         "ter:OperationProhibited",
+                                         "ter:UsernameClash",
+                                         "Username already exists");
+            }
+        }
+        MockUser mu;
+        mu.username = u->Username;
+        mu.password = u->Password ? *u->Password : "";
+        mu.level = static_cast<int>(u->UserLevel);
+        sys_.users.push_back(mu);
+    }
+    return SOAP_OK;
+}
+
+int DeviceService::DeleteUsers(_tds__DeleteUsers* req,
+                               _tds__DeleteUsersResponse& resp) {
+    (void)resp;
+    this->soap->mustUnderstand = 0;
+    this->soap->header = nullptr;
+    if (!req || req->Username.empty()) {
+        return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                 "ter:InvalidArgVal", nullptr,
+                                 "No username provided");
+    }
+    std::lock_guard<std::mutex> lk(sysMtx_);
+    for (const auto& name : req->Username) {
+        // Không cho xóa admin cuối cùng (fixed camera cần ≥1 admin)
+        int adminCount = 0;
+        for (const auto& u : sys_.users)
+            if (u.level == 0) ++adminCount;
+
+        auto it = std::find_if(sys_.users.begin(), sys_.users.end(),
+                               [&](const MockUser& u){ return u.username == name; });
+        if (it == sys_.users.end()) {
+            std::string msg = "User not found: " + name;
+            return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                     "ter:InvalidArgVal", "ter:UsernameMissing",
+                                     msg.c_str());
+        }
+        if (it->level == 0 && adminCount <= 1) {
+            return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                     "ter:OperationProhibited",
+                                     "ter:FixedUser",
+                                     "Cannot delete last admin");
+        }
+        sys_.users.erase(it);
+    }
+    return SOAP_OK;
+}
+
+int DeviceService::SetUser(_tds__SetUser* req,
+                           _tds__SetUserResponse& resp) {
+    (void)resp;
+    this->soap->mustUnderstand = 0;
+    this->soap->header = nullptr;
+    if (!req || req->User.empty()) {
+        return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                 "ter:InvalidArgVal", nullptr,
+                                 "No users provided");
+    }
+    std::lock_guard<std::mutex> lk(sysMtx_);
+    for (auto* u : req->User) {
+        if (!u || u->Username.empty()) {
+            return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                     "ter:InvalidArgVal", "ter:UsernameMissing",
+                                     "Empty username");
+        }
+        auto it = std::find_if(sys_.users.begin(), sys_.users.end(),
+                               [&](const MockUser& mu){ return mu.username == u->Username; });
+        if (it == sys_.users.end()) {
+            std::string msg = "User not found: " + u->Username;
+            return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                     "ter:InvalidArgVal", "ter:UsernameMissing",
+                                     msg.c_str());
+        }
+        if (u->Password) it->password = *u->Password;
+        it->level = static_cast<int>(u->UserLevel);
     }
     return SOAP_OK;
 }
