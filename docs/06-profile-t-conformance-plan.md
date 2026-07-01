@@ -71,6 +71,10 @@ Tài liệu này tổng hợp toàn bộ vấn đề còn tồn đọng để pa
 - Áp dụng topic filter khi PullMessages; `extractTag` viết lại để đọc được element có attribute.
 - **Còn có thể đỏ:** EVENT-3-1-16/38 nếu tool đòi lọc message content chính xác hơn (hiện chỉ lọc theo topic) — chờ test lại.
 
+**STATUS (01/07/2026) — vòng 3, theo log `result3.xml`:**
+- Nguyên nhân 1: SOAP Fault thiếu `<wsa:Action>...soap/fault</wsa:Action>` trong header → tool báo "No Action element from namespace Addressing10". **Fix:** thêm WS-Addressing header vào `soapFault` (ảnh hưởng EVENT-3-1-17, 19, 20, 22).
+- Nguyên nhân 2: TopicSet chứa `tt:MessageDescription` bên trong topic leaf → tool crash "Index out of bounds" khi parse cây topic. **Fix:** bỏ hết MessageDescription, chỉ giữ topic leaf trống `wstop:topic="true"` (ảnh hưởng EVENT-3-1-16, 25, 33, 34, 35, 38).
+
 ### 🟠 Nhóm 3 — Device Network (DEVICE-2-x, IPCONFIG)
 - `GetNetworkInterfaces`/`Set`, `GetDNS`/`Set`, `GetNetworkDefaultGateway`/`Set`,
   `GetNetworkProtocols`/`Set`, `GetHostname`/`Set`, DHCP IPv4.

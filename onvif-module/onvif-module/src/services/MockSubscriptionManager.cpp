@@ -123,12 +123,18 @@ std::string MockSubscriptionManager::wrapEnvelope(const std::string& action,
 std::string MockSubscriptionManager::soapFault(const std::string& code,
                                                const std::string& subcode,
                                                const std::string& reason) {
+    // Fault phải có wsa:Action = ".../soap/fault" (test tool kiểm tra strict).
     std::ostringstream os;
     os << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
        << "<SOAP-ENV:Envelope"
        << " xmlns:SOAP-ENV=\"http://www.w3.org/2003/05/soap-envelope\""
+       << " xmlns:wsa=\"http://www.w3.org/2005/08/addressing\""
        << " xmlns:ter=\"http://www.onvif.org/ver10/error\""
        << " xmlns:wsnt=\"http://docs.oasis-open.org/wsn/b-2\">"
+       << "<SOAP-ENV:Header>"
+       << "<wsa:Action>http://www.w3.org/2005/08/addressing/soap/fault</wsa:Action>"
+       << "<wsa:MessageID>" << newMessageId() << "</wsa:MessageID>"
+       << "</SOAP-ENV:Header>"
        << "<SOAP-ENV:Body><SOAP-ENV:Fault>"
        << "<SOAP-ENV:Code><SOAP-ENV:Value>" << code << "</SOAP-ENV:Value>"
        << "<SOAP-ENV:Subcode><SOAP-ENV:Value>" << subcode << "</SOAP-ENV:Value></SOAP-ENV:Subcode>"
@@ -185,33 +191,16 @@ std::string MockSubscriptionManager::handleGetEventProperties(const std::string&
         "<tev:GetEventPropertiesResponse>"
         "<tev:TopicNamespaceLocation>http://www.onvif.org/onvif/ver10/topics/topicns.xml</tev:TopicNamespaceLocation>"
         "<wsnt:FixedTopicSet>true</wsnt:FixedTopicSet>"
-        // Topic con PHẢI có namespace prefix (tns1); nếu để trần, topic parser
-        // của test tool bị "Index out of bounds" khi tách QName.
+        // TopicSet: chỉ khai báo cây topic thuần với `wstop:topic="true"` ở lá.
+        // KHÔNG nhúng tt:MessageDescription bên trong topic leaf — test tool
+        // parse cây topic sẽ crash "Index out of bounds" vì tưởng đó là sub-topic.
         "<wstop:TopicSet>"
           "<tns1:VideoSource>"
-            "<tns1:MotionAlarm wstop:topic=\"true\">"
-              "<tt:MessageDescription IsProperty=\"true\">"
-                "<tt:Source><tt:SimpleItemDescription Name=\"Source\" Type=\"tt:ReferenceToken\"/></tt:Source>"
-                "<tt:Data><tt:SimpleItemDescription Name=\"State\" Type=\"xs:boolean\"/></tt:Data>"
-              "</tt:MessageDescription>"
-            "</tns1:MotionAlarm>"
+            "<tns1:MotionAlarm wstop:topic=\"true\"/>"
           "</tns1:VideoSource>"
           "<tns1:Media>"
-            "<tns1:ProfileChanged wstop:topic=\"true\">"
-              "<tt:MessageDescription IsProperty=\"false\">"
-                "<tt:Source><tt:SimpleItemDescription Name=\"Token\" Type=\"tt:ReferenceToken\"/></tt:Source>"
-                "<tt:Data><tt:SimpleItemDescription Name=\"ProfileToken\" Type=\"tt:ReferenceToken\"/></tt:Data>"
-              "</tt:MessageDescription>"
-            "</tns1:ProfileChanged>"
-            "<tns1:ConfigurationChanged wstop:topic=\"true\">"
-              "<tt:MessageDescription IsProperty=\"false\">"
-                "<tt:Source>"
-                  "<tt:SimpleItemDescription Name=\"Token\" Type=\"tt:ReferenceToken\"/>"
-                  "<tt:SimpleItemDescription Name=\"Type\" Type=\"xs:string\"/>"
-                "</tt:Source>"
-                "<tt:Data><tt:SimpleItemDescription Name=\"ConfigToken\" Type=\"tt:ReferenceToken\"/></tt:Data>"
-              "</tt:MessageDescription>"
-            "</tns1:ConfigurationChanged>"
+            "<tns1:ProfileChanged wstop:topic=\"true\"/>"
+            "<tns1:ConfigurationChanged wstop:topic=\"true\"/>"
           "</tns1:Media>"
         "</wstop:TopicSet>"
         "<wsnt:TopicExpressionDialect>http://www.onvif.org/ver10/tev/topicExpression/ConcreteSet</wsnt:TopicExpressionDialect>"
