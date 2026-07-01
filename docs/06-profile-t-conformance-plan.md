@@ -63,6 +63,14 @@ Tài liệu này tổng hợp toàn bộ vấn đề còn tồn đọng để pa
 - Đã compile-check trên server (pass).
 - **Chưa làm:** EVENT-2 Basic Notification (push/Notify — cần device gọi ngược client); EVENT-6 Seek; EVENT-7 MQTT (đều ngoài Profile T bắt buộc hoặc optional).
 
+**STATUS (01/07/2026) — vòng 2, sửa theo log test tool 324.xml:**
+- ✅ Đã xanh: EVENT-1-1-2, EVENT-3-1-9/12/15/24/25/32/36/37, EVENT-4-1-6→10, EVENT-5-1-1.
+- **Fix TopicSet**: prefix topic con bằng `tns1` (MotionAlarm→tns1:MotionAlarm...) — sửa lỗi tool "Index out of bounds" ở bước Parse topic (EVENT-3-1-16/33/34/35/38).
+- **Validate Filter** trong CreatePullPoint: TopicExpression không hợp lệ (không có ':') → `wsnt:InvalidTopicExpressionFault` (EVENT-3-1-22); MessageContent ngoặc lệch → `wsnt:InvalidMessageContentExpressionFault` (EVENT-3-1-17).
+- **Honor InitialTerminationTime** (PT20S...) + auto-expire subscription → unsubscribe sau hết hạn trả fault (EVENT-3-1-20).
+- Áp dụng topic filter khi PullMessages; `extractTag` viết lại để đọc được element có attribute.
+- **Còn có thể đỏ:** EVENT-3-1-16/38 nếu tool đòi lọc message content chính xác hơn (hiện chỉ lọc theo topic) — chờ test lại.
+
 ### 🟠 Nhóm 3 — Device Network (DEVICE-2-x, IPCONFIG)
 - `GetNetworkInterfaces`/`Set`, `GetDNS`/`Set`, `GetNetworkDefaultGateway`/`Set`,
   `GetNetworkProtocols`/`Set`, `GetHostname`/`Set`, DHCP IPv4.

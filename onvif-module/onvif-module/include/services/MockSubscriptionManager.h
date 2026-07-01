@@ -17,6 +17,7 @@ struct SubscriptionState {
     std::string id;
     std::chrono::steady_clock::time_point terminationTime;
     int timeoutSeconds = 60;
+    std::string topicFilter;   // nội dung TopicExpression (rỗng = không lọc)
 };
 
 class MockSubscriptionManager {
@@ -50,7 +51,12 @@ private:
     std::string wrapEnvelope(const std::string& action,
                              const std::string& relatesTo,
                              const std::string& bodyXml) const;
-    static std::string soapFault(const std::string& subcode, const std::string& reason);
+    // code = "SOAP-ENV:Sender" hoặc "SOAP-ENV:Receiver"
+    static std::string soapFault(const std::string& code,
+                                 const std::string& subcode,
+                                 const std::string& reason);
+    static int parseDurationSeconds(const std::string& iso, int fallback);
+    void purgeExpired();   // xóa các subscription đã hết hạn
 
     std::mutex mtx_;
     std::map<std::string, SubscriptionState> subscriptions_;

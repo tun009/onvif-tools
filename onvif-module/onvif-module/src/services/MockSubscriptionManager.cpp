@@ -54,10 +54,13 @@ std::string MockSubscriptionManager::newMessageId() {
 
 std::string MockSubscriptionManager::extractTag(const std::string& xml,
                                                 const std::string& localName) {
-    const std::string token = localName + ">";
-    size_t p = xml.find(token);
+    // Tìm phần tử mở đầu tiên có tên cục bộ này (chịu được thuộc tính).
+    size_t p = xml.find(localName);
     if (p == std::string::npos) return "";
-    size_t start = p + token.size();
+    size_t gt = xml.find('>', p);          // kết thúc thẻ mở (dù có attribute)
+    if (gt == std::string::npos) return "";
+    if (xml[gt - 1] == '/') return "";      // thẻ tự đóng → không có nội dung
+    size_t start = gt + 1;
     size_t end = xml.find('<', start);
     if (end == std::string::npos) return "";
     std::string v = xml.substr(start, end - start);
@@ -65,6 +68,31 @@ std::string MockSubscriptionManager::extractTag(const std::string& xml,
     size_t b = v.find_last_not_of(" \t\r\n");
     if (a == std::string::npos) return "";
     return v.substr(a, b - a + 1);
+}
+
+// Parse xsd:duration đơn giản dạng PT#H#M#S → giây. Trả fallback nếu không hợp lệ.
+int MockSubscriptionManager::parseDurationSeconds(const std::string& iso, int fallback) {
+    if (iso.empty() || iso[0] != 'P') return fallback;
+    size_t tpos = iso.find('T');
+    if (tpos == std::string::npos) return fallback;
+    int total = 0; long num = 0; bool has = false;
+    for (size_t i = tpos + 1; i < iso.size(); ++i) {
+        char c = iso[i];
+        if (c >= '0' && c <= '9') { num = num * 10 + (c - '0'); has = true; }
+        else if (c == 'H') { total += num * 3600; num = 0; has = false; }
+        else if (c == 'M') { total += num * 60;   num = 0; has = false; }
+        else if (c == 'S') { total += num;        num = 0; has = false; }
+    }
+    (void)has;
+    return total > 0 ? total : fallback;
+}
+
+void MockSubscriptionManager::purgeExpired() {
+    auto now = std::chrono::steady_clock::now();
+    for (auto it = subscriptions_.begin(); it != subscriptions_.end(); ) {
+        if (now >= it->second.terminationTime) it = subscriptions_.erase(it);
+        else ++it;
+    }
 }
 
 std::string MockSubscriptionManager::wrapEnvelope(const std::string& action,
@@ -92,15 +120,17 @@ std::string MockSubscriptionManager::wrapEnvelope(const std::string& action,
     return os.str();
 }
 
-std::string MockSubscriptionManager::soapFault(const std::string& subcode,
+std::string MockSubscriptionManager::soapFault(const std::string& code,
+                                               const std::string& subcode,
                                                const std::string& reason) {
     std::ostringstream os;
     os << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
        << "<SOAP-ENV:Envelope"
        << " xmlns:SOAP-ENV=\"http://www.w3.org/2003/05/soap-envelope\""
-       << " xmlns:ter=\"http://www.onvif.org/ver10/error\">"
+       << " xmlns:ter=\"http://www.onvif.org/ver10/error\""
+       << " xmlns:wsnt=\"http://docs.oasis-open.org/wsn/b-2\">"
        << "<SOAP-ENV:Body><SOAP-ENV:Fault>"
-       << "<SOAP-ENV:Code><SOAP-ENV:Value>SOAP-ENV:Receiver</SOAP-ENV:Value>"
+       << "<SOAP-ENV:Code><SOAP-ENV:Value>" << code << "</SOAP-ENV:Value>"
        << "<SOAP-ENV:Subcode><SOAP-ENV:Value>" << subcode << "</SOAP-ENV:Value></SOAP-ENV:Subcode>"
        << "</SOAP-ENV:Code>"
        << "<SOAP-ENV:Reason><SOAP-ENV:Text xml:lang=\"en\">" << reason << "</SOAP-ENV:Text></SOAP-ENV:Reason>"
@@ -155,29 +185,33 @@ std::string MockSubscriptionManager::handleGetEventProperties(const std::string&
         "<tev:GetEventPropertiesResponse>"
         "<tev:TopicNamespaceLocation>http://www.onvif.org/onvif/ver10/topics/topicns.xml</tev:TopicNamespaceLocation>"
         "<wsnt:FixedTopicSet>true</wsnt:FixedTopicSet>"
+        // Topic con PHẢI có namespace prefix (tns1); nếu để trần, topic parser
+        // của test tool bị "Index out of bounds" khi tách QName.
         "<wstop:TopicSet>"
           "<tns1:VideoSource>"
-            "<MotionAlarm wstop:topic=\"true\">"
+            "<tns1:MotionAlarm wstop:topic=\"true\">"
               "<tt:MessageDescription IsProperty=\"true\">"
                 "<tt:Source><tt:SimpleItemDescription Name=\"Source\" Type=\"tt:ReferenceToken\"/></tt:Source>"
                 "<tt:Data><tt:SimpleItemDescription Name=\"State\" Type=\"xs:boolean\"/></tt:Data>"
               "</tt:MessageDescription>"
-            "</MotionAlarm>"
+            "</tns1:MotionAlarm>"
           "</tns1:VideoSource>"
           "<tns1:Media>"
-            "<ProfileChanged wstop:topic=\"true\">"
+            "<tns1:ProfileChanged wstop:topic=\"true\">"
               "<tt:MessageDescription IsProperty=\"false\">"
                 "<tt:Source><tt:SimpleItemDescription Name=\"Token\" Type=\"tt:ReferenceToken\"/></tt:Source>"
+                "<tt:Data><tt:SimpleItemDescription Name=\"ProfileToken\" Type=\"tt:ReferenceToken\"/></tt:Data>"
               "</tt:MessageDescription>"
-            "</ProfileChanged>"
-            "<ConfigurationChanged wstop:topic=\"true\">"
+            "</tns1:ProfileChanged>"
+            "<tns1:ConfigurationChanged wstop:topic=\"true\">"
               "<tt:MessageDescription IsProperty=\"false\">"
                 "<tt:Source>"
                   "<tt:SimpleItemDescription Name=\"Token\" Type=\"tt:ReferenceToken\"/>"
                   "<tt:SimpleItemDescription Name=\"Type\" Type=\"xs:string\"/>"
                 "</tt:Source>"
+                "<tt:Data><tt:SimpleItemDescription Name=\"ConfigToken\" Type=\"tt:ReferenceToken\"/></tt:Data>"
               "</tt:MessageDescription>"
-            "</ConfigurationChanged>"
+            "</tns1:ConfigurationChanged>"
           "</tns1:Media>"
         "</wstop:TopicSet>"
         "<wsnt:TopicExpressionDialect>http://www.onvif.org/ver10/tev/topicExpression/ConcreteSet</wsnt:TopicExpressionDialect>"
@@ -194,13 +228,41 @@ std::string MockSubscriptionManager::handleCreateSubscription(const std::string&
                                                               const std::string& req) {
     std::string rel = extractTag(req, "MessageID");
     std::string subId = generateSubId();
-    int timeout = 60;
+
+    // Honor InitialTerminationTime (vd PT20S) — cần cho test TIMEOUT.
+    int timeout = parseDurationSeconds(extractTag(req, "InitialTerminationTime"), 60);
+
+    // ── Parse + validate Filter ───────────────────────────────────────────
+    std::string topicExpr, msgContent;
+    if (req.find("TopicExpression") != std::string::npos)
+        topicExpr = extractTag(req, "TopicExpression");
+    if (req.find("MessageContent Dialect") != std::string::npos ||
+        req.find("MessageContent ") != std::string::npos)
+        msgContent = extractTag(req, "MessageContent");
+
+    // TopicExpression sai (vd "U" — không có prefix ':') → InvalidTopicExpressionFault
+    if (!topicExpr.empty() && topicExpr.find(':') == std::string::npos) {
+        return soapFault("SOAP-ENV:Sender", "wsnt:InvalidTopicExpressionFault",
+                         "Invalid topic expression: " + topicExpr);
+    }
+    // MessageContent sai (ngoặc lệch) → InvalidMessageContentExpressionFault
+    if (!msgContent.empty()) {
+        int bal = 0;
+        for (char c : msgContent) { if (c == '(') ++bal; else if (c == ')') --bal; }
+        if (bal != 0) {
+            return soapFault("SOAP-ENV:Sender",
+                             "wsnt:InvalidMessageContentExpressionFault",
+                             "Invalid message content filter expression");
+        }
+    }
 
     {
         std::lock_guard<std::mutex> lk(mtx_);
+        purgeExpired();
         SubscriptionState st;
         st.id = subId;
         st.timeoutSeconds = timeout;
+        st.topicFilter = topicExpr;
         st.terminationTime = std::chrono::steady_clock::now() + std::chrono::seconds(timeout);
         subscriptions_[subId] = st;
     }
@@ -223,22 +285,31 @@ std::string MockSubscriptionManager::handleCreateSubscription(const std::string&
 std::string MockSubscriptionManager::handlePullMessages(const std::string& subId,
                                                         const std::string& req) {
     std::string rel = extractTag(req, "MessageID");
+    bool emitMotion = true;
+    int timeout = 60;
     {
         std::lock_guard<std::mutex> lk(mtx_);
+        purgeExpired();
         auto it = subscriptions_.find(subId);
         if (it == subscriptions_.end())
-            return soapFault("ter:InvalidArgVal",
+            return soapFault("SOAP-ENV:Receiver", "ter:InvalidArgVal",
                              "Subscription not found: " + subId);
         it->second.terminationTime =
             std::chrono::steady_clock::now() +
             std::chrono::seconds(it->second.timeoutSeconds);
+        timeout = it->second.timeoutSeconds;
+        // Chỉ phát MotionAlarm nếu filter rỗng hoặc lọc đúng topic MotionAlarm.
+        const std::string& f = it->second.topicFilter;
+        emitMotion = f.empty() || f.find("MotionAlarm") != std::string::npos;
     }
 
     std::string now = getXmlUtcTime(0);
     std::ostringstream body;
     body << "<tev:PullMessagesResponse>"
          << "<tev:CurrentTime>" << now << "</tev:CurrentTime>"
-         << "<tev:TerminationTime>" << getXmlUtcTime(60) << "</tev:TerminationTime>"
+         << "<tev:TerminationTime>" << getXmlUtcTime(timeout) << "</tev:TerminationTime>";
+    if (emitMotion) {
+        body
          // Property event: VideoSource/MotionAlarm (State=false, Initialized)
          << "<wsnt:NotificationMessage>"
          << "<wsnt:Topic Dialect=\"" << TOPIC_DIALECT << "\">"
@@ -253,8 +324,9 @@ std::string MockSubscriptionManager::handlePullMessages(const std::string& subId
          << "</tt:Data>"
          << "</tt:Message>"
          << "</wsnt:Message>"
-         << "</wsnt:NotificationMessage>"
-         << "</tev:PullMessagesResponse>";
+         << "</wsnt:NotificationMessage>";
+    }
+    body << "</tev:PullMessagesResponse>";
     return wrapEnvelope(ACT_PULL, rel, body.str());
 }
 
@@ -262,19 +334,23 @@ std::string MockSubscriptionManager::handlePullMessages(const std::string& subId
 std::string MockSubscriptionManager::handleRenew(const std::string& subId,
                                                  const std::string& req) {
     std::string rel = extractTag(req, "MessageID");
+    int timeout = 60;
     {
         std::lock_guard<std::mutex> lk(mtx_);
+        purgeExpired();
         auto it = subscriptions_.find(subId);
         if (it == subscriptions_.end())
-            return soapFault("wsnt:UnableToDestroySubscriptionFault",
+            return soapFault("SOAP-ENV:Receiver",
+                             "wsnt:UnableToDestroySubscriptionFault",
                              "Subscription not found: " + subId);
         it->second.terminationTime =
             std::chrono::steady_clock::now() +
             std::chrono::seconds(it->second.timeoutSeconds);
+        timeout = it->second.timeoutSeconds;
     }
     std::ostringstream body;
     body << "<wsnt:RenewResponse>"
-         << "<wsnt:TerminationTime>" << getXmlUtcTime(60) << "</wsnt:TerminationTime>"
+         << "<wsnt:TerminationTime>" << getXmlUtcTime(timeout) << "</wsnt:TerminationTime>"
          << "<wsnt:CurrentTime>" << getXmlUtcTime(0) << "</wsnt:CurrentTime>"
          << "</wsnt:RenewResponse>";
     return wrapEnvelope(ACT_RENEW, rel, body.str());
@@ -286,9 +362,11 @@ std::string MockSubscriptionManager::handleUnsubscribe(const std::string& subId,
     std::string rel = extractTag(req, "MessageID");
     {
         std::lock_guard<std::mutex> lk(mtx_);
+        purgeExpired();   // sub hết hạn coi như đã biến mất → unsubscribe sẽ fault
         auto it = subscriptions_.find(subId);
         if (it == subscriptions_.end())
-            return soapFault("wsnt:UnableToDestroySubscriptionFault",
+            return soapFault("SOAP-ENV:Receiver",
+                             "wsnt:UnableToDestroySubscriptionFault",
                              "Subscription not found: " + subId);
         subscriptions_.erase(it);
     }
