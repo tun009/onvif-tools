@@ -121,8 +121,10 @@ int DeviceService::GetCapabilities(
 
     // Lọc theo Category yêu cầu. Khi client hỏi 1 category cụ thể, PHẢI chỉ trả
     // đúng category đó (test DEVICE-1-1-3/4/5/10). Rỗng hoặc All → trả tất cả.
+    // Được hỗ trợ (legacy GetCapabilities): Device, Events, Imaging.
+    // KHÔNG hỗ trợ: Media (chỉ có Media2/ver20), PTZ, Analytics → phải trả fault.
     bool wantAll = false, wantDevice = false, wantEvents = false,
-         wantMedia = false, wantImaging = false, reqPTZ = false, reqAnalytics = false;
+         wantImaging = false, reqUnsupported = false;
     if (!tds__GetCapabilities || tds__GetCapabilities->Category.empty()) {
         wantAll = true;
     } else {
@@ -131,23 +133,27 @@ int DeviceService::GetCapabilities(
                 case tt__CapabilityCategory::All:       wantAll = true; break;
                 case tt__CapabilityCategory::Device:    wantDevice = true; break;
                 case tt__CapabilityCategory::Events:    wantEvents = true; break;
-                case tt__CapabilityCategory::Media:     wantMedia = true; break;
                 case tt__CapabilityCategory::Imaging:   wantImaging = true; break;
-                case tt__CapabilityCategory::PTZ:       reqPTZ = true; break;
-                case tt__CapabilityCategory::Analytics: reqAnalytics = true; break;
+                case tt__CapabilityCategory::Media:     reqUnsupported = true; break;
+                case tt__CapabilityCategory::PTZ:       reqUnsupported = true; break;
+                case tt__CapabilityCategory::Analytics: reqUnsupported = true; break;
             }
         }
     }
 
-    // PTZ / Analytics KHÔNG hỗ trợ → SOAP 1.2 fault env:Receiver /
-    // ter:ActionNotSupported / ter:NoSuchService (test DEVICE-1-1-6, 1-1-11).
-    if (!wantAll && (reqPTZ || reqAnalytics)) {
-        soap_receiver_fault_subcode(soap, "ter:ActionNotSupported",
-                                    "No such service", nullptr);
+    // Category không hỗ trợ → SOAP 1.2 fault env:Receiver /
+    // ter:ActionNotSupported / ter:NoSuchService (DEVICE-1-1-4, 1-1-6, 1-1-11).
+    // Dùng QName dạng "URI":local để gSOAP tự khai báo namespace (tránh lỗi
+    // "ter is an undeclared prefix").
+    if (!wantAll && reqUnsupported) {
+        soap_receiver_fault_subcode(
+            soap, "\"http://www.onvif.org/ver10/error\":ActionNotSupported",
+            "No such service", nullptr);
         if (soap->fault && soap->fault->SOAP_ENV__Code &&
             soap->fault->SOAP_ENV__Code->SOAP_ENV__Subcode) {
             auto sub2 = soap_new_SOAP_ENV__Code(soap);
-            sub2->SOAP_ENV__Value = soap_strdup(soap, "ter:NoSuchService");
+            sub2->SOAP_ENV__Value =
+                soap_strdup(soap, "\"http://www.onvif.org/ver10/error\":NoSuchService");
             soap->fault->SOAP_ENV__Code->SOAP_ENV__Subcode->SOAP_ENV__Subcode = sub2;
         }
         return SOAP_FAULT;
@@ -190,17 +196,19 @@ int DeviceService::GetCapabilities(
     caps->Device->Security->SAMLToken          = false;
     caps->Device->Security->KerberosToken      = false;
     caps->Device->Security->RELToken           = false;
+
+    // IO capabilities (tool yêu cầu ở DEVICE-1-1-3 STEP 13)
+    caps->Device->IO = soap_new_tt__IOCapabilities(soap);
+    {
+        int* ic = (int*)soap_malloc(soap, sizeof(int)); *ic = 0;
+        int* ro = (int*)soap_malloc(soap, sizeof(int)); *ro = 0;
+        caps->Device->IO->InputConnectors = ic;
+        caps->Device->IO->RelayOutputs    = ro;
+    }
     } // end Device
 
-    // ── Media (Profile T: streaming RTP/RTSP/TCP) ─────────────────────────
-    if (wantAll || wantMedia) {
-        caps->Media = soap_new_tt__MediaCapabilities(soap);
-        caps->Media->XAddr = base + "/onvif/media";
-        caps->Media->StreamingCapabilities = soap_new_tt__RealTimeStreamingCapabilities(soap);
-        caps->Media->StreamingCapabilities->RTPMulticast              = B(false);
-        caps->Media->StreamingCapabilities->RTP_USCORETCP             = B(true);
-        caps->Media->StreamingCapabilities->RTP_USCORERTSP_USCORETCP  = B(true);
-    }
+    // Media (ver10) KHÔNG hỗ trợ — thiết bị dùng Media2 (ver20). Không đưa vào
+    // legacy GetCapabilities; hỏi Category=Media sẽ nhận fault ở trên.
 
     // ── Events (Profile T mandatory: PullPoint) ───────────────────────────
     if (wantAll || wantEvents) {
