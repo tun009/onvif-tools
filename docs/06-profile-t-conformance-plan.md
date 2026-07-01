@@ -160,6 +160,21 @@ Tài liệu này tổng hợp toàn bộ vấn đề còn tồn đọng để pa
 - `GetUsers` giờ đọc từ cache thay vì hardcode (SetUser/CreateUsers/DeleteUsers thay đổi phản ánh ngay).
 - Compile-check pass.
 
+**STATUS (01/07/2026) — System/User kết quả (result17.xml + fix vòng 2):**
+- ✅ Pass 8/25: DEVICE-3-1-9/11, DEVICE-4-1-1/3/4/6/7/9 (nhiều test User mandatory).
+- **Fix vòng 2 dựa trên log:**
+  - `3-1-1` GetSystemDateAndTime: TZ="UTC" invalid POSIX → đổi thành "UTC0".
+  - `3-1-4` SetSystemDateAndTime invalid TZ: "INVALIDTIMEZONE" (toàn chữ) không có digit/comma → thêm check hasDigit/hasComma → fault InvalidTimeZone.
+  - `3-1-5` invalid date: tool gửi Hour=25/Month=13; ta chỉ validate date, không validate time → thêm validate Time (Hour 0-23, Minute/Second 0-59/60).
+  - `4-1-5` DeleteUsers atomic: xóa từng cái, gặp user bậy mới fault → đã xóa trước đó. Sửa: validate all trước, delete sau.
+  - `4-1-8` SetUser atomic: tương tự Delete → validate all trước, apply sau.
+- **Skip (không thuộc Profile T mục 7.5/7.6):**
+  - `3-1-10` GetSystemLog, `3-1-13` GetSystemUris, `3-1-14/15` SystemRestore, `3-1-16/17` FirmwareUpload — Profile T chỉ list SetSystemDateAndTime + SetSystemFactoryDefault + SystemReboot.
+  - `3-1-12` SetDateTime USING NTP — ta chưa implement NTP config.
+  - `4-1-10/11` GetRemoteUser/SetRemoteUser — không mandatory.
+- **Discovery-based (subnet issue, không fix bằng code):**
+  - `3-1-6/7` FactoryDefault Hard/Soft, `3-1-8` Reboot — chờ Hello sau reboot, tool khác subnet không nhận.
+
 ### 🟠 Nhóm 5 — User/Security (DEVICE-4-x, SECURITY-1)
 - `GetUsers` / `CreateUsers` / `SetUser` / `DeleteUsers` + error case.
 - `USER TOKEN PROFILE`: WS-Security UsernameToken đúng chuẩn → **bỏ `mustUnderstand` bypass** trong `OnvifServer`.

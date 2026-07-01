@@ -104,9 +104,11 @@ int DeviceService::GetSystemDateAndTime(
     sdt->DateTimeType = tt__SetDateTimeType::Manual;
     sdt->DaylightSavings = dt.daylightSaving;
 
-    // TimeZone
+    // TimeZone — POSIX TZ format: STD offset [DST[offset][,rule]]
+    // "UTC" alone không hợp lệ ("standard offset part format is incorrect"),
+    // dùng "UTC0" (STD=UTC, offset=0). Test DEVICE-3-1-1.
     sdt->TimeZone = soap_new_tt__TimeZone(soap);
-    sdt->TimeZone->TZ = "UTC";
+    sdt->TimeZone->TZ = "UTC0";
 
     // UTCDateTime
     sdt->UTCDateTime = soap_new_tt__DateTime(soap);
@@ -671,26 +673,44 @@ int DeviceService::SetSystemDateAndTime(_tds__SetSystemDateAndTime* req,
                                  "ter:InvalidArgVal", "ter:MissingAttribute",
                                  "UTCDateTime required for Manual");
     }
-    // Validate timezone (nếu có) — check ký tự bậy đơn giản.
+    // Validate timezone (nếu có): POSIX TZ tối thiểu cần có digit (offset) hoặc
+    // dấu phẩy (rule). "INVALIDTIMEZONE" (toàn chữ) không hợp lệ.
     if (req->TimeZone) {
         const std::string& tz = req->TimeZone->TZ;
-        // POSIX TZ format tối giản: các ký tự cho phép [A-Za-z0-9+\-:]
+        bool hasDigit = false, hasComma = false;
         for (char c : tz) {
-            if (!(std::isalnum((unsigned char)c) || c=='+'||c=='-'||c==':'||c=='/'))
+            if (std::isdigit((unsigned char)c)) hasDigit = true;
+            if (c == ',') hasComma = true;
+            if (!(std::isalnum((unsigned char)c) || c=='+'||c=='-'||c==':'||c=='/'||c=='.'||c==','))
                 return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
                                          "ter:InvalidArgVal", "ter:InvalidTimeZone",
                                          "Invalid timezone format");
         }
-    }
-    // Validate date (nếu Manual)
-    if (req->DateTimeType == tt__SetDateTimeType::Manual && req->UTCDateTime
-        && req->UTCDateTime->Date) {
-        auto* d = req->UTCDateTime->Date;
-        if (d->Month < 1 || d->Month > 12 || d->Day < 1 || d->Day > 31
-            || d->Year < 1970 || d->Year > 2099) {
+        if (tz.empty() || (!hasDigit && !hasComma)) {
             return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
-                                     "ter:InvalidArgVal", "ter:InvalidDateTime",
-                                     "Invalid date");
+                                     "ter:InvalidArgVal", "ter:InvalidTimeZone",
+                                     "Invalid POSIX TZ format");
+        }
+    }
+    // Validate date + time (nếu Manual)
+    if (req->DateTimeType == tt__SetDateTimeType::Manual && req->UTCDateTime) {
+        if (req->UTCDateTime->Date) {
+            auto* d = req->UTCDateTime->Date;
+            if (d->Month < 1 || d->Month > 12 || d->Day < 1 || d->Day > 31
+                || d->Year < 1970 || d->Year > 2099) {
+                return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                         "ter:InvalidArgVal", "ter:InvalidDateTime",
+                                         "Invalid date");
+            }
+        }
+        if (req->UTCDateTime->Time) {
+            auto* t = req->UTCDateTime->Time;
+            if (t->Hour < 0 || t->Hour > 23 || t->Minute < 0 || t->Minute > 59
+                || t->Second < 0 || t->Second > 60) {
+                return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                         "ter:InvalidArgVal", "ter:InvalidDateTime",
+                                         "Invalid time");
+            }
         }
     }
     std::lock_guard<std::mutex> lk(sysMtx_);
@@ -775,12 +795,14 @@ int DeviceService::DeleteUsers(_tds__DeleteUsers* req,
                                  "No username provided");
     }
     std::lock_guard<std::mutex> lk(sysMtx_);
-    for (const auto& name : req->Username) {
-        // Không cho xóa admin cuối cùng (fixed camera cần ≥1 admin)
-        int adminCount = 0;
-        for (const auto& u : sys_.users)
-            if (u.level == 0) ++adminCount;
+    // Atomic: validate TẤT CẢ trước, delete sau. Nếu bất kỳ user nào sai,
+    // reject cả lệnh — không delete gì (DEVICE-4-1-5 error case).
+    int adminCount = 0;
+    for (const auto& u : sys_.users)
+        if (u.level == 0) ++adminCount;
 
+    std::vector<size_t> toDelete;
+    for (const auto& name : req->Username) {
         auto it = std::find_if(sys_.users.begin(), sys_.users.end(),
                                [&](const MockUser& u){ return u.username == name; });
         if (it == sys_.users.end()) {
@@ -789,14 +811,19 @@ int DeviceService::DeleteUsers(_tds__DeleteUsers* req,
                                      "ter:InvalidArgVal", "ter:UsernameMissing",
                                      msg.c_str());
         }
-        if (it->level == 0 && adminCount <= 1) {
-            return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
-                                     "ter:OperationProhibited",
-                                     "ter:FixedUser",
-                                     "Cannot delete last admin");
+        if (it->level == 0) {
+            if (--adminCount < 1) {
+                return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                         "ter:OperationProhibited",
+                                         "ter:FixedUser",
+                                         "Cannot delete last admin");
+            }
         }
-        sys_.users.erase(it);
+        toDelete.push_back(std::distance(sys_.users.begin(), it));
     }
+    // Delete descending để index không thay đổi
+    std::sort(toDelete.rbegin(), toDelete.rend());
+    for (size_t idx : toDelete) sys_.users.erase(sys_.users.begin() + idx);
     return SOAP_OK;
 }
 
@@ -811,6 +838,8 @@ int DeviceService::SetUser(_tds__SetUser* req,
                                  "No users provided");
     }
     std::lock_guard<std::mutex> lk(sysMtx_);
+    // Atomic: validate all trước, apply sau (DEVICE-4-1-8 error case).
+    std::vector<size_t> targets;
     for (auto* u : req->User) {
         if (!u || u->Username.empty()) {
             return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
@@ -825,8 +854,14 @@ int DeviceService::SetUser(_tds__SetUser* req,
                                      "ter:InvalidArgVal", "ter:UsernameMissing",
                                      msg.c_str());
         }
-        if (u->Password) it->password = *u->Password;
-        it->level = static_cast<int>(u->UserLevel);
+        targets.push_back(std::distance(sys_.users.begin(), it));
+    }
+    // Apply
+    for (size_t i = 0; i < req->User.size(); ++i) {
+        auto* u = req->User[i];
+        auto& mu = sys_.users[targets[i]];
+        if (u->Password) mu.password = *u->Password;
+        mu.level = static_cast<int>(u->UserLevel);
     }
     return SOAP_OK;
 }
