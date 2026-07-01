@@ -39,10 +39,19 @@ private:
     ServiceConfig cfg_;
     std::shared_ptr<ICameraBackend> backend_;
 
-    // Cache riêng vì backend mock không persist một số field (vd BLC mode).
-    // Static để chia sẻ giữa các instance ImagingService (mỗi request tạo 1 instance).
+    // Cache riêng vì backend mock không persist một số field. Extended lưu
+    // các mode ONVIF (Exposure/WhiteBalance/Focus/IrCut/BLC/WDR) không có
+    // trong ImagingSettings backend struct.
+    struct ExtSettings {
+        ImagingSettings basic;             // brightness/contrast/saturation/sharpness/BLC/WDR
+        int exposureMode = 0;              // 0=AUTO, 1=MANUAL (enum tt__ExposureMode)
+        int whiteBalanceMode = 0;          // 0=AUTO, 1=MANUAL
+        int autoFocusMode = 0;             // 0=AUTO, 1=MANUAL
+        int irCutFilter = 0;               // 0=ON, 1=OFF, 2=AUTO (enum tt__IrCutFilterMode)
+        bool loaded = false;               // đã init từ backend?
+    };
     static std::mutex cacheMtx_;
-    static std::map<std::string, ImagingSettings> cache_;
+    static std::map<std::string, ExtSettings> cache_;
 
     static bool isValidToken(const std::string& tok);
     static bool isValidSettings(const ImagingSettings& s);

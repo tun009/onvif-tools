@@ -8,7 +8,7 @@
 #include <sstream>
 
 std::mutex ImagingService::cacheMtx_;
-std::map<std::string, ImagingSettings> ImagingService::cache_;
+std::map<std::string, ImagingService::ExtSettings> ImagingService::cache_;
 
 ImagingService::ImagingService(struct soap* soap,
                                const ServiceConfig& cfg,
@@ -26,12 +26,14 @@ bool ImagingService::isValidSettings(const ImagingSettings& s) {
         && in(s.saturation) && in(s.sharpness);
 }
 
-// Build fault XML thủ công — gSOAP không tự thêm xmlns:ter cho prefix trong
-// subcode Value (text content), khiến tool báo "undeclared prefix". Ta trả raw
-// XML với xmlns:ter declared để tool parse được.
+// Build fault XML thủ công. ONVIF fault dùng nested Subcode 2 lớp:
+//   Code=env:Sender/Receiver -> Subcode=ter:<general> -> Subcode=ter:<specific>
+// (vd env:Sender / ter:InvalidArgVal / ter:SettingsInvalid).
+// gSOAP không sinh nested subcode chuẩn cũng không declare xmlns:ter — ta tự làm.
 static int sendOnvifFault(struct soap* soap,
-                          const char* code,      // "SOAP-ENV:Sender" | "SOAP-ENV:Receiver"
-                          const char* subcode,   // "ter:SettingsInvalid" ...
+                          const char* code,           // "SOAP-ENV:Sender"|"SOAP-ENV:Receiver"
+                          const char* subcode,        // ter:<general> (level 1)
+                          const char* subSubcode,     // ter:<specific> (level 2, có thể null)
                           const char* reason) {
     std::ostringstream os;
     os << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
@@ -40,17 +42,21 @@ static int sendOnvifFault(struct soap* soap,
        << " xmlns:ter=\"http://www.onvif.org/ver10/error\">"
        << "<SOAP-ENV:Body><SOAP-ENV:Fault>"
        << "<SOAP-ENV:Code><SOAP-ENV:Value>" << code << "</SOAP-ENV:Value>"
-       << "<SOAP-ENV:Subcode><SOAP-ENV:Value>" << subcode
-       << "</SOAP-ENV:Value></SOAP-ENV:Subcode></SOAP-ENV:Code>"
+       << "<SOAP-ENV:Subcode><SOAP-ENV:Value>" << subcode << "</SOAP-ENV:Value>";
+    if (subSubcode && *subSubcode) {
+        os << "<SOAP-ENV:Subcode><SOAP-ENV:Value>" << subSubcode
+           << "</SOAP-ENV:Value></SOAP-ENV:Subcode>";
+    }
+    os << "</SOAP-ENV:Subcode></SOAP-ENV:Code>"
        << "<SOAP-ENV:Reason><SOAP-ENV:Text xml:lang=\"en\">"
        << reason << "</SOAP-ENV:Text></SOAP-ENV:Reason>"
        << "</SOAP-ENV:Fault></SOAP-ENV:Body></SOAP-ENV:Envelope>";
     std::string xml = os.str();
     soap->http_content = "application/soap+xml; charset=utf-8";
-    soap_response(soap, SOAP_FILE);          // HTTP 200 + custom content-type
+    soap_response(soap, SOAP_FILE);
     soap_send_raw(soap, xml.data(), xml.size());
     soap_end_send(soap);
-    return SOAP_STOP;   // báo dispatcher không tự sinh fault nữa
+    return SOAP_STOP;
 }
 
 ImagingBindingService* ImagingService::copy() {
@@ -72,19 +78,32 @@ int ImagingService::GetServiceCapabilities(
     _timg__GetServiceCapabilitiesResponse &resp)
 {
     (void)req;
+    (void)resp;
     this->soap->mustUnderstand = 0;
     this->soap->header = nullptr;
     auto soap = this->soap;
 
-    auto caps = soap_new_timg__Capabilities(soap);
-    // Set explicit false — nếu để null, XML sinh ra thiếu attribute, tool báo
-    // "Error in deserializing body" (IMAGING-3-1-1).
-    auto B = [&](bool v) { bool* p = (bool*)soap_malloc(soap, sizeof(bool)); *p = v; return p; };
-    caps->ImageStabilization = B(false);
-    caps->Presets            = B(false);
-    caps->AdaptablePreset    = B(false);
-    resp.Capabilities = caps;
-    return SOAP_OK;
+    // gSOAP tự thêm `xsi:type="timg:Capabilities"` (do class extends xsd:anyType)
+    // khiến test tool báo "Error in deserializing body". Build response thủ công
+    // — sạch, không xsi:type. (IMAGING-3-1-1)
+    const char* xml =
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        "<SOAP-ENV:Envelope"
+        " xmlns:SOAP-ENV=\"http://www.w3.org/2003/05/soap-envelope\""
+        " xmlns:timg=\"http://www.onvif.org/ver20/imaging/wsdl\">"
+        "<SOAP-ENV:Body>"
+        "<timg:GetServiceCapabilitiesResponse>"
+        "<timg:Capabilities"
+        " ImageStabilization=\"false\""
+        " Presets=\"false\""
+        " AdaptablePreset=\"false\"/>"
+        "</timg:GetServiceCapabilitiesResponse>"
+        "</SOAP-ENV:Body></SOAP-ENV:Envelope>";
+    soap->http_content = "application/soap+xml; charset=utf-8";
+    soap_response(soap, SOAP_FILE);
+    soap_send_raw(soap, xml, strlen(xml));
+    soap_end_send(soap);
+    return SOAP_STOP;
 }
 
 // ── GetImagingSettings ─────────────────────────────────────────────────────
@@ -98,33 +117,39 @@ int ImagingService::GetImagingSettings(
 
     const std::string tok = req ? req->VideoSourceToken : "";
     if (!isValidToken(tok)) {
-        return sendOnvifFault(soap, "SOAP-ENV:Sender", "ter:NoSource",
-                              "Invalid VideoSourceToken");
+        return sendOnvifFault(soap, "SOAP-ENV:Sender", "ter:InvalidArgVal",
+                              "ter:NoSource", "Invalid VideoSourceToken");
     }
 
-    // Đọc từ cache trước, fallback backend nếu chưa có.
-    ImagingSettings s;
+    // Đọc từ cache; init từ backend + clamp nếu chưa có.
+    ExtSettings ext;
     {
         std::lock_guard<std::mutex> lk(cacheMtx_);
         auto it = cache_.find(tok);
-        if (it != cache_.end()) s = it->second;
-        else {
-            try { s = backend_->getImagingSettings(tok); }
+        if (it != cache_.end() && it->second.loaded) {
+            ext = it->second;
+        } else {
+            try { ext.basic = backend_->getImagingSettings(tok); }
             catch (const std::exception& e) {
                 std::cerr << "[ImagingService] backend error: " << e.what() << "\n";
             }
-            // Backend có thể mang state bậy từ session trước → clamp
-            // về 0..100 để đảm bảo Get luôn trả valid range (test 1-1-15/16).
             auto clamp = [](float v) {
                 return v < 0.0f ? 0.0f : (v > 100.0f ? 100.0f : v);
             };
-            s.brightness = clamp(s.brightness);
-            s.contrast   = clamp(s.contrast);
-            s.saturation = clamp(s.saturation);
-            s.sharpness  = clamp(s.sharpness);
-            cache_[tok] = s;
+            ext.basic.brightness = clamp(ext.basic.brightness);
+            ext.basic.contrast   = clamp(ext.basic.contrast);
+            ext.basic.saturation = clamp(ext.basic.saturation);
+            ext.basic.sharpness  = clamp(ext.basic.sharpness);
+            // Default modes: AUTO cho tất cả, IrCut = AUTO (2)
+            ext.exposureMode = 0;
+            ext.whiteBalanceMode = 0;
+            ext.autoFocusMode = 0;
+            ext.irCutFilter = 2;
+            ext.loaded = true;
+            cache_[tok] = ext;
         }
     }
+    ImagingSettings& s = ext.basic;
 
     auto out = soap_new_tt__ImagingSettings20(soap);
     out->Brightness      = F(soap, s.brightness);
@@ -144,22 +169,22 @@ int ImagingService::GetImagingSettings(
         s.wideDynRange ? tt__WideDynamicMode::ON
                        : tt__WideDynamicMode::OFF;
 
-    // IrCutFilter (mock — camera màu ngày)
+    // IrCutFilter (từ cache)
     auto* irc = (tt__IrCutFilterMode*)soap_malloc(soap, sizeof(tt__IrCutFilterMode));
-    *irc = tt__IrCutFilterMode::AUTO;
+    *irc = static_cast<tt__IrCutFilterMode>(ext.irCutFilter);
     out->IrCutFilter = irc;
 
-    // WhiteBalance mặc định AUTO
+    // WhiteBalance mode từ cache
     out->WhiteBalance = soap_new_tt__WhiteBalance20(soap);
-    out->WhiteBalance->Mode = tt__WhiteBalanceMode::AUTO;
+    out->WhiteBalance->Mode = static_cast<tt__WhiteBalanceMode>(ext.whiteBalanceMode);
 
-    // Exposure mặc định AUTO
+    // Exposure mode từ cache
     out->Exposure = soap_new_tt__Exposure20(soap);
-    out->Exposure->Mode = tt__ExposureMode::AUTO;
+    out->Exposure->Mode = static_cast<tt__ExposureMode>(ext.exposureMode);
 
-    // Focus mặc định AUTO
+    // Focus mode từ cache
     out->Focus = soap_new_tt__FocusConfiguration20(soap);
-    out->Focus->AutoFocusMode = tt__AutoFocusMode::AUTO;
+    out->Focus->AutoFocusMode = static_cast<tt__AutoFocusMode>(ext.autoFocusMode);
 
     resp.ImagingSettings = out;
     return SOAP_OK;
@@ -176,50 +201,62 @@ int ImagingService::SetImagingSettings(
 
     if (!req || !req->ImagingSettings) {
         return sendOnvifFault(this->soap, "SOAP-ENV:Sender", "ter:InvalidArgVal",
-                              "Missing ImagingSettings");
+                              nullptr, "Missing ImagingSettings");
     }
     if (!isValidToken(req->VideoSourceToken)) {
-        return sendOnvifFault(this->soap, "SOAP-ENV:Sender", "ter:NoSource",
-                              "Invalid VideoSourceToken");
+        return sendOnvifFault(this->soap, "SOAP-ENV:Sender", "ter:InvalidArgVal",
+                              "ter:NoSource", "Invalid VideoSourceToken");
     }
 
-    ImagingSettings s;
+    // Đọc cache/init từ backend làm baseline.
+    ExtSettings ext;
     {
         std::lock_guard<std::mutex> lk(cacheMtx_);
         auto it = cache_.find(req->VideoSourceToken);
-        if (it != cache_.end()) s = it->second;
+        if (it != cache_.end() && it->second.loaded) ext = it->second;
         else {
-            try { s = backend_->getImagingSettings(req->VideoSourceToken); }
+            try { ext.basic = backend_->getImagingSettings(req->VideoSourceToken); }
             catch (...) {}
+            auto clamp = [](float v) {
+                return v < 0.0f ? 0.0f : (v > 100.0f ? 100.0f : v);
+            };
+            ext.basic.brightness = clamp(ext.basic.brightness);
+            ext.basic.contrast   = clamp(ext.basic.contrast);
+            ext.basic.saturation = clamp(ext.basic.saturation);
+            ext.basic.sharpness  = clamp(ext.basic.sharpness);
+            ext.loaded = true;
         }
     }
 
-    if (req->ImagingSettings->Brightness)      s.brightness  = *req->ImagingSettings->Brightness;
-    if (req->ImagingSettings->ColorSaturation) s.saturation  = *req->ImagingSettings->ColorSaturation;
-    if (req->ImagingSettings->Contrast)        s.contrast    = *req->ImagingSettings->Contrast;
-    if (req->ImagingSettings->Sharpness)       s.sharpness   = *req->ImagingSettings->Sharpness;
-    if (req->ImagingSettings->BacklightCompensation)
-        s.backlightComp =
-            (req->ImagingSettings->BacklightCompensation->Mode ==
-             tt__BacklightCompensationMode::ON);
-    if (req->ImagingSettings->WideDynamicRange)
-        s.wideDynRange =
-            (req->ImagingSettings->WideDynamicRange->Mode ==
-             tt__WideDynamicMode::ON);
+    auto* in = req->ImagingSettings;
+    if (in->Brightness)      ext.basic.brightness  = *in->Brightness;
+    if (in->ColorSaturation) ext.basic.saturation  = *in->ColorSaturation;
+    if (in->Contrast)        ext.basic.contrast    = *in->Contrast;
+    if (in->Sharpness)       ext.basic.sharpness   = *in->Sharpness;
+    if (in->BacklightCompensation)
+        ext.basic.backlightComp =
+            (in->BacklightCompensation->Mode == tt__BacklightCompensationMode::ON);
+    if (in->WideDynamicRange)
+        ext.basic.wideDynRange =
+            (in->WideDynamicRange->Mode == tt__WideDynamicMode::ON);
+    if (in->Exposure)     ext.exposureMode     = static_cast<int>(in->Exposure->Mode);
+    if (in->WhiteBalance) ext.whiteBalanceMode = static_cast<int>(in->WhiteBalance->Mode);
+    if (in->Focus)        ext.autoFocusMode    = static_cast<int>(in->Focus->AutoFocusMode);
+    if (in->IrCutFilter)  ext.irCutFilter      = static_cast<int>(*in->IrCutFilter);
 
-    // Validate range — settings ngoài [0,100] → fault (IMAGING-1-1-8).
-    if (!isValidSettings(s)) {
+    // Validate range — nested fault (IMAGING-1-1-8).
+    if (!isValidSettings(ext.basic)) {
         return sendOnvifFault(this->soap, "SOAP-ENV:Sender",
-                              "ter:SettingsInvalid",
+                              "ter:InvalidArgVal", "ter:SettingsInvalid",
                               "Imaging settings out of range");
     }
 
-    // Ghi cache + best-effort push xuống backend.
+    // Ghi cache + best-effort push xuống backend (backend chỉ nhận subset).
     {
         std::lock_guard<std::mutex> lk(cacheMtx_);
-        cache_[req->VideoSourceToken] = s;
+        cache_[req->VideoSourceToken] = ext;
     }
-    try { backend_->setImagingSettings(req->VideoSourceToken, s); }
+    try { backend_->setImagingSettings(req->VideoSourceToken, ext.basic); }
     catch (const std::exception& e) {
         std::cerr << "[ImagingService] setImagingSettings backend err: "
                   << e.what() << " (cache still updated)\n";
@@ -237,8 +274,8 @@ int ImagingService::GetOptions(
     auto soap = this->soap;
 
     if (!req || !isValidToken(req->VideoSourceToken)) {
-        return sendOnvifFault(soap, "SOAP-ENV:Sender", "ter:NoSource",
-                              "Invalid VideoSourceToken");
+        return sendOnvifFault(soap, "SOAP-ENV:Sender", "ter:InvalidArgVal",
+                              "ter:NoSource", "Invalid VideoSourceToken");
     }
 
     auto opts = soap_new_tt__ImagingOptions20(soap);

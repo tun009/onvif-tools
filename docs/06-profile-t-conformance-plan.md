@@ -114,6 +114,14 @@ Tài liệu này tổng hợp toàn bộ vấn đề còn tồn đọng để pa
 - **Fix 2 (root cause phụ):** backend có thể mang state bậy từ session trước (vd Brightness=101 do vòng trước chưa có validate). Clamp giá trị đọc từ backend về 0..100 khi khởi tạo cache → Get luôn trả valid range → Restore không fault.
 - Compile-check pass.
 
+**STATUS (01/07/2026) — Imaging vòng 6 (theo ressult11.xml, sửa dứt điểm):**
+- ✅ Xanh thêm 4 test: IMAGING-1-1-10/11/12/16.
+- **Fix 1 (1-1-8)**: mở rộng `sendOnvifFault` hỗ trợ nested subcode (`env:Sender/ter:InvalidArgVal/ter:SettingsInvalid`).
+- **Fix 2 (1-1-14)**: cache `ExtSettings` mở rộng lưu Exposure/WhiteBalance/Focus/IrCut modes — vì `ImagingSettings` backend struct chỉ có BLC/WDR.
+- **Fix 3 (3-1-1)**: `GetServiceCapabilities` response build thủ công — tránh `xsi:type="timg:Capabilities"` mà gSOAP tự thêm gây deserialize error.
+- **Skip 3-1-2**: Capabilities inline trong GetServices cần thao tác DOM xsd:any (đã note ở nhóm Capabilities/GetServices).
+- Compile-check pass.
+
 ### 🟠 Nhóm 3 — Device Network (DEVICE-2-x, IPCONFIG)
 - `GetNetworkInterfaces`/`Set`, `GetDNS`/`Set`, `GetNetworkDefaultGateway`/`Set`,
   `GetNetworkProtocols`/`Set`, `GetHostname`/`Set`, DHCP IPv4.
