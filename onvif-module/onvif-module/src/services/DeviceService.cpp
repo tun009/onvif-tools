@@ -139,6 +139,13 @@ int DeviceService::GetCapabilities(
     caps->Device->System->SystemBackup     = false;
     caps->Device->System->SystemLogging    = false;
     caps->Device->System->FirmwareUpgrade  = false;
+    // SupportedVersions BẮT BUỘC (schema minOccurs=1)
+    {
+        auto ver = soap_new_tt__OnvifVersion(soap);
+        ver->Major = 21;
+        ver->Minor = 12;
+        caps->Device->System->SupportedVersions.push_back(ver);
+    }
 
     caps->Device->Security = soap_new_tt__SecurityCapabilities(soap);
     caps->Device->Security->TLS1_x002e1        = false;
