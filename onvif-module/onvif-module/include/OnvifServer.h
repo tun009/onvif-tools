@@ -1,5 +1,6 @@
 #pragma once
 #include "services/DeviceService.h"
+#include "services/DiscoveryService.h"
 #include <memory>
 #include <thread>
 #include <atomic>
@@ -20,4 +21,6 @@ private:
     std::atomic<bool> running_{false};
     std::thread serverThread_;
     int masterSocket_ = -1;
+
+    std::unique_ptr<DiscoveryService> discovery_;
 };

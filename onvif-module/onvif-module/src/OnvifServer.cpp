@@ -73,10 +73,22 @@ bool OnvifServer::start() {
     if (running_) return true;
     running_ = true;
     serverThread_ = std::thread(&OnvifServer::listenLoop, this);
+
+    // Khởi động WS-Discovery (UDP multicast 3702)
+    discovery_ = std::make_unique<DiscoveryService>(cfg_);
+    if (!discovery_->start()) {
+        std::cerr << "[OnvifServer] WS-Discovery không khởi động được "
+                     "(kiểm tra quyền bind UDP 3702)\n";
+    }
     return true;
 }
 
 void OnvifServer::stop() {
+    if (discovery_) {
+        discovery_->stop();
+        discovery_.reset();
+    }
+
     if (masterSocket_ >= 0) {
 #ifdef _WIN32
         closesocket(masterSocket_);
