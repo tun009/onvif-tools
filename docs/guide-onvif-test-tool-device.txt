@@ -1,0 +1,3501 @@
+7 Device Management Test Cases
+
+ 
+7.1 Capabilities
+
+ 
+7.1.1 ALL CAPABILITIES
+
+Test Case ID: DEVICE-1-1-2 
+
+Specification Coverage: Capability exchange 
+
+Feature Under Test: GetCapabilities 
+
+WSDL Reference: devicemgmt.wsdl 
+
+Test Purpose: To verify all Capabilities of the DUT. 
+
+Pre-Requisite: GetCapabilities is supported by the DUT. 
+
+Test Configuration: ONVIF Client and DUT 
+
+Test Procedure: 
+
+
+
+ 
+1.Start an ONVIF Client. 
+
+
+2.Start the DUT. 
+
+
+3.ONVIF Client invokes GetCapabilities message with parameters: 
+
+
+•Category[0] := All 
+
+
+4.The DUT responds with a GetCapabilitiesResponse message with parameters: 
+
+
+•Capabilities =: capabilities1 
+
+
+5.If capabilities1.Device is not specified, FAIL the test and skip other steps. 
+
+
+6.If capabilities1.Events is not specified, FAIL the test and skip other steps. 
+
+
+7.If Media is supported by the DUT and capabilities1.Media is not specified, FAIL the test and skip other steps. 
+
+
+8.If PTZ is supported by the DUT and capabilities1.PTZ is not specified, FAIL the test and skip other steps. 
+
+
+9.If Imaging is supported by the DUT and capabilities1.Imaging is not specified, FAIL the test and skip other steps. 
+
+
+10.If Analytics is supported by the DUT and capabilities1.Analytics is not specified, FAIL the test and skip other steps. 
+
+
+11.If DeviceIO is supported by the DUT and capabilities1.Extension.DeviceIO is not specified, FAIL the test and skip other steps. 
+
+
+12.ONVIF Client invokes GetCapabilities message with parameters: 
+
+
+•Category list skipped 
+
+
+13.The DUT responds with a GetCapabilitiesResponse message with parameters: 
+
+
+•Capabilities =: capabilities1 
+
+
+14.If capabilities1.Device is not specified, FAIL the test and skip other steps. 
+
+
+15.If capabilities1.Events is not specified, FAIL the test and skip other steps. 
+
+
+16.If Media is supported by the DUT and capabilities1.Media is not specified, FAIL the test and skip other steps. 
+
+
+17.If PTZ is supported by the DUT and capabilities1.PTZ is not specified, FAIL the test and skip other steps. 
+
+
+18.If Imaging is supported by the DUT and capabilities1.Imaging is not specified, FAIL the test and skip other steps. 
+
+
+19.If Analytics is supported by the DUT and capabilities1.Analytics is not specified, FAIL the test and skip other steps. 
+
+
+20.If DeviceIO is supported by the DUT and capabilities1.Extension.DeviceIO is not specified, FAIL the test and skip other steps. 
+
+Test Result: 
+
+PASS – 
+
+
+• DUT passes all assertions. 
+
+FAIL – 
+
+
+• The DUT did not send GetCapabilitiesResponse message. 
+
+ 
+7.1.2 DEVICE CAPABILITIES
+
+Test Case ID: DEVICE-1-1-3 
+
+Specification Coverage: Capability exchange. 
+
+Feature Under Test: GetCapabilities 
+
+WSDL Reference: devicemgmt.wsdl 
+
+Test Purpose: To verify Device Capabilities of the DUT. 
+
+Pre-Requisite: GetCapabilities is supported by the DUT. 
+
+Test Configuration: ONVIF Client and DUT. 
+
+Test Procedure: 
+
+
+
+ 
+1.Start an ONVIF Client. 
+
+
+2.Start the DUT. 
+
+
+3.ONVIF Client invokes GetCapabilities message with parameters: 
+
+
+•Category[0] := Device 
+
+
+4.The DUT responds with a GetCapabilitiesResponse message with parameters: 
+
+
+•Capabilities =: capabilities 
+
+
+5.If capabilities.Device is not specified, FAIL the test and skip other steps. 
+
+
+6.If capabilities.Device.XAddr is not valid URI, FAIL the test and skip other steps. 
+
+
+7.If capabilities.Analytics is specified, FAIL the test and skip other steps. 
+
+
+8.If capabilities.Events is specified, FAIL the test and skip other steps. 
+
+
+9.If capabilities.Imaging is specified, FAIL the test and skip other steps. 
+
+
+10.If capabilities.Media is specified, FAIL the test and skip other steps. 
+
+
+11.If capabilities.PTZ is specified, FAIL the test and skip other steps. 
+
+Test Result: 
+
+PASS – 
+
+
+• DUT passes all assertions. 
+
+FAIL – 
+
+
+• The DUT did not send GetCapabilitiesResponse message. 
+
+ 
+7.1.3 MEDIA CAPABILITIES
+
+Test Case ID: DEVICE-1-1-4 
+
+Specification Coverage: Capability exchange 
+
+Feature Under Test: GetCapabilities 
+
+WSDL Reference: devicemgmt.wsdl 
+
+Test Purpose: To verify Media Capabilities of the DUT. 
+
+Pre-Requisite: GetCapabilities is supported by the DUT. 
+
+Test Configuration: ONVIF Client and DUT. 
+
+Test Procedure: 
+
+
+
+ 
+1.Start an ONVIF Client. 
+
+
+2.Start the DUT. 
+
+
+3.ONVIF Client invokes GetCapabilities message with parameters: 
+
+
+•Category[0] := Media 
+
+
+4.If Media Service is supported by the DUT:  
+
+
+4.1
+
+The DUT responds with a GetCapabilitiesResponse message with parameters: 
+
+
+•Capabilities =: capabilities 
+ 
+
+
+4.2
+
+If capabilities.Media is not specified, FAIL the test and skip other steps. 
+ 
+
+
+4.3
+
+If capabilities.Media.XAddr is not valid URI, FAIL the test and skip other steps. 
+ 
+
+
+4.4
+
+If capabilities.Analytics is specified, FAIL the test and skip other steps. 
+ 
+
+
+4.5
+
+If capabilities.Device is specified, FAIL the test and skip other steps. 
+ 
+
+
+4.6
+
+If capabilities.Imaging is specified, FAIL the test and skip other steps. 
+ 
+
+
+4.7
+
+If capabilities.Events is specified, FAIL the test and skip other steps. 
+ 
+
+
+4.8
+
+If capabilities.PTZ is specified, FAIL the test and skip other steps. 
+  
+
+5.If Media Service is not supported by the DUT:  
+
+
+5.1
+
+The DUT returns env:Receiver/ter:ActionNotSupported/ter:NoSuchService SOAP 1.2 fault. 
+  
+Test Result: 
+
+PASS – 
+
+
+• DUT passes all assertions. 
+
+FAIL – 
+
+
+• The DUT did not send the env:Receiver/ter:ActionNotSupported/ter:NoSuchService SOAP 1.2 fault message, if Media Service is not supported by the DUT. 
+
+
+•The DUT did not send GetCapabilitiesResponse message, if Media Service is supported by the DUT. 
+
+ 
+7.1.4 EVENT CAPABILITIES
+
+Test Case ID: DEVICE-1-1-5 
+
+Specification Coverage: Capability exchange. 
+
+Feature Under Test: GetCapabilities. 
+
+WSDL Reference: devicemgmt.wsdl 
+
+Test Purpose: To verify event capabilities of the DUT. 
+
+Pre-Requisite: GetCapabilities is supported by the DUT. 
+
+Test Configuration: ONVIF Client and DUT. 
+
+Test Procedure: 
+
+
+
+ 
+1.Start an ONVIF Client. 
+
+
+2.Start the DUT. 
+
+
+3.ONVIF Client invokes GetCapabilities message with parameters: 
+
+
+•Category[0] := Events 
+
+
+4.The DUT responds with a GetCapabilitiesResponse message with parameters: 
+
+
+•Capabilities =: capabilities 
+
+
+5.If capabilities.Events is not specified, FAIL the test and skip other steps. 
+
+
+6.If capabilities.Events.XAddr is not valid URI, FAIL the test and skip other steps. 
+
+
+7.If capabilities.Analytics is specified, FAIL the test and skip other steps. 
+
+
+8.If capabilities.Device is specified, FAIL the test and skip other steps. 
+
+
+9.If capabilities.Imaging is specified, FAIL the test and skip other steps. 
+
+
+10.If capabilities.Media is specified, FAIL the test and skip other steps. 
+
+
+11.If capabilities.PTZ is specified, FAIL the test and skip other steps. 
+
+Test Result: 
+
+PASS – 
+
+
+• DUT passes all assertions. 
+
+FAIL – 
+
+
+• The DUT did not send GetCapabilitiesResponse message. 
+
+ 
+7.1.5 PTZ CAPABILITIES
+
+Test Case ID: DEVICE-1-1-6 
+
+Specification Coverage: Capability exchange. 
+
+Feature Under Test: GetCapabilities. 
+
+WSDL Reference: devicemgmt.wsdl 
+
+Test Purpose: To verify PTZ capabilities of the DUT. 
+
+Pre-Requisite: GetCapabilities is supported by the DUT. 
+
+Test Configuration: ONVIF Client and DUT. 
+
+Test Procedure: 
+
+
+
+ 
+1.Start an ONVIF Client. 
+
+
+2.Start the DUT. 
+
+
+3.ONVIF Client invokes GetCapabilities message with parameters: 
+
+
+•Category[0] := PTZ 
+
+
+4.If PTZ Service is supported by the DUT:  
+
+
+4.1
+
+The DUT responds with a GetCapabilitiesResponse message with parameters: 
+
+
+•Capabilities =: capabilities 
+ 
+
+
+4.2
+
+If capabilities.PTZ is not specified, FAIL the test and skip other steps. 
+ 
+
+
+4.3
+
+If capabilities.PTZ.XAddr is not valid URI, FAIL the test and skip other steps. 
+ 
+
+
+4.4
+
+If capabilities.Analytics is specified, FAIL the test and skip other steps. 
+ 
+
+
+4.5
+
+If capabilities.Device is specified, FAIL the test and skip other steps. 
+ 
+
+
+4.6
+
+If capabilities.Imaging is specified, FAIL the test and skip other steps. 
+ 
+
+
+4.7
+
+If capabilities.Events is specified, FAIL the test and skip other steps. 
+ 
+
+
+4.8
+
+If capabilities.Media is specified, FAIL the test and skip other steps. 
+  
+
+5.If PTZ Service is not supported by the DUT:  
+
+
+5.1
+
+The DUT returns env:Receiver/ter:ActionNotSupported/ter:NoSuchService SOAP 1.2 fault. 
+  
+Test Result: 
+
+PASS – 
+
+
+• DUT passes all assertions. 
+
+FAIL – 
+
+
+• The DUT did not send the env:Receiver/ter:ActionNotSupported/ter:NoSuchService SOAP 1.2 fault message, if PTZ Service is not supported by the DUT. 
+
+
+•The DUT did not send GetCapabilitiesResponse message, if PTZ Service is supported by the DUT. 
+
+ 
+7.1.6 SOAP FAULT MESSAGE
+
+Test Case ID: DEVICE-1-1-9 
+
+Feature Under Test: GetCapabilities 
+
+Specification Coverage: Capability exchange. 
+
+WSDL Reference: devicemgmt.wsdl 
+
+Pre-Requisite: GetCapabilities is supported by the DUT. 
+
+Test Purpose: To verify that the DUT generates SOAP 1.2 fault message to the invalid GetCapabilities message (invalid capability category). 
+
+Test Configuration: ONVIF Client and DUT. 
+
+Test Procedure: 
+
+
+
+ 
+1.Start an ONVIF Client. 
+
+
+2.Start the DUT. 
+
+
+3.ONVIF Client invokes GetCapabilities message with parameters: 
+
+
+•Category[0] := invalid capability category 
+
+
+4.The DUT returns SOAP 1.2 fault. 
+
+Test Result: 
+
+PASS – 
+
+
+• DUT passes all assertions. 
+
+FAIL – 
+
+
+• The DUT did not send the SOAP 1.2 fault message. 
+
+Note: See → Annex A.4for Invalid SOAP 1.2 fault message definition. 
+
+ 
+7.1.7 IMAGING CAPABILITIES
+
+Test Case ID: DEVICE-1-1-10 
+
+Specification Coverage: Capability exchange 
+
+Feature Under Test: GetCapabilities 
+
+WSDL Reference: devicemgmt.wsdl 
+
+Test Purpose: To verify Imaging Capabilities of the DUT. 
+
+Pre-Requisite: GetCapabilities is supported by the DUT. 
+
+Test Configuration: ONVIF Client and DUT. 
+
+Test Procedure: 
+
+
+
+ 
+1.Start an ONVIF Client. 
+
+
+2.Start the DUT. 
+
+
+3.ONVIF Client invokes GetCapabilities message with parameters: 
+
+
+•Category[0] := Imaging 
+
+
+4.If Imaging Service is supported by the DUT:  
+
+
+4.1
+
+The DUT responds with a GetCapabilitiesResponse message with parameters: 
+
+
+•Capabilities =: capabilities 
+ 
+
+
+4.2
+
+If capabilities.Imaging is not specified, FAIL the test and skip other steps. 
+ 
+
+
+4.3
+
+If capabilities.Imaging.XAddr is not valid URI, FAIL the test and skip other steps. 
+ 
+
+
+4.4
+
+If capabilities.Analytics is specified, FAIL the test and skip other steps. 
+ 
+
+
+4.5
+
+If capabilities.Device is specified, FAIL the test and skip other steps. 
+ 
+
+
+4.6
+
+If capabilities.PTZ is specified, FAIL the test and skip other steps. 
+ 
+
+
+4.7
+
+If capabilities.Events is specified, FAIL the test and skip other steps. 
+ 
+
+
+4.8
+
+If capabilities.Media is specified, FAIL the test and skip other steps. 
+  
+
+5.If Imaging Service is not supported by the DUT:  
+
+
+5.1
+
+The DUT returns env:Receiver/ter:ActionNotSupported/ter:NoSuchService SOAP 1.2 fault. 
+  
+Test Result: 
+
+PASS – 
+
+
+• DUT passes all assertions. 
+
+FAIL – 
+
+
+• The DUT did not send the env:Receiver/ter:ActionNotSupported/ter:NoSuchService SOAP 1.2 fault message, if Imaging Service is not supported by the DUT. 
+
+
+•The DUT did not send GetCapabilitiesResponse message, if Imaging Service is supported by the DUT. 
+
+ 
+7.1.8 ANALYTICS CAPABILITIES
+
+Test Case ID: DEVICE-1-1-11 
+
+Specification Coverage: Capability exchange 
+
+Feature Under Test: GetCapabilities 
+
+WSDL Reference: devicemgmt.wsdl 
+
+Test Purpose: To verify Analytics Capabilities of the DUT. 
+
+Pre-Requisite: GetCapabilities is supported by the DUT. 
+
+Test Configuration: ONVIF Client and DUT. 
+
+Test Procedure: 
+
+
+
+ 
+1.Start an ONVIF Client. 
+
+
+2.Start the DUT. 
+
+
+3.ONVIF Client invokes GetCapabilities message with parameters: 
+
+
+•Category[0] := Analytics 
+
+
+4.If Analytics Service is supported by the DUT:  
+
+
+4.1
+
+The DUT responds with a GetCapabilitiesResponse message with parameters: 
+
+
+•Capabilities =: capabilities 
+ 
+
+
+4.2
+
+If capabilities.Analytics is not specified, FAIL the test and skip other steps. 
+ 
+
+
+4.3
+
+If capabilities.Analytics.XAddr is not valid URI, FAIL the test and skip other steps. 
+ 
+
+
+4.4
+
+If capabilities.Imaging is specified, FAIL the test and skip other steps. 
+ 
+
+
+4.5
+
+If capabilities.Device is specified, FAIL the test and skip other steps. 
+ 
+
+
+4.6
+
+If capabilities.PTZ is specified, FAIL the test and skip other steps. 
+ 
+
+
+4.7
+
+If capabilities.Events is specified, FAIL the test and skip other steps. 
+ 
+
+
+4.8
+
+If capabilities.Media is specified, FAIL the test and skip other steps. 
+  
+
+5.If Analytics Service is not supported by the DUT:  
+
+
+5.1
+
+The DUT returns env:Receiver/ter:ActionNotSupported/ter:NoSuchService SOAP 1.2 fault. 
+  
+Test Result: 
+
+PASS – 
+
+
+• DUT passes all assertions. 
+
+FAIL – 
+
+
+• The DUT did not send the env:Receiver/ter:ActionNotSupported/ter:NoSuchService SOAP 1.2 fault message, if Analytics Service is not supported by the DUT. 
+
+
+•The DUT did not send GetCapabilitiesResponse message, if Analytics Service is supported by the DUT. 
+
+ 
+7.1.9 GET SERVICES – DEVICE SERVICE
+
+Test Case ID: DEVICE-1-1-13 
+
+Specification Coverage: Capability exchange 
+
+Feature Under Test: GetServices 
+
+WSDL Reference: devicemgmt.wsdl 
+
+Test Purpose: To verify that Device Management Service is received using GetServices request. 
+
+Pre-Requisite: GetServices is supported by the DUT. 
+
+Test Configuration: ONVIF Client and DUT 
+
+Test Procedure: 
+
+
+
+ 
+1.Start an ONVIF Client. 
+
+
+2.Start the DUT. 
+
+
+3.ONVIF Client invokes GetServices message with parameters: 
+
+
+•IncludeCapability := false 
+
+
+4.The DUT responds with a GetServicesResponse message with parameters: 
+
+
+•Service list =: listOfServicesWithoutCapabilities 
+
+
+5.If listOfServicesWithoutCapabilities does not contain item with Namespace = "http://www.onvif.org/ver10/device/wsdl", FAIL the test and skip other steps. 
+
+
+6.Set deviceServ := item from listOfServicesWithoutCapabilities list with Namespace = "http://www.onvif.org/ver10/device/wsdl". 
+
+
+7.If deviceServ.Capabilities is specified, FAIL the test and skip other steps. 
+
+
+8.ONVIF Client invokes GetServices message with parameters: 
+
+
+•IncludeCapability := true 
+
+
+9.The DUT responds with a GetServicesResponse message with parameters: 
+
+
+•Service list =: listOfServicesWithCapabilities 
+
+
+10.If listOfServicesWithCapabilities does not contain item with Namespace = "http://www.onvif.org/ver10/device/wsdl", FAIL the test and skip other steps. 
+
+
+11.Set deviceServ := item from listOfServicesWithCapabilities list with Namespace = "http://www.onvif.org/ver10/device/wsdl". 
+
+
+12.If deviceServ.Capabilities is not specified, FAIL the test and skip other steps. 
+
+
+13.If deviceServ.Capabilities does not contain valid Capabilities element for Device Management service from "http://www.onvif.org/ver10/device/wsdl" namespace, FAIL the test and skip other steps. 
+
+Test Result: 
+
+PASS – 
+
+
+• DUT passes all assertions. 
+
+FAIL – 
+
+
+• The DUT did not send GetServicesResponse message. 
+
+ 
+7.1.10 GET SERVICES – MEDIA SERVICE
+
+Test Case ID: DEVICE-1-1-14 
+
+Specification Coverage: Capability exchange 
+
+Feature Under Test: GetServices 
+
+WSDL Reference: devicemgmt.wsdl 
+
+Test Purpose: To verify that Media Service is received using GetServices request. 
+
+Pre-Requisite: GetServices is supported by the DUT. Media Service is supported by the DUT. 
+
+Test Configuration: ONVIF Client and DUT 
+
+Test Procedure: 
+
+
+
+ 
+1.Start an ONVIF Client. 
+
+
+2.Start the DUT. 
+
+
+3.ONVIF Client invokes GetServices message with parameters: 
+
+
+•IncludeCapability := false 
+
+
+4.The DUT responds with a GetServicesResponse message with parameters: 
+
+
+•Service list =: listOfServicesWithoutCapabilities 
+
+
+5.If listOfServicesWithoutCapabilities does not contain item with Namespace = "http://www.onvif.org/ver10/media/wsdl", FAIL the test and skip other steps. 
+
+
+6.Set mediaServ := item from listOfServicesWithoutCapabilities list with Namespace = "http://www.onvif.org/ver10/media/wsdl". 
+
+
+7.If mediaServ.Capabilities is specified, FAIL the test and skip other steps. 
+
+
+8.ONVIF Client invokes GetServices message with parameters: 
+
+
+•IncludeCapability := true 
+
+
+9.The DUT responds with a GetServicesResponse message with parameters: 
+
+
+•Service list =: listOfServicesWithCapabilities 
+
+
+10.If listOfServicesWithCapabilities does not contain item with Namespace = "http://www.onvif.org/ver10/media/wsdl", FAIL the test and skip other steps. 
+
+
+11.Set mediaServ := item from listOfServicesWithCapabilities list with Namespace = "http://www.onvif.org/ver10/media/wsdl". 
+
+
+12.If mediaServ.Capabilities is not specified, FAIL the test and skip other steps. 
+
+
+13.If mediaServ.Capabilities does not contain valid Capabilities element for Media service from "http://www.onvif.org/ver10/media/wsdl" namespace, FAIL the test and skip other steps. 
+
+Test Result: 
+
+PASS – 
+
+
+• DUT passes all assertions. 
+
+FAIL – 
+
+
+• The DUT did not send GetServicesResponse message. 
+
+ 
+7.1.11 GET SERVICES – PTZ SERVICE
+
+Test Case ID: DEVICE-1-1-15 
+
+Specification Coverage: Capability exchange 
+
+Feature Under Test: GetServices 
+
+WSDL Reference: devicemgmt.wsdl 
+
+Test Purpose: To verify that PTZ Service is received using GetServices request. 
+
+Pre-Requisite: GetServices is supported by the DUT. PTZ Service is supported by the DUT. 
+
+Test Configuration: ONVIF Client and DUT 
+
+Test Procedure: 
+
+
+
+ 
+1.Start an ONVIF Client. 
+
+
+2.Start the DUT. 
+
+
+3.ONVIF Client invokes GetServices message with parameters: 
+
+
+•IncludeCapability := false 
+
+
+4.The DUT responds with a GetServicesResponse message with parameters: 
+
+
+•Service list =: listOfServicesWithoutCapabilities 
+
+
+5.If listOfServicesWithoutCapabilities does not contain item with Namespace = "http://www.onvif.org/ver20/ptz/wsdl", FAIL the test and skip other steps. 
+
+
+6.Set ptzServ := item from listOfServicesWithoutCapabilities list with Namespace = "http://www.onvif.org/ver20/ptz/wsdl". 
+
+
+7.If ptzServ.Capabilities is specified, FAIL the test and skip other steps. 
+
+
+8.ONVIF Client invokes GetServices message with parameters: 
+
+
+•IncludeCapability := true 
+
+
+9.The DUT responds with a GetServicesResponse message with parameters: 
+
+
+•Service list =: listOfServicesWithCapabilities 
+
+
+10.If listOfServicesWithCapabilities does not contain item with Namespace = "http://www.onvif.org/ver20/ptz/wsdl", FAIL the test and skip other steps. 
+
+
+11.Set ptzServ := item from listOfServicesWithCapabilities list with Namespace = "http://www.onvif.org/ver20/ptz/wsdl". 
+
+
+12.If ptzServ.Capabilities is not specified, FAIL the test and skip other steps. 
+
+
+13.If ptzServ.Capabilities does not contain valid Capabilities element for PTZ service from "http://www.onvif.org/ver20/ptz/wsdl" namespace, FAIL the test and skip other steps. 
+
+Test Result: 
+
+PASS – 
+
+
+• DUT passes all assertions. 
+
+FAIL – 
+
+
+• The DUT did not send GetServicesResponse message. 
+
+ 
+7.1.12 GET SERVICES – EVENT SERVICE
+
+Test Case ID: DEVICE-1-1-16 
+
+Specification Coverage: Capability exchange 
+
+Feature Under Test: GetServices 
+
+WSDL Reference: devicemgmt.wsdl 
+
+Test Purpose: To verify that Event Service is received using GetServices request. 
+
+Pre-Requisite: GetServices is supported by the DUT. 
+
+Test Configuration: ONVIF Client and DUT 
+
+Test Procedure: 
+
+
+
+ 
+1.Start an ONVIF Client. 
+
+
+2.Start the DUT. 
+
+
+3.ONVIF Client invokes GetServices message with parameters: 
+
+
+•IncludeCapability := false 
+
+
+4.The DUT responds with a GetServicesResponse message with parameters: 
+
+
+•Service list =: listOfServicesWithoutCapabilities 
+
+
+5.If listOfServicesWithoutCapabilities does not contain item with Namespace = "http://www.onvif.org/ver10/events/wsdl", FAIL the test and skip other steps. 
+
+
+6.Set eventsServ := item from listOfServicesWithoutCapabilities list with Namespace = "http://www.onvif.org/ver10/events/wsdl". 
+
+
+7.If eventsServ.Capabilities is specified, FAIL the test and skip other steps. 
+
+
+8.ONVIF Client invokes GetServices message with parameters: 
+
+
+•IncludeCapability := true 
+
+
+9.The DUT responds with a GetServicesResponse message with parameters: 
+
+
+•Service list =: listOfServicesWithCapabilities 
+
+
+10.If listOfServicesWithCapabilities does not contain item with Namespace = "http://www.onvif.org/ver10/events/wsdl", FAIL the test and skip other steps. 
+
+
+11.Set eventsServ := item from listOfServicesWithCapabilities list with Namespace = "http://www.onvif.org/ver10/events/wsdl". 
+
+
+12.If eventsServ.Capabilities is not specified, FAIL the test and skip other steps. 
+
+
+13.If eventsServ.Capabilities does not contain valid Capabilities element for Event service from "http://www.onvif.org/ver10/events/wsdl" namespace, FAIL the test and skip other steps. 
+
+Test Result: 
+
+PASS – 
+
+
+• DUT passes all assertions. 
+
+FAIL – 
+
+
+• The DUT did not send GetServicesResponse message. 
+
+ 
+7.1.13 GET SERVICES – IMAGING SERVICE
+
+Test Case ID: DEVICE-1-1-17 
+
+Specification Coverage: Capability exchange 
+
+Feature Under Test: GetServices 
+
+WSDL Reference: devicemgmt.wsdl 
+
+Test Purpose: To verify that Imaging Service is received using GetServices request. 
+
+Pre-Requisite: GetServices is supported by the DUT. Imaging Service is supported by the DUT. 
+
+Test Configuration: ONVIF Client and DUT 
+
+Test Procedure: 
+
+
+
+ 
+1.Start an ONVIF Client. 
+
+
+2.Start the DUT. 
+
+
+3.ONVIF Client invokes GetServices message with parameters: 
+
+
+•IncludeCapability := false 
+
+
+4.The DUT responds with a GetServicesResponse message with parameters: 
+
+
+•Service list =: listOfServicesWithoutCapabilities 
+
+
+5.If listOfServicesWithoutCapabilities does not contain item with Namespace = "http://www.onvif.org/ver20/imaging/wsdl", FAIL the test and skip other steps. 
+
+
+6.Set imagingServ := item from listOfServicesWithoutCapabilities list with Namespace = "http://www.onvif.org/ver20/imaging/wsdl". 
+
+
+7.If imagingServ.Capabilities is specified, FAIL the test and skip other steps. 
+
+
+8.ONVIF Client invokes GetServices message with parameters: 
+
+
+•IncludeCapability := true 
+
+
+9.The DUT responds with a GetServicesResponse message with parameters: 
+
+
+•Service list =: listOfServicesWithCapabilities 
+
+
+10.If listOfServicesWithCapabilities does not contain item with Namespace = "http://www.onvif.org/ver20/imaging/wsdl", FAIL the test and skip other steps. 
+
+
+11.Set imagingServ := item from listOfServicesWithCapabilities list with Namespace = "http://www.onvif.org/ver20/imaging/wsdl". 
+
+
+12.If imagingServ.Capabilities is not specified, FAIL the test and skip other steps. 
+
+
+13.If imagingServ.Capabilities does not contain valid Capabilities element for Imaging service from "http://www.onvif.org/ver20/imaging/wsdl" namespace, FAIL the test and skip other steps. 
+
+Test Result: 
+
+PASS – 
+
+
+• DUT passes all assertions. 
+
+FAIL – 
+
+
+• The DUT did not send GetServicesResponse message. 
+
+ 
+7.1.14 DEVICE SERVICE CAPABILITIES
+
+Test Case ID: DEVICE-1-1-18 
+
+Specification Coverage: Capability exchange 
+
+Feature Under Test: GetServiceCapabilities (for Device Management service) 
+
+WSDL Reference: devicemgmt.wsdl 
+
+Test Purpose: To verify Device Management Service Capabilities of the DUT. 
+
+Pre-Requisite: GetServices is supported by the DUT. 
+
+Test Configuration: ONVIF Client and DUT 
+
+Test Procedure: 
+
+
+
+ 
+1.Start an ONVIF Client. 
+
+
+2.Start the DUT. 
+
+
+3.ONVIF Client invokes GetServiceCapabilities message. 
+
+
+4.The DUT responds with a GetServiceCapabilitiesResponse message with parameters: 
+
+
+•Capabilities 
+
+
+5.If Capabilities.System.DiscoveryNotSupported = true and Capabilities.Device.System.DiscoveryBye = true, FAIL the test and skip other steps. 
+
+Test Result: 
+
+PASS – 
+
+
+• DUT passes all assertions. 
+
+FAIL – 
+
+
+• The DUT did not send GetServiceCapabilitiesResponse message. 
+
+ 
+7.1.15 GET SERVICES AND GET DEVICE SERVICE CAPABILITIES CONSISTENCY
+
+Test Case ID: DEVICE-1-1-19 
+
+Specification Coverage: Capability exchange 
+
+Feature Under Test: GetServices, GetServiceCapabilities (for Device Management Service) 
+
+WSDL Reference: devicemgmt.wsdl 
+
+Test Purpose: To verify Get Services and Device Management Service Capabilities consistency. 
+
+Pre-Requisite: GetServices is supported by the DUT. 
+
+Test Configuration: ONVIF Client and DUT 
+
+Test Procedure: 
+
+
+
+ 
+1.Start an ONVIF Client. 
+
+
+2.Start the DUT. 
+
+
+3.ONVIF Client invokes GetServices message with parameters: 
+
+
+•IncludeCapability := true 
+
+
+4.The DUT responds with a GetServicesResponse message with parameters: 
+
+
+•Service list =: listOfServicesWithCapabilities 
+
+
+5.Set deviceServ := item from listOfServicesWithCapabilities list with Namespace = "http://www.onvif.org/ver10/device/wsdl". 
+
+
+6.ONVIF Client invokes GetServiceCapabilities message. 
+
+
+7.The DUT responds with a GetServiceCapabilitiesResponse message with parameters: 
+
+
+•Capabilities =: deviceCapabilities 
+
+
+8.If deviceCapabilities are not equal to deviceServ.Capabilities.Capabilities, FAIL the test and skip other steps. 
+
+Test Result: 
+
+PASS – 
+
+
+• DUT passes all assertions. 
+
+FAIL – 
+
+
+• The DUT did not send GetServicesResponse message. 
+
+
+•The DUT did not send GetServiceCapabilitiesResponse message. 
+
+Note: The following fields are compared at step → 8: 
+
+
+•Network 
+
+
+◦IPFilter 
+
+
+◦ZeroConfiguration 
+
+
+◦IPVersion6 
+
+
+◦DynDNS 
+
+
+◦Dot11Configuration 
+
+
+◦HostnameFromDHCP 
+
+
+◦NTP 
+
+
+•System 
+
+
+◦DiscoveryBye 
+
+
+◦DiscoveryResolve 
+
+
+◦FirmwareUpgrade 
+
+
+◦HttpFirmwareUpgrade 
+
+
+◦HttpSupportInformation 
+
+
+◦HttpSystemBackup 
+
+
+◦HttpSystemLogging 
+
+
+◦RemoteDiscovery 
+
+
+◦SystemBackup 
+
+
+◦SystemLogging 
+
+
+•Security 
+
+
+◦TLS1.0 
+
+
+◦TLS1.1 
+
+
+◦TLS1.2 
+
+
+◦OnboardKeyGeneration 
+
+
+◦AccessPolicyConfig 
+
+
+◦Dot1X 
+
+
+◦RemoteUserHandling 
+
+
+◦X.509Token 
+
+
+◦SAMLToken 
+
+
+◦KerberosToken 
+
+
+◦UsernameToken 
+
+
+◦HttpDigest 
+
+
+◦RELToken 
+
+
+◦DefaultAccessPolicy 
+
+
+◦SupportedEAPMethod 
+
+
+•Misc 
+
+
+◦AuxiliaryCommands 
+
+ 
+7.1.16 GET SERVICES – REPLAY SERVICE
+
+Test Case ID: DEVICE-1-1-20 
+
+Specification Coverage: Capability exchange 
+
+Feature Under Test: GetServices 
+
+WSDL Reference: devicemgmt.wsdl 
+
+Test Purpose: To verify getting Replay Service with using GetServices request. 
+
+Pre-Requisite: GetServices is supported by the DUT. Replay Service is supported by the DUT. 
+
+Test Configuration: ONVIF Client and DUT 
+
+Test Procedure: 
+
+
+
+ 
+1.Start an ONVIF Client. 
+
+
+2.Start the DUT. 
+
+
+3.ONVIF Client invokes GetServices message with parameters: 
+
+
+•IncludeCapability := false 
+
+
+4.The DUT responds with a GetServicesResponse message with parameters: 
+
+
+•Service list =: listOfServicesWithoutCapabilities 
+
+
+5.If listOfServicesWithoutCapabilities does not contain item with Namespace = "http://www.onvif.org/ver10/replay/wsdl", FAIL the test and skip other steps. 
+
+
+6.Set replayServ := item from listOfServicesWithoutCapabilities list with Namespace = "http://www.onvif.org/ver10/replay/wsdl". 
+
+
+7.If replayServ.Capabilities is specified, FAIL the test and skip other steps. 
+
+
+8.ONVIF Client invokes GetServices message with parameters: 
+
+
+•IncludeCapability := true 
+
+
+9.The DUT responds with a GetServicesResponse message with parameters: 
+
+
+•Service list =: listOfServicesWithCapabilities 
+
+
+10.If listOfServicesWithCapabilities does not contain item with Namespace = "http://www.onvif.org/ver10/replay/wsdl", FAIL the test and skip other steps. 
+
+
+11.Set replayServ := item from listOfServicesWithCapabilities list with Namespace = "http://www.onvif.org/ver10/replay/wsdl". 
+
+
+12.If replayServ.Capabilities is not specified, FAIL the test and skip other steps. 
+
+
+13.If replayServ.Capabilities does not contain valid Capabilities element for Replay service from "http://www.onvif.org/ver10/replay/wsdl" namespace, FAIL the test and skip other steps. 
+
+Test Result: 
+
+PASS – 
+
+
+• DUT passes all assertions. 
+
+FAIL – 
+
+
+• The DUT did not send GetServicesResponse message. 
+
+ 
+7.1.17 GET SERVICES – RECORDING SEARCH SERVICE
+
+Test Case ID: DEVICE-1-1-21 
+
+Specification Coverage: Capability exchange 
+
+Feature Under Test: GetServices 
+
+WSDL Reference: devicemgmt.wsdl 
+
+Test Purpose: To verify that Recording Search Service is received using GetServices request. 
+
+Pre-Requisite: GetServices is supported by the DUT. Recording Search Service is supported by the DUT. 
+
+Test Configuration: ONVIF Client and DUT 
+
+Test Procedure: 
+
+
+
+ 
+1.Start an ONVIF Client. 
+
+
+2.Start the DUT. 
+
+
+3.ONVIF Client invokes GetServices message with parameters: 
+
+
+•IncludeCapability := false 
+
+
+4.The DUT responds with a GetServicesResponse message with parameters: 
+
+
+•Service list =: listOfServicesWithoutCapabilities 
+
+
+5.If listOfServicesWithoutCapabilities does not contain item with Namespace = "http://www.onvif.org/ver10/search/wsdl", FAIL the test and skip other steps. 
+
+
+6.Set searchServ := item from listOfServicesWithoutCapabilities list with Namespace = "http://www.onvif.org/ver10/search/wsdl". 
+
+
+7.If searchServ.Capabilities is specified, FAIL the test and skip other steps. 
+
+
+8.ONVIF Client invokes GetServices message with parameters: 
+
+
+•IncludeCapability := true 
+
+
+9.The DUT responds with a GetServicesResponse message with parameters: 
+
+
+•Service list =: listOfServicesWithCapabilities 
+
+
+10.If listOfServicesWithCapabilities does not contain item with Namespace = "http://www.onvif.org/ver10/search/wsdl", FAIL the test and skip other steps. 
+
+
+11.Set searchServ := item from listOfServicesWithCapabilities list with Namespace = "http://www.onvif.org/ver10/search/wsdl". 
+
+
+12.If searchServ.Capabilities is not specified, FAIL the test and skip other steps. 
+
+
+13.If searchServ.Capabilities does not contain valid Capabilities element for Recording Search service from "http://www.onvif.org/ver10/search/wsdl" namespace, FAIL the test and skip other steps. 
+
+Test Result: 
+
+PASS – 
+
+
+• DUT passes all assertions. 
+
+FAIL – 
+
+
+• The DUT did not send GetServicesResponse message. 
+
+ 
+7.1.18 GET SERVICES – RECORDING CONTROL SERVICE
+
+Test Case ID: DEVICE-1-1-22 
+
+Specification Coverage: Capability exchange (ONVIF Core Specification) 
+
+Feature Under Test: GetServices 
+
+WSDL Reference: devicemgmt.wsdl 
+
+Test Purpose: To verify that Recording Control Service is received using GetServices request. 
+
+Pre-Requisite: GetServices is supported by the DUT. Recording Control Service is supported by the DUT. 
+
+Test Configuration: ONVIF Client and DUT 
+
+Test Procedure: 
+
+
+
+ 
+1.Start an ONVIF Client. 
+
+
+2.Start the DUT. 
+
+
+3.ONVIF Client invokes GetServices message with parameters: 
+
+
+•IncludeCapability := false 
+
+
+4.The DUT responds with a GetServicesResponse message with parameters: 
+
+
+•Service list =: listOfServicesWithoutCapabilities 
+
+
+5.If listOfServicesWithoutCapabilities does not contain item with Namespace = "http://www.onvif.org/ver10/recording/wsdl", FAIL the test and skip other steps. 
+
+
+6.Set recordingServ := item from listOfServicesWithoutCapabilities list with Namespace = "http://www.onvif.org/ver10/recording/wsdl". 
+
+
+7.If recordingServ.Capabilities is specified, FAIL the test and skip other steps. 
+
+
+8.ONVIF Client invokes GetServices message with parameters: 
+
+
+•IncludeCapability := true 
+
+
+9.The DUT responds with a GetServicesResponse message with parameters: 
+
+
+•Service list =: listOfServicesWithCapabilities 
+
+
+10.If listOfServicesWithCapabilities does not contain item with Namespace = "http://www.onvif.org/ver10/recording/wsdl", FAIL the test and skip other steps. 
+
+
+11.Set recordingServ := item from listOfServicesWithCapabilities list with Namespace = "http://www.onvif.org/ver10/recording/wsdl". 
+
+
+12.If recordingServ.Capabilities is not specified, FAIL the test and skip other steps. 
+
+
+13.If recordingServ.Capabilities does not contain valid Capabilities element for Recording Control service from "http://www.onvif.org/ver10/recording/wsdl" namespace, FAIL the test and skip other steps. 
+
+Test Result: 
+
+PASS – 
+
+
+• DUT passes all assertions. 
+
+FAIL – 
+
+
+• The DUT did not send GetServicesResponse message. 
+
+ 
+7.1.19 GET SERVICES – RECEIVER SERVICE
+
+Test Case ID: DEVICE-1-1-23 
+
+Specification Coverage: Capability exchange (ONVIF Core Specification) 
+
+Feature Under Test: GetServices 
+
+WSDL Reference: devicemgmt.wsdl 
+
+Test Purpose: To verify that Receiver Service is received using GetServices request. 
+
+Pre-Requisite: GetServices is supported by the DUT. Receiver Service is supported by the DUT. 
+
+Test Configuration: ONVIF Client and DUT 
+
+Test Procedure: 
+
+
+
+ 
+1.Start an ONVIF Client. 
+
+
+2.Start the DUT. 
+
+
+3.ONVIF Client invokes GetServices message with parameters: 
+
+
+•IncludeCapability := false 
+
+
+4.The DUT responds with a GetServicesResponse message with parameters: 
+
+
+•Service list =: listOfServicesWithoutCapabilities 
+
+
+5.If listOfServicesWithoutCapabilities does not contain item with Namespace = "http://www.onvif.org/ver10/receiver/wsdl", FAIL the test and skip other steps. 
+
+
+6.Set receiverServ := item from listOfServicesWithoutCapabilities list with Namespace = "http://www.onvif.org/ver10/receiver/wsdl". 
+
+
+7.If receiverServ.Capabilities is specified, FAIL the test and skip other steps. 
+
+
+8.ONVIF Client invokes GetServices message with parameters: 
+
+
+•IncludeCapability := true 
+
+
+9.The DUT responds with a GetServicesResponse message with parameters: 
+
+
+•Service list =: listOfServicesWithCapabilities 
+
+
+10.If listOfServicesWithCapabilities does not contain item with Namespace = "http://www.onvif.org/ver10/receiver/wsdl", FAIL the test and skip other steps. 
+
+
+11.Set receiverServ := item from listOfServicesWithCapabilities list with Namespace = "http://www.onvif.org/ver10/receiver/wsdl". 
+
+
+12.If receiverServ.Capabilities is not specified, FAIL the test and skip other steps. 
+
+
+13.If receiverServ.Capabilities does not contain valid Capabilities element for Receiver service from "http://www.onvif.org/ver10/receiver/wsdl" namespace, FAIL the test and skip other steps. 
+
+Test Result: 
+
+PASS – 
+
+
+• DUT passes all assertions. 
+
+FAIL – 
+
+
+• The DUT did not send GetServicesResponse message. 
+
+ 
+7.1.20 GET SERVICES – ACCESS CONTROL SERVICE
+
+Test Case ID: DEVICE-1-1-24 
+
+Specification Coverage: Capability exchange (ONVIF Core Specification) 
+
+Feature Under Test: GetServices 
+
+WSDL Reference: devicemgmt.wsdl 
+
+Test Purpose: To verify that Access Control Service is received using GetServices request. 
+
+Pre-Requisite: Access Control Service is supported by the DUT. 
+
+Test Configuration: ONVIF Client and DUT 
+
+Test Procedure: 
+
+
+
+ 
+1.Start an ONVIF Client. 
+
+
+2.Start the DUT. 
+
+
+3.ONVIF Client invokes GetServices message with parameters: 
+
+
+•IncludeCapability := false 
+
+
+4.The DUT responds with a GetServicesResponse message with parameters: 
+
+
+•Service list =: listOfServicesWithoutCapabilities 
+
+
+5.If listOfServicesWithoutCapabilities does not contain item with Namespace = "http://www.onvif.org/ver10/accesscontrol/wsdl", FAIL the test and skip other steps. 
+
+
+6.Set accessControlServ := item from listOfServicesWithoutCapabilities list with Namespace = "http://www.onvif.org/ver10/accesscontrol/wsdl". 
+
+
+7.If accessControlServ.Capabilities is specified, FAIL the test and skip other steps. 
+
+
+8.ONVIF Client invokes GetServices message with parameters: 
+
+
+•IncludeCapability := true 
+
+
+9.The DUT responds with a GetServicesResponse message with parameters: 
+
+
+•Service list =: listOfServicesWithCapabilities 
+
+
+10.If listOfServicesWithCapabilities does not contain item with Namespace = "http://www.onvif.org/ver10/accesscontrol/wsdl", FAIL the test and skip other steps. 
+
+
+11.Set accessControlServ := item from listOfServicesWithCapabilities list with Namespace = "http://www.onvif.org/ver10/accesscontrol/wsdl". 
+
+
+12.If accessControlServ.Capabilities is not specified, FAIL the test and skip other steps. 
+
+
+13.If accessControlServ.Capabilities does not contain valid Capabilities element for Access Control service from "http://www.onvif.org/ver10/accesscontrol/wsdl" namespace, FAIL the test and skip other steps. 
+
+Test Result: 
+
+PASS – 
+
+
+• DUT passes all assertions. 
+
+FAIL – 
+
+
+• The DUT did not send GetServicesResponse message. 
+
+ 
+7.1.21 GET SERVICES – DOOR CONTROL SERVICE
+
+Test Case ID: DEVICE-1-1-25 
+
+Specification Coverage: Capability exchange (ONVIF Core Specification) 
+
+Feature Under Test: GetServices 
+
+WSDL Reference: devicemgmt.wsdl 
+
+Test Purpose: To verify getting Door Control Service using GetServices request. 
+
+Pre-Requisite: Door Control Service is supported by the DUT. 
+
+Test Configuration: ONVIF Client and DUT 
+
+Test Procedure: 
+
+
+
+ 
+1.Start an ONVIF Client. 
+
+
+2.Start the DUT. 
+
+
+3.ONVIF Client invokes GetServices message with parameters: 
+
+
+•IncludeCapability := false 
+
+
+4.The DUT responds with a GetServicesResponse message with parameters: 
+
+
+•Service list =: listOfServicesWithoutCapabilities 
+
+
+5.If listOfServicesWithoutCapabilities does not contain item with Namespace = "http://www.onvif.org/ver10/doorcontrol/wsdl", FAIL the test and skip other steps. 
+
+
+6.Set doorControlServ := item from listOfServicesWithoutCapabilities list with Namespace = "http://www.onvif.org/ver10/doorcontrol/wsdl". 
+
+
+7.If doorControlServ.Capabilities is specified, FAIL the test and skip other steps. 
+
+
+8.ONVIF Client invokes GetServices message with parameters: 
+
+
+•IncludeCapability := true 
+
+
+9.The DUT responds with a GetServicesResponse message with parameters: 
+
+
+•Service list =: listOfServicesWithCapabilities 
+
+
+10.If listOfServicesWithCapabilities does not contain item with Namespace = "http://www.onvif.org/ver10/doorcontrol/wsdl", FAIL the test and skip other steps. 
+
+
+11.Set doorControlServ := item from listOfServicesWithCapabilities list with Namespace = "http://www.onvif.org/ver10/doorcontrol/wsdl". 
+
+
+12.If doorControlServ.Capabilities is not specified, FAIL the test and skip other steps. 
+
+
+13.If doorControlServ.Capabilities does not contain valid Capabilities element for Door Control service from "http://www.onvif.org/ver10/doorcontrol/wsdl" namespace, FAIL the test and skip other steps. 
+
+Test Result: 
+
+PASS – 
+
+
+• DUT passes all assertions. 
+
+FAIL – 
+
+
+• The DUT did not send GetServicesResponse message. 
+
+ 
+7.1.22 GET SERVICES – SECURITY CONFIGURATION SERVICE
+
+Test Case ID: DEVICE-1-1-26 
+
+Specification Coverage: Capability exchange (ONVIF Core Specification) 
+
+Feature Under Test: GetServices 
+
+WSDL Reference: devicemgmt.wsdl 
+
+Test Purpose: To verify getting Security Configuration Service using GetServices request. 
+
+Pre-Requisite: Security Configuration Service is supported by the DUT. 
+
+Test Configuration: ONVIF Client and DUT 
+
+Test Procedure: 
+
+
+
+ 
+1.Start an ONVIF Client. 
+
+
+2.Start the DUT. 
+
+
+3.ONVIF Client invokes GetServices message with parameters: 
+
+
+•IncludeCapability := false 
+
+
+4.The DUT responds with a GetServicesResponse message with parameters: 
+
+
+•Service list =: listOfServicesWithoutCapabilities 
+
+
+5.If listOfServicesWithoutCapabilities does not contain item with Namespace = "http://www.onvif.org/ver10/advancedsecurity/wsdl", FAIL the test and skip other steps. 
+
+
+6.Set securityConfigurationServ := item from listOfServicesWithoutCapabilities list with Namespace = "http://www.onvif.org/ver10/advancedsecurity/wsdl". 
+
+
+7.If securityConfigurationServ.Capabilities is specified, FAIL the test and skip other steps. 
+
+
+8.ONVIF Client invokes GetServices message with parameters: 
+
+
+•IncludeCapability := true 
+
+
+9.The DUT responds with a GetServicesResponse message with parameters: 
+
+
+•Service list =: listOfServicesWithCapabilities 
+
+
+10.If listOfServicesWithCapabilities does not contain item with Namespace = "http://www.onvif.org/ver10/advancedsecurity/wsdl", FAIL the test and skip other steps. 
+
+
+11.Set securityConfigurationServ := item from listOfServicesWithCapabilities list with Namespace = "http://www.onvif.org/ver10/advancedsecurity/wsdl". 
+
+
+12.If securityConfigurationServ.Capabilities is not specified, FAIL the test and skip other steps. 
+
+
+13.If securityConfigurationServ.Capabilities does not contain valid Capabilities element for Security Configuration Service from "http://www.onvif.org/ver10/advancedsecurity/wsdl" namespace, FAIL the test and skip other steps. 
+
+Test Result: 
+
+PASS – 
+
+
+• DUT passes all assertions. 
+
+FAIL – 
+
+
+• The DUT did not send GetServicesResponse message. 
+
+ 
+7.1.23 GET SERVICES – ACCESS RULES SERVICE
+
+Test Case ID: DEVICE-1-1-27 
+
+Specification Coverage: Capability exchange (ONVIF Core Specification) 
+
+Feature Under Test: GetServices 
+
+WSDL Reference: devicemgmt.wsdl 
+
+Test Purpose: To verify getting Access Rules Service using GetServices request. 
+
+Pre-Requisite: Access Rules Service is supported by the DUT. 
+
+Test Configuration: ONVIF Client and DUT 
+
+Test Procedure: 
+
+
+
+ 
+1.Start an ONVIF Client. 
+
+
+2.Start the DUT. 
+
+
+3.ONVIF Client invokes GetServices message with parameters: 
+
+
+•IncludeCapability := false 
+
+
+4.The DUT responds with a GetServicesResponse message with parameters: 
+
+
+•Service list =: listOfServicesWithoutCapabilities 
+
+
+5.If listOfServicesWithoutCapabilities does not contain item with Namespace = "http://www.onvif.org/ver10/accessrules/wsdl", FAIL the test and skip other steps. 
+
+
+6.Set accessRulesServ := item from listOfServicesWithoutCapabilities list with Namespace = "http://www.onvif.org/ver10/accessrules/wsdl". 
+
+
+7.If accessRulesServ.Capabilities is specified, FAIL the test and skip other steps. 
+
+
+8.ONVIF Client invokes GetServices message with parameters: 
+
+
+•IncludeCapability := true 
+
+
+9.The DUT responds with a GetServicesResponse message with parameters: 
+
+
+•Service list =: listOfServicesWithCapabilities 
+
+
+10.If listOfServicesWithCapabilities does not contain item with Namespace = "http://www.onvif.org/ver10/accessrules/wsdl", FAIL the test and skip other steps. 
+
+
+11.Set accessRulesServ := item from listOfServicesWithCapabilities list with Namespace = "http://www.onvif.org/ver10/accessrules/wsdl". 
+
+
+12.If accessRulesServ.Capabilities is not specified, FAIL the test and skip other steps. 
+
+
+13.If accessRulesServ.Capabilities does not contain valid Capabilities element for Access Rules service from "http://www.onvif.org/ver10/accessrules/wsdl" namespace, FAIL the test and skip other steps. 
+
+Test Result: 
+
+PASS – 
+
+
+• DUT passes all assertions. 
+
+FAIL – 
+
+
+• The DUT did not send GetServicesResponse message. 
+
+ 
+7.1.24 GET SERVICES – CREDENTIAL SERVICE
+
+Test Case ID: DEVICE-1-1-28 
+
+Specification Coverage: Capability exchange (ONVIF Core Specification) 
+
+Feature Under Test: GetServices 
+
+WSDL Reference: devicemgmt.wsdl 
+
+Test Purpose: To verify getting Credential Service using GetServices request. 
+
+Pre-Requisite: Credential Service is supported by the DUT. 
+
+Test Configuration: ONVIF Client and DUT 
+
+Test Procedure: 
+
+
+
+ 
+1.Start an ONVIF Client. 
+
+
+2.Start the DUT. 
+
+
+3.ONVIF Client invokes GetServices message with parameters: 
+
+
+•IncludeCapability := false 
+
+
+4.The DUT responds with a GetServicesResponse message with parameters: 
+
+
+•Service list =: listOfServicesWithoutCapabilities 
+
+
+5.If listOfServicesWithoutCapabilities does not contain item with Namespace = "http://www.onvif.org/ver10/credential/wsdl", FAIL the test and skip other steps. 
+
+
+6.Set credentialServ := item from listOfServicesWithoutCapabilities list with Namespace = "http://www.onvif.org/ver10/credential/wsdl". 
+
+
+7.If credentialServ.Capabilities is specified, FAIL the test and skip other steps. 
+
+
+8.ONVIF Client invokes GetServices message with parameters: 
+
+
+•IncludeCapability := true 
+
+
+9.The DUT responds with a GetServicesResponse message with parameters: 
+
+
+•Service list =: listOfServicesWithCapabilities 
+
+
+10.If listOfServicesWithCapabilities does not contain item with Namespace = "http://www.onvif.org/ver10/credential/wsdl", FAIL the test and skip other steps. 
+
+
+11.Set credentialServ := item from listOfServicesWithCapabilities list with Namespace = "http://www.onvif.org/ver10/credential/wsdl". 
+
+
+12.If credentialServ.Capabilities is not specified, FAIL the test and skip other steps. 
+
+
+13.If credentialServ.Capabilities does not contain valid Capabilities element for Credential service from "http://www.onvif.org/ver10/credential/wsdl" namespace, FAIL the test and skip other steps. 
+
+Test Result: 
+
+PASS – 
+
+
+• DUT passes all assertions. 
+
+FAIL – 
+
+
+• The DUT did not send GetServicesResponse message. 
+
+ 
+7.1.25 GET SERVICES – SCHEDULE SERVICE
+
+Test Case ID: DEVICE-1-1-29 
+
+Specification Coverage: Capability exchange (ONVIF Core Specification) 
+
+Feature Under Test: GetServices 
+
+WSDL Reference: devicemgmt.wsdl 
+
+Test Purpose: To verify getting Schedule Service using GetServices request. 
+
+Pre-Requisite: Schedule Service is supported by the DUT. 
+
+Test Configuration: ONVIF Client and DUT 
+
+Test Procedure: 
+
+
+
+ 
+1.Start an ONVIF Client. 
+
+
+2.Start the DUT. 
+
+
+3.ONVIF Client invokes GetServices message with parameters: 
+
+
+•IncludeCapability := false 
+
+
+4.The DUT responds with a GetServicesResponse message with parameters: 
+
+
+•Service list =: listOfServicesWithoutCapabilities 
+
+
+5.If listOfServicesWithoutCapabilities does not contain item with Namespace = "http://www.onvif.org/ver10/schedule/wsdl", FAIL the test and skip other steps. 
+
+
+6.Set scheduleServ := item from listOfServicesWithoutCapabilities list with Namespace = "http://www.onvif.org/ver10/schedule/wsdl". 
+
+
+7.If scheduleServ.Capabilities is specified, FAIL the test and skip other steps. 
+
+
+8.ONVIF Client invokes GetServices message with parameters: 
+
+
+•IncludeCapability := true 
+
+
+9.The DUT responds with a GetServicesResponse message with parameters: 
+
+
+•Service list =: listOfServicesWithCapabilities 
+
+
+10.If listOfServicesWithCapabilities does not contain item with Namespace = "http://www.onvif.org/ver10/schedule/wsdl", FAIL the test and skip other steps. 
+
+
+11.Set scheduleServ := item from listOfServicesWithCapabilities list with Namespace = "http://www.onvif.org/ver10/schedule/wsdl". 
+
+
+12.If scheduleServ.Capabilities is not specified, FAIL the test and skip other steps. 
+
+
+13.If scheduleServ.Capabilities does not contain valid Schedule element for Credential service from "http://www.onvif.org/ver10/schedule/wsdl" namespace, FAIL the test and skip other steps. 
+
+Test Result: 
+
+PASS – 
+
+
+• DUT passes all assertions. 
+
+FAIL – 
+
+
+• The DUT did not send GetServicesResponse message. 
+
+ 
+7.1.26 GET SERVICES AND GET CAPABILITIES CONSISTENCY
+
+Test Case ID: DEVICE-1-1-30 
+
+Specification Coverage: Capability exchange (ONVIF Core Specification) 
+
+Feature Under Test: GetServices, GetCapabilities 
+
+WSDL Reference: devicemgmt.wsdl 
+
+Test Purpose: To verify Get Services and Get Capabilities consistency. 
+
+Pre-Requisite: GetServices is supported by the DUT. GetCapabilities is supported by the DUT. 
+
+Test Configuration: ONVIF Client and DUT 
+
+Test Procedure: 
+
+
+
+ 
+1.Start an ONVIF Client. 
+
+
+2.Start the DUT. 
+
+
+3.ONVIF Client invokes GetServices message with parameters: 
+
+
+•IncludeCapability := true 
+
+
+4.The DUT responds with a GetServicesResponse message with parameters: 
+
+
+•Service list =: listOfServices 
+
+
+5.ONVIF Client invokes GetCapabilities message with parameters: 
+
+
+•Category[0] := All 
+
+
+6.The DUT responds with a GetCapabilitiesResponse message with parameters: 
+
+
+•Capabilities =: capabilities 
+
+ 
+7.Set deviceServ := item from listOfServices list with Namespace = "http://www.onvif.org/ver10/device/wsdl". 
+
+
+8.Set deviceServCapabilities := deviceServ.Capabilities.Capabilities. 
+
+ 
+9.If capabilities.Device.Network.IPFilter is skipped or capabilities.Device.Network.IPFilter = false:  
+
+
+9.1
+
+If deviceServCapabilities.Network.@IPFilter = true, FAIL the test and skip other steps. 
+  
+
+10.If capabilities.Device.Network.IPFilter = true:  
+
+
+10.1
+
+If deviceServCapabilities.Network.@IPFilter is skipped or deviceServCapabilities.Network.@IPFilter = false, FAIL the test and skip other steps. 
+  
+ 
+11.If capabilities.Device.Network.ZeroConfiguration is skipped or capabilities.Device.Network.ZeroConfiguration = false:  
+
+
+11.1
+
+If deviceServCapabilities.Network.@ZeroConfiguration = true, FAIL the test and skip other steps. 
+  
+
+12.If capabilities.Device.Network.ZeroConfiguration = true:  
+
+
+12.1
+
+If deviceServCapabilities.Network.@ZeroConfiguration is skipped or deviceServCapabilities.Network.@ZeroConfiguration = false, FAIL the test and skip other steps. 
+  
+ 
+13.If capabilities.Device.Network.IPVersion6 is skipped or capabilities.Device.Network.IPVersion6 = false:  
+
+
+13.1
+
+If deviceServCapabilities.Network.@IPVersion6 = true, FAIL the test and skip other steps. 
+  
+
+14.If capabilities.Device.Network.IPVersion6 = true:  
+
+
+14.1
+
+If deviceServCapabilities.Network.@IPVersion6 is skipped or deviceServCapabilities.Network.@IPVersion6 = false, FAIL the test and skip other steps. 
+  
+ 
+15.If capabilities.Device.Network.DynDNS is skipped or capabilities.Device.Network.DynDNS = false:  
+
+
+15.1
+
+If deviceServCapabilities.Network.@DynDNS = true, FAIL the test and skip other steps. 
+  
+
+16.If capabilities.Device.Network.DynDNS = true:  
+
+
+16.1
+
+If deviceServCapabilities.Network.@DynDNS is skipped or deviceServCapabilities.Network.@DynDNS = false, FAIL the test and skip other steps. 
+  
+ 
+17.If capabilities.Device.Network.Extension.Dot11Configuration is skipped or capabilities.Device.Network.Extension.Dot11Configuration = false:  
+
+
+17.1
+
+If deviceServCapabilities.Network.@Dot11Configuration = true, FAIL the test and skip other steps. 
+  
+
+18.If capabilities.Device.Network.Extension.Dot11Configuration = true:  
+
+
+18.1
+
+If deviceServCapabilities.Network.@Dot11Configuration is skipped or deviceServCapabilities.Network.@Dot11Configuration = false, FAIL the test and skip other steps. 
+  
+ 
+19.If capabilities.Device.System.DiscoveryResolve is skipped or capabilities.Device.System.DiscoveryResolve = false:  
+
+
+19.1
+
+If deviceServCapabilities.System.@DiscoveryResolve = true, FAIL the test and skip other steps. 
+  
+
+20.If capabilities.Device.System.DiscoveryResolve = true:  
+
+
+20.1
+
+If deviceServCapabilities.System.@DiscoveryResolve is skipped or deviceServCapabilities.System.@DiscoveryResolve = false, FAIL the test and skip other steps. 
+  
+ 
+21.If capabilities.Device.System.DiscoveryBye is skipped or capabilities.Device.System.DiscoveryBye = false:  
+
+
+21.1
+
+If deviceServCapabilities.System.@DiscoveryBye = true, FAIL the test and skip other steps. 
+  
+
+22.If capabilities.Device.System.DiscoveryBye = true:  
+
+
+22.1
+
+If deviceServCapabilities.System.@DiscoveryBye is skipped or deviceServCapabilities.System.@DiscoveryBye = false, FAIL the test and skip other steps. 
+  
+ 
+23.If capabilities.Device.System.RemoteDiscovery is skipped or capabilities.Device.System.RemoteDiscovery = false:  
+
+
+23.1
+
+If deviceServCapabilities.System.@RemoteDiscovery = true, FAIL the test and skip other steps. 
+  
+
+24.If capabilities.Device.System.RemoteDiscovery = true:  
+
+
+24.1
+
+If deviceServCapabilities.System.@RemoteDiscovery is skipped or deviceServCapabilities.System.@RemoteDiscovery = false, FAIL the test and skip other steps. 
+  
+ 
+25.If capabilities.Device.System.SystemBackup is skipped or capabilities.Device.System.SystemBackup = false:  
+
+
+25.1
+
+If deviceServCapabilities.System.@SystemBackup = true, FAIL the test and skip other steps. 
+  
+
+26.If capabilities.Device.System.SystemBackup = true:  
+
+
+26.1
+
+If deviceServCapabilities.System.@SystemBackup is skipped or deviceServCapabilities.System.@SystemBackup = false, FAIL the test and skip other steps. 
+  
+ 
+27.If capabilities.Device.System.SystemLogging is skipped or capabilities.Device.System.SystemLogging = false:  
+
+
+27.1
+
+If deviceServCapabilities.System.@SystemLogging = true, FAIL the test and skip other steps. 
+  
+
+28.If capabilities.Device.System.SystemLogging = true:  
+
+
+28.1
+
+If deviceServCapabilities.System.@SystemLogging is skipped or deviceServCapabilities.System.@SystemLogging = false, FAIL the test and skip other steps. 
+  
+ 
+29.If capabilities.Device.System.FirmwareUpgrade is skipped or capabilities.Device.System.FirmwareUpgrade = false:  
+
+
+29.1
+
+If deviceServCapabilities.System.@FirmwareUpgrade = true, FAIL the test and skip other steps. 
+  
+
+30.If capabilities.Device.System.FirmwareUpgrade = true:  
+
+
+30.1
+
+If deviceServCapabilities.System.@FirmwareUpgrade is skipped or deviceServCapabilities.System.@FirmwareUpgrade = false, FAIL the test and skip other steps. 
+  
+ 
+31.If capabilities.Device.System.Extension.HttpFirmwareUpgrade is skipped or capabilities.Device.System.Extension.HttpFirmwareUpgrade = false:  
+
+
+31.1
+
+If deviceServCapabilities.System.@HttpFirmwareUpgrade = true, FAIL the test and skip other steps. 
+  
+
+32.If capabilities.Device.System.Extension.HttpFirmwareUpgrade = true:  
+
+
+32.1
+
+If deviceServCapabilities.System.@HttpFirmwareUpgrade is skipped or deviceServCapabilities.System.@HttpFirmwareUpgrade = false, FAIL the test and skip other steps. 
+  
+ 
+33.If capabilities.Device.System.Extension.HttpSystemBackup is skipped or capabilities.Device.System.Extension.HttpSystemBackup = false:  
+
+
+33.1
+
+If deviceServCapabilities.System.@HttpSystemBackup = true, FAIL the test and skip other steps. 
+  
+
+34.If capabilities.Device.System.Extension.HttpSystemBackup = true:  
+
+
+34.1
+
+If deviceServCapabilities.System.@HttpSystemBackup is skipped or deviceServCapabilities.System.@HttpSystemBackup = false, FAIL the test and skip other steps. 
+  
+ 
+35.If capabilities.Device.System.Extension.HttpSystemLogging is skipped or capabilities.Device.System.Extension.HttpSystemLogging = false:  
+
+
+35.1
+
+If deviceServCapabilities.System.@HttpSystemLogging = true, FAIL the test and skip other steps. 
+  
+
+36.If capabilities.Device.System.Extension.HttpSystemLogging = true:  
+
+
+36.1
+
+If deviceServCapabilities.System.@HttpSystemLogging is skipped or deviceServCapabilities.System.@HttpSystemLogging = false, FAIL the test and skip other steps. 
+  
+ 
+37.If capabilities.Device.System.Extension.HttpSupportInformation is skipped or capabilities.Device.System.Extension.HttpSupportInformation = false:  
+
+
+37.1
+
+If deviceServCapabilities.System.@HttpSupportInformation = true, FAIL the test and skip other steps. 
+  
+
+38.If capabilities.Device.System.Extension.HttpSupportInformation = true:  
+
+
+38.1
+
+If deviceServCapabilities.System.@HttpSupportInformation is skipped or deviceServCapabilities.System.@HttpSupportInformation = false, FAIL the test and skip other steps. 
+  
+ 
+39.If capabilities.Device.Security.TLS1.1 is skipped or capabilities.Device.Security.TLS1.1 = false:  
+
+
+39.1
+
+If deviceServCapabilities.Security.@TLS1.1 = true, FAIL the test and skip other steps. 
+  
+
+40.If capabilities.Device.Security.TLS1.1 = true:  
+
+
+40.1
+
+If deviceServCapabilities.Security.@TLS1.1 is skipped or deviceServCapabilities.Security.@TLS1.1 = false, FAIL the test and skip other steps. 
+  
+ 
+41.If capabilities.Device.Security.TLS1.2 is skipped or capabilities.Device.Security.TLS1.2 = false:  
+
+
+41.1
+
+If deviceServCapabilities.Security.@TLS1.2 = true, FAIL the test and skip other steps. 
+  
+
+42.If capabilities.Device.Security.TLS1.2 = true:  
+
+
+42.1
+
+If deviceServCapabilities.Security.@TLS1.2 is skipped or deviceServCapabilities.Security.@TLS1.2 = false, FAIL the test and skip other steps. 
+  
+ 
+43.If capabilities.Device.Security.OnboardKeyGeneration is skipped or capabilities.Device.Security.OnboardKeyGeneration = false:  
+
+
+43.1
+
+If deviceServCapabilities.Security.@OnboardKeyGeneration = true, FAIL the test and skip other steps. 
+  
+
+44.If capabilities.Device.Security.OnboardKeyGeneration = true:  
+
+
+44.1
+
+If deviceServCapabilities.Security.@OnboardKeyGeneration is skipped or deviceServCapabilities.Security.@OnboardKeyGeneration = false, FAIL the test and skip other steps. 
+  
+ 
+45.If capabilities.Device.Security.AccessPolicyConfig is skipped or capabilities.Device.Security.AccessPolicyConfig = false:  
+
+
+45.1
+
+If deviceServCapabilities.Security.@AccessPolicyConfig = true, FAIL the test and skip other steps. 
+  
+
+46.If capabilities.Device.Security.AccessPolicyConfig = true:  
+
+
+46.1
+
+If deviceServCapabilities.Security.@AccessPolicyConfig is skipped or deviceServCapabilities.Security.@AccessPolicyConfig = false, FAIL the test and skip other steps. 
+  
+ 
+47.If capabilities.Device.Security.X.509Token is skipped or capabilities.Device.Security.X.509Token = false:  
+
+
+47.1
+
+If deviceServCapabilities.Security.@X.509Token = true, FAIL the test and skip other steps. 
+  
+
+48.If capabilities.Device.Security.X.509Token = true:  
+
+
+48.1
+
+If deviceServCapabilities.Security.@X.509Token is skipped or deviceServCapabilities.Security.@X.509Token = false, FAIL the test and skip other steps. 
+  
+ 
+49.If capabilities.Device.Security.SAMLToken is skipped or capabilities.Device.Security.SAMLToken = false:  
+
+
+49.1
+
+If deviceServCapabilities.Security.@SAMLToken = true, FAIL the test and skip other steps. 
+  
+
+50.If capabilities.Device.Security.SAMLToken = true:  
+
+
+50.1
+
+If deviceServCapabilities.Security.@SAMLToken is skipped or deviceServCapabilities.Security.@SAMLToken = false, FAIL the test and skip other steps. 
+  
+ 
+51.If capabilities.Device.Security.KerberosToken is skipped or capabilities.Device.Security.KerberosToken = false:  
+
+
+51.1
+
+If deviceServCapabilities.Security.@KerberosToken = true, FAIL the test and skip other steps. 
+  
+
+52.If capabilities.Device.Security.KerberosToken = true:  
+
+
+52.1
+
+If deviceServCapabilities.Security.@KerberosToken is skipped or deviceServCapabilities.Security.@KerberosToken = false, FAIL the test and skip other steps. 
+  
+ 
+53.If capabilities.Device.Security.RELToken is skipped or capabilities.Device.Security.RELToken = false:  
+
+
+53.1
+
+If deviceServCapabilities.Security.@RELToken = true, FAIL the test and skip other steps. 
+  
+
+54.If capabilities.Device.Security.RELToken = true:  
+
+
+54.1
+
+If deviceServCapabilities.Security.@RELToken is skipped or deviceServCapabilities.Security.@RELToken = false, FAIL the test and skip other steps. 
+  
+ 
+55.If capabilities.Device.Security.Extension.TLS1.0 is skipped or capabilities.Device.Security.Extension.TLS1.0 = false:  
+
+
+55.1
+
+If deviceServCapabilities.Security.@TLS1.0 = true, FAIL the test and skip other steps. 
+  
+
+56.If capabilities.Device.Security.Extension.TLS1.0 = true:  
+
+
+56.1
+
+If deviceServCapabilities.Security.@TLS1.0 is skipped or deviceServCapabilities.Security.@TLS1.0 = false, FAIL the test and skip other steps. 
+  
+ 
+57.If capabilities.Device.Security.Extension.Extension.Dot1X is skipped or capabilities.Device.Security.Extension.Extension.Dot1X = false:  
+
+
+57.1
+
+If deviceServCapabilities.Security.@Dot1X = true, FAIL the test and skip other steps. 
+  
+
+58.If capabilities.Device.Security.Extension.Extension.Dot1X = true:  
+
+
+58.1
+
+If deviceServCapabilities.Security.@Dot1X is skipped or deviceServCapabilities.Security.@Dot1X = false, FAIL the test and skip other steps. 
+  
+ 
+59.If capabilities.Device.Security.Extension.Extension.SupportedEAPMethod is skipped:  
+
+
+59.1
+
+If deviceServCapabilities.Security.@SupportedEAPMethods is not empty, FAIL the test and skip other steps. 
+  
+
+60.If capabilities.Device.Security.Extension.Extension.SupportedEAPMethod is not empty:  
+
+
+60.1
+
+If deviceServCapabilities.Security.@SupportedEAPMethods is skipped or deviceServCapabilities.Security.@SupportedEAPMethods is empty, FAIL the test and skip other steps. 
+ 
+
+
+60.2
+
+For each supportedEAPMethod1 from capabilities.Device.Security.Extension.Extension.SupportedEAPMethod list:  
+
+
+60.2.1
+
+If deviceServCapabilities.Security.@SupportedEAPMethods does not contain supportedEAPMethod1, FAIL the test and skip other steps. 
+    
+ 
+61.If capabilities.Device.Security.Extension.Extension.RemoteUserHandling is skipped or capabilities.Device.Security.Extension.Extension.RemoteUserHandling = false:  
+
+
+61.1
+
+If deviceServCapabilities.Security.@RemoteUserHandling = true, FAIL the test and skip other steps. 
+  
+
+62.If capabilities.Device.Security.Extension.Extension.RemoteUserHandling = true:  
+
+
+62.1
+
+If deviceServCapabilities.Security.@RemoteUserHandling is skipped or deviceServCapabilities.Security.@RemoteUserHandling = false, FAIL the test and skip other steps. 
+  
+ 
+63.Set eventsServ := item from listOfServices list with Namespace = "http://www.onvif.org/ver10/events/wsdl". 
+
+
+64.Set eventsServCapabilities := eventsServ.Capabilities.Capabilities. 
+
+ 
+65.If capabilities.Events.WSSubscriptionPolicySupport = false:  
+
+
+65.1
+
+If eventsServCapabilities.@WSSubscriptionPolicySupport = true, FAIL the test and skip other steps. 
+  
+
+66.If capabilities.Events.WSSubscriptionPolicySupport = true:  
+
+
+66.1
+
+If eventsServCapabilities.@WSSubscriptionPolicySupport is skipped or eventsServCapabilities.@WSSubscriptionPolicySupport = false, FAIL the test and skip other steps. 
+  
+ 
+67.If capabilities.Events.WSPullPointSupport = false:  
+
+
+67.1
+
+If eventsServCapabilities.@WSPullPointSupport = true, FAIL the test and skip other steps. 
+  
+
+68.If capabilities.Events.WSPullPointSupport = true:  
+
+
+68.1
+
+If eventsServCapabilities.@WSPullPointSupport is skipped or eventsServCapabilities.@WSPullPointSupport = false, FAIL the test and skip other steps. 
+  
+ 
+69.If capabilities.Events.WSPausableSubscriptionManagerInterfaceSupport = false:  
+
+
+69.1
+
+If eventsServCapabilities.@WSPausableSubscriptionManagerInterfaceSupport = true, FAIL the test and skip other steps. 
+  
+
+70.If capabilities.Events.WSPausableSubscriptionManagerInterfaceSupport = true:  
+
+
+70.1
+
+If eventsServCapabilities.@WSPausableSubscriptionManagerInterfaceSupport is skipped or eventsServCapabilities.@WSPausableSubscriptionManagerInterfaceSupport = false, FAIL the test and skip other steps. 
+  
+ 
+71.If capabilities contains Analytics element:  
+
+
+71.1
+
+If listOfServices does not contain item with Namespace = "http://www.onvif.org/ver20/analytics/wsdl", FAIL the test and skip other steps. 
+ 
+
+
+71.2
+
+Set analyticsServ := item from listOfServices list with Namespace = "http://www.onvif.org/ver20/analytics/wsdl". 
+ 
+
+
+71.3
+
+Set analyticsServCapabilities := analyticsServ.Capabilities.Capabilities. 
+ 
+
+
+71.4
+
+If capabilities.Analytics.RuleSupport = false:  
+
+
+71.4.1
+
+If analyticsServCapabilities.@RuleSupport = true, FAIL the test and skip other steps. 
+   
+
+
+71.5
+
+If capabilities.Analytics.RuleSupport = true:  
+
+
+71.5.1
+
+If analyticsServCapabilities.@RuleSupport is skipped or analyticsServCapabilities.@RuleSupport = false, FAIL the test and skip other steps. 
+   
+
+
+71.6
+
+If capabilities.Analytics.AnalyticsModuleSupport = false:  
+
+
+71.6.1
+
+If analyticsServCapabilities.@AnalyticsModuleSupport = true, FAIL the test and skip other steps. 
+   
+
+
+71.7
+
+If capabilities.Analytics.AnalyticsModuleSupport = true:  
+
+
+71.7.1
+
+If analyticsServCapabilities.@AnalyticsModuleSupport is skipped or analyticsServCapabilities.@AnalyticsModuleSupport = false, FAIL the test and skip other steps. 
+    
+ 
+72.If capabilities contains Imaging element:  
+
+
+72.1
+
+If listOfServices does not contain item with Namespace = "http://www.onvif.org/ver20/imaging/wsdl", FAIL the test and skip other steps. 
+  
+ 
+73.If capabilities contains Media element:  
+
+
+73.1
+
+If listOfServices does not contain item with Namespace = "http://www.onvif.org/ver10/media/wsdl"", FAIL the test and skip other steps. 
+ 
+
+
+73.2
+
+Set mediaServ := item from listOfServices list with Namespace = "http://www.onvif.org/ver10/media/wsdl". 
+ 
+
+
+73.3
+
+Set mediaServCapabilities := mediaServ.Capabilities.Capabilities. 
+ 
+
+
+73.4
+
+If capabilities.Media.StreamingCapabilities.RTPMulticast is skipped or capabilities.Media.StreamingCapabilities.RTPMulticast = false:  
+
+
+73.4.1
+
+If mediaServCapabilities.StreamingCapabilities.@RTPMulticast = true, FAIL the test and skip other steps. 
+   
+
+
+73.5
+
+If capabilities.Media.StreamingCapabilities.RTPMulticast = true:  
+
+
+73.5.1
+
+If mediaServCapabilities.StreamingCapabilities.@RTPMulticast is skipped or deviceServCapabilities.StreamingCapabilities.@RTPMulticast = false, FAIL the test and skip other steps. 
+   
+
+
+73.6
+
+If capabilities.Media.StreamingCapabilities.RTP_TCP is skipped or capabilities.Media.StreamingCapabilities.RTP_TCP = false:  
+
+
+73.6.1
+
+If mediaServCapabilities.StreamingCapabilities.@RTP_TCP = true, FAIL the test and skip other steps. 
+   
+
+
+73.7
+
+If capabilities.Media.StreamingCapabilities.RTP_TCP = true:  
+
+
+73.7.1
+
+If mediaServCapabilities.StreamingCapabilities.@RTP_TCP is skipped or deviceServCapabilities.StreamingCapabilities.@RTP_TCP = false, FAIL the test and skip other steps. 
+   
+
+
+73.8
+
+If capabilities.Media.StreamingCapabilities.RTP_RTSP_TCP is skipped or capabilities.Media.StreamingCapabilities.RTP_RTSP_TCP = false:  
+
+
+73.8.1
+
+If mediaServCapabilities.StreamingCapabilities.@RTP_RTSP_TCP = true, FAIL the test and skip other steps. 
+   
+
+
+73.9
+
+If capabilities.Media.StreamingCapabilities.RTP_RTSP_TCP = true:  
+
+
+73.9.1
+
+If mediaServCapabilities.StreamingCapabilities.@RTP_RTSP_TCP is skipped or deviceServCapabilities.StreamingCapabilities.@RTP_RTSP_TCP = false, FAIL the test and skip other steps. 
+   
+
+
+73.10
+
+If capabilities.Media.Extension.ProfileCapabilities.MaximumNumberOfProfiles is not skipped:  
+
+
+73.10.1
+
+If mediaServCapabilities.ProfileCapabilities.@MaximumNumberOfProfiles is skipped or mediaServCapabilities.ProfileCapabilities.@MaximumNumberOfProfiles != capabilities.Media.Extension.ProfileCapabilities.MaximumNumberOfProfiles, FAIL the test and skip other steps. 
+    
+ 
+74.If capabilities contains PTZ element:  
+
+
+74.1
+
+If listOfServices does not contain item with Namespace = "http://www.onvif.org/ver20/ptz/wsdl", FAIL the test and skip other steps. 
+  
+ 
+75.If capabilities contains Extension.DeviceIO element:  
+
+
+75.1
+
+If listOfServices does not contain item with Namespace = "http://www.onvif.org/ver10/deviceIO/wsdl", FAIL the test and skip other steps. 
+ 
+
+
+75.2
+
+Set deviceIOServ := item from listOfServices list with Namespace = "http://www.onvif.org/ver10/deviceIO/wsdl". 
+ 
+
+
+75.3
+
+Set deviceIOServCapabilities := deviceIOServ.Capabilities.Capabilities. 
+ 
+
+
+75.4
+
+If capabilities.Extension.DeviceIO.VideoSources = 0:  
+
+
+75.4.1
+
+If deviceIOServCapabilities.@VideoSources > 0, FAIL the test and skip other steps. 
+   
+
+
+75.5
+
+If capabilities.Extension.DeviceIO.VideoSources > 0:  
+
+
+75.5.1
+
+If deviceIOServCapabilities.@VideoSources is skipped or deviceIOServCapabilities.@VideoSources != capabilities.Extension.DeviceIO.VideoSources, FAIL the test and skip other steps. 
+   
+
+
+75.6
+
+If capabilities.Extension.DeviceIO.VideoOutputs = 0:  
+
+
+75.6.1
+
+If deviceIOServCapabilities.@VideoOutputs > 0, FAIL the test and skip other steps. 
+   
+
+
+75.7
+
+If capabilities.Extension.DeviceIO.VideoOutputs > 0:  
+
+
+75.7.1
+
+If deviceIOServCapabilities.@VideoOutputs is skipped or deviceIOServCapabilities.@VideoOutputs != capabilities.Extension.DeviceIO.VideoOutputs, FAIL the test and skip other steps. 
+   
+
+
+75.8
+
+If capabilities.Extension.DeviceIO.AudioSources = 0:  
+
+
+75.8.1
+
+If deviceIOServCapabilities.@AudioSources > 0, FAIL the test and skip other steps. 
+   
+
+
+75.9
+
+If capabilities.Extension.DeviceIO.AudioSources > 0:  
+
+
+75.9.1
+
+If deviceIOServCapabilities.@AudioSources is skipped or deviceIOServCapabilities.@AudioSources != capabilities.Extension.DeviceIO.AudioSources, FAIL the test and skip other steps. 
+   
+
+
+75.10
+
+If capabilities.Extension.DeviceIO.AudioOutputs = 0:  
+
+
+75.10.1
+
+If deviceIOServCapabilities.@AudioOutputs > 0, FAIL the test and skip other steps. 
+   
+
+
+75.11
+
+If capabilities.Extension.DeviceIO.AudioOutputs > 0:  
+
+
+75.11.1
+
+If deviceIOServCapabilities.@AudioOutputs is skipped or deviceIOServCapabilities.@AudioOutputs != capabilities.Extension.DeviceIO.AudioOutputs, FAIL the test and skip other steps. 
+   
+
+
+75.12
+
+If capabilities.Extension.DeviceIO.RelayOutputs = 0:  
+
+
+75.12.1
+
+If deviceIOServCapabilities.@RelayOutputs > 0, FAIL the test and skip other steps. 
+   
+
+
+75.13
+
+If capabilities.Extension.DeviceIO.RelayOutputs > 0:  
+
+
+75.13.1
+
+If deviceIOServCapabilities.@RelayOutputs is skipped or deviceIOServCapabilities.@RelayOutputs != capabilities.Extension.DeviceIO.RelayOutputs, FAIL the test and skip other steps. 
+    
+ 
+76.If capabilities contains Extension.Recording element:  
+
+
+76.1
+
+If listOfServices does not contain item with Namespace = "http://www.onvif.org/ver10/recording/wsdl", FAIL the test and skip other steps. 
+ 
+
+
+76.2
+
+Set recordingServ := item from listOfServices list with Namespace = "http://www.onvif.org/ver10/recording/wsdl". 
+ 
+
+
+76.3
+
+Set recordingServCapabilities := recordingServ.Capabilities.Capabilities. 
+ 
+
+
+76.4
+
+If capabilities.Extension.Recording.DynamicRecordings = false:  
+
+
+76.4.1
+
+If recordingServCapabilities.@DynamicRecordings = true, FAIL the test and skip other steps. 
+   
+
+
+76.5
+
+If capabilities.Extension.Recording.DynamicRecordings = true:  
+
+
+76.5.1
+
+If recordingServCapabilities.@DynamicRecordings is skipped or recordingServCapabilities.@DynamicRecordings = false, FAIL the test and skip other steps. 
+   
+
+
+76.6
+
+If capabilities.Extension.Recording.DynamicTracks = false:  
+
+
+76.6.1
+
+If recordingServCapabilities.@DynamicTracks = true, FAIL the test and skip other steps. 
+   
+
+
+76.7
+
+If capabilities.Extension.Recording.DynamicTracks = true:  
+
+
+76.7.1
+
+If recordingServCapabilities.@DynamicTracks is skipped or recordingServCapabilities.@DynamicTracks = false, FAIL the test and skip other steps. 
+    
+ 
+77.If capabilities contains Extension.Search element:  
+
+
+77.1
+
+If listOfServices does not contain item with Namespace = "http://www.onvif.org/ver10/search/wsdl", FAIL the test and skip other steps. 
+ 
+
+
+77.2
+
+Set searchServ := item from listOfServices list with Namespace = "http://www.onvif.org/ver10/search/wsdl". 
+ 
+
+
+77.3
+
+Set searchServCapabilities := searchServ.Capabilities.Capabilities. 
+ 
+
+
+77.4
+
+If capabilities.Extension.Search.MetadataSearch = false:  
+
+
+77.4.1
+
+If searchServCapabilities.@MetadataSearch = true, FAIL the test and skip other steps. 
+   
+
+
+77.5
+
+If capabilities.Extension.Search.MetadataSearch = true:  
+
+
+77.5.1
+
+If searchServCapabilities.@MetadataSearch is skipped or searchServCapabilities.@MetadataSearch = false, FAIL the test and skip other steps. 
+    
+ 
+78.If capabilities contains Extension.Replay element:  
+
+
+78.1
+
+If listOfServices does not contain item with Namespace = "http://www.onvif.org/ver10/replay/wsdl", FAIL the test and skip other steps. 
+  
+ 
+79.If capabilities contains Extension.Receiver element:  
+
+
+79.1
+
+If listOfServices does not contain item with Namespace = "http://www.onvif.org/ver10/receiver/wsdl", FAIL the test and skip other steps. 
+ 
+
+
+79.2
+
+Set receiverServ := item from listOfServices list with Namespace = "http://www.onvif.org/ver10/receiver/wsdl". 
+ 
+
+
+79.3
+
+Set receiverServCapabilities := receiverServ.Capabilities.Capabilities. 
+ 
+
+
+79.4
+
+If capabilities.Extension.Receiver.RTP_Multicast = false:  
+
+
+79.4.1
+
+If receiverServCapabilities.@RTP_Multicast = true, FAIL the test and skip other steps. 
+   
+
+
+79.5
+
+If capabilities.Extension.Receiver.RTP_Multicast = true:  
+
+
+79.5.1
+
+If receiverServCapabilities.@RTP_Multicast is skipped or receiverServCapabilities.@RTP_Multicast = false, FAIL the test and skip other steps. 
+   
+
+
+79.6
+
+If capabilities.Extension.Receiver.RTP_TCP = false:  
+
+
+79.6.1
+
+If receiverServCapabilities.@RTP_TCP = true, FAIL the test and skip other steps. 
+   
+
+
+79.7
+
+If capabilities.Extension.Receiver.RTP_TCP = true:  
+
+
+79.7.1
+
+If receiverServCapabilities.@RTP_TCP is skipped or receiverServCapabilities.@RTP_TCP = false, FAIL the test and skip other steps. 
+   
+
+
+79.8
+
+If capabilities.Extension.Receiver.RTP_RTSP_TCP = false:  
+
+
+79.8.1
+
+If receiverServCapabilities.@RTP_RTSP_TCP = true, FAIL the test and skip other steps. 
+   
+
+
+79.9
+
+If capabilities.Extension.Receiver.RTP_RTSP_TCP = true:  
+
+
+79.9.1
+
+If receiverServCapabilities.@RTP_RTSP_TCP is skipped or receiverServCapabilities.@RTP_RTSP_TCP = false, FAIL the test and skip other steps. 
+   
+
+
+79.10
+
+If capabilities.Extension.Receiver.SupportedReceivers = 0:  
+
+
+79.10.1
+
+If receiverServCapabilities.@SupportedReceivers > 0, FAIL the test and skip other steps. 
+   
+
+
+79.11
+
+If capabilities.Extension.Receiver.SupportedReceivers > 0:  
+
+
+79.11.1
+
+If receiverServCapabilities.@SupportedReceivers != capabilities.Extension.Receiver.SupportedReceivers, FAIL the test and skip other steps. 
+   
+
+
+79.12
+
+If capabilities.Extension.Receiver.MaximumRTSPURILength = 0:  
+
+
+79.12.1
+
+If receiverServCapabilities.@MaximumRTSPURILength > 0, FAIL the test and skip other steps. 
+   
+
+
+79.13
+
+If capabilities.Extension.Receiver.MaximumRTSPURILength > 0:  
+
+
+79.13.1
+
+If receiverServCapabilities.@MaximumRTSPURILength is skipped or receiverServCapabilities.@MaximumRTSPURILength != capabilities.Extension.Receiver.MaximumRTSPURILength, FAIL the test and skip other steps. 
+    
+Test Result: 
+
+PASS – 
+
+
+• DUT passes all assertions. 
+
+FAIL – 
+
+
+• DUT did not send GetServicesResponse message. 
+
+
+•DUT did not send GetCapabilitiesResponse message. 
+
+ 
+7.1.27 GET SERVICES - XADDR
+
+Test Case ID: DEVICE-1-1-31 
+
+Specification Coverage: GetServices (ONVIF Core Specification) 
+
+Feature Under Test: GetServices 
+
+WSDL Reference: devicemgmt.wsdl 
+
+Test Purpose: To verify XAddr in Get ServicesResponse. 
+
+Pre-Requisite: GetServices is supported by the DUT. If DUT supports HTTPS, then HTTPS is configured on the DUT, if TLS Server is not supported by DUT. 
+
+Test Configuration: ONVIF Client and DUT 
+
+Test Procedure: 
+
+
+
+ 
+1.Start an ONVIF Client. 
+
+
+2.Start the DUT. 
+
+
+3.ONVIF Client invokes GetServices message over HTTP with parameters: 
+
+
+•IncludeCapability := false 
+
+
+4.The DUT responds with a GetServicesResponse message with parameters: 
+
+
+•Service list =: listOfServices 
+
+
+5.Set the following 
+
+
+• uriScheme := "http" 
+
+
+• uriHost := host of uri used for GetServices request at step 3 (IP or hostname) 
+
+
+• uriHostPort := host port of uri used for GetServices request at step 3 
+
+
+6.For each Service service in listOfServices repeat the following steps:  
+
+
+6.1
+
+ONVIF Client checks service.XAddr uri by following the procedure mentioned in Annex A.23 with the following input and output parameters 
+
+
+•in xAddr := service.XAddr - XAddr to check 
+
+
+•in uriScheme - Uri Scheme 
+
+
+•in uriHost - Uri host 
+
+
+•in uriHostPort - Uri host port 
+  
+
+7.If HTTPS feature is supported by the DUT:  
+
+
+7.1
+
+ONVIF Client configures HTTPS if required by following the procedure mentioned in Annex A.24. 
+ 
+
+
+7.2
+
+ONVIF Client invokes GetServices message over HTTPS with parameters: 
+
+
+•IncludeCapability := false 
+ 
+
+
+7.3
+
+The DUT responds with a GetServicesResponse message with parameters: 
+
+
+•Service list =: listOfServices 
+ 
+
+
+7.4
+
+Set the following 
+
+
+• uriScheme := "https" 
+
+
+• uriHost := host of uri used for GetServices request at step 7.2 (IP or hostname) 
+
+
+• uriHostPort := host port of uri used for GetServices request at step 7.2 
+ 
+
+
+7.5
+
+For each Service service in listOfServices repeat the following steps:  
+
+
+7.5.1
+
+ONVIF Client checks service.XAddr uri by following the procedure mentioned in Annex A.23 with the following input and output parameters 
+
+
+•in xAddr := service.XAddr - XAddr to check 
+
+
+•in uriScheme - Uri Scheme 
+
+
+•in uriHost - Uri host 
+
+
+•in uriHostPort - Uri host port 
+    
+Test Result: 
+
+PASS – 
+
+
+• DUT passes all assertions. 
+
+FAIL – 
+
+
+• DUT did not send GetServicesResponse message. 
+
+Note: see [RFC3986] for details of uri syntax. 
