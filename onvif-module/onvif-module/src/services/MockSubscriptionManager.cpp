@@ -194,14 +194,26 @@ std::string MockSubscriptionManager::handleGetEventProperties(const std::string&
         // TopicSet: chỉ khai báo cây topic thuần với `wstop:topic="true"` ở lá.
         // KHÔNG nhúng tt:MessageDescription bên trong topic leaf — test tool
         // parse cây topic sẽ crash "Index out of bounds" vì tưởng đó là sub-topic.
+        // TopicSet: topic leaf trống với wstop:topic="true".
+        // Nhiều topic để tool có đủ lựa chọn khi build filter conjunction (3-1-33/34/35).
         "<wstop:TopicSet>"
           "<tns1:VideoSource>"
             "<tns1:MotionAlarm wstop:topic=\"true\"/>"
+            "<tns1:GlobalSceneChange wstop:topic=\"true\"/>"
+            "<tns1:ImageTooBlurry wstop:topic=\"true\"/>"
+            "<tns1:ImageTooDark wstop:topic=\"true\"/>"
+            "<tns1:ImageTooBright wstop:topic=\"true\"/>"
           "</tns1:VideoSource>"
           "<tns1:Media>"
             "<tns1:ProfileChanged wstop:topic=\"true\"/>"
             "<tns1:ConfigurationChanged wstop:topic=\"true\"/>"
           "</tns1:Media>"
+          "<tns1:Device>"
+            "<tns1:OperatingTime>"
+              "<tns1:LastReboot wstop:topic=\"true\"/>"
+              "<tns1:LastReset wstop:topic=\"true\"/>"
+            "</tns1:OperatingTime>"
+          "</tns1:Device>"
         "</wstop:TopicSet>"
         "<wsnt:TopicExpressionDialect>http://www.onvif.org/ver10/tev/topicExpression/ConcreteSet</wsnt:TopicExpressionDialect>"
         "<wsnt:TopicExpressionDialect>http://docs.oasis-open.org/wsn/t-1/TopicExpression/Concrete</wsnt:TopicExpressionDialect>"
