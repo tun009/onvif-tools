@@ -1,6 +1,7 @@
 #include "OnvifServer.h"
 #include "services/Media2Service.h"
 #include "services/ImagingService.h"
+#include "services/MediaLegacyHandler.h"
 #include "soapH.h"
 #include "auth/DigestAuthHandler.h"
 #include "services/MockSubscriptionManager.h"
@@ -263,6 +264,18 @@ void OnvifServer::listenLoop() {
             }
 
             if (path.find("/onvif/media") != std::string::npos) {
+                // Intercept các op Media ver10 (legacy) — trả XML thủ công.
+                // Media2 (ver20) chuyển tiếp về gSOAP dispatcher như bình thường.
+                std::string legacyResp = MediaLegacyHandler::dispatch(g_current_headers);
+                if (!legacyResp.empty()) {
+                    soap->error = SOAP_OK;
+                    soap_response(soap, SOAP_OK);
+                    soap_send_raw(soap, legacyResp.c_str(), legacyResp.size());
+                    soap_end_send(soap);
+                    soap_destroy(soap);
+                    soap_end(soap);
+                    continue;
+                }
                 // Yêu cầu đến Media2Service
                 serveResult = media2Svc.dispatch();
                 soap->error = media2Svc.soap->error;
