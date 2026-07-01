@@ -116,19 +116,60 @@ int DeviceService::GetCapabilities(
     this->soap->header = nullptr;
     auto soap = this->soap;
 
+    // Helper: cấp phát bool* do soap quản lý (tự giải phóng khi soap_end)
+    auto B = [&](bool v) { bool* p = (bool*)soap_malloc(soap, sizeof(bool)); *p = v; return p; };
+    const std::string base = "http://" + cfg_.deviceIp + ":" + std::to_string(cfg_.httpPort);
+
     auto caps = soap_new_tt__Capabilities(soap);
 
-    // Device capabilities
+    // ── Device ────────────────────────────────────────────────────────────
     caps->Device = soap_new_tt__DeviceCapabilities(soap);
-    caps->Device->XAddr = "http://" + cfg_.deviceIp + ":" + std::to_string(cfg_.httpPort) + "/onvif/device";
-    
-    // Media capabilities (VMS expects media capability even if implemented partially/postponed)
+    caps->Device->XAddr = base + "/onvif/device_service";
+
+    caps->Device->Network = soap_new_tt__NetworkCapabilities(soap);
+    caps->Device->Network->IPFilter          = B(false);
+    caps->Device->Network->ZeroConfiguration  = B(false);
+    caps->Device->Network->IPVersion6         = B(false);
+    caps->Device->Network->DynDNS             = B(false);
+
+    caps->Device->System = soap_new_tt__SystemCapabilities(soap);
+    caps->Device->System->DiscoveryResolve = true;
+    caps->Device->System->DiscoveryBye     = true;
+    caps->Device->System->RemoteDiscovery  = false;
+    caps->Device->System->SystemBackup     = false;
+    caps->Device->System->SystemLogging    = false;
+    caps->Device->System->FirmwareUpgrade  = false;
+
+    caps->Device->Security = soap_new_tt__SecurityCapabilities(soap);
+    caps->Device->Security->TLS1_x002e1        = false;
+    caps->Device->Security->TLS1_x002e2        = false;
+    caps->Device->Security->OnboardKeyGeneration = false;
+    caps->Device->Security->AccessPolicyConfig = false;
+    caps->Device->Security->X_x002e509Token    = false;
+    caps->Device->Security->SAMLToken          = false;
+    caps->Device->Security->KerberosToken      = false;
+    caps->Device->Security->RELToken           = false;
+
+    // ── Media (Profile T: streaming RTP/RTSP/TCP) ─────────────────────────
     caps->Media = soap_new_tt__MediaCapabilities(soap);
-    caps->Media->XAddr = "http://" + cfg_.deviceIp + ":" + std::to_string(cfg_.httpPort) + "/onvif/media";
-    
-    // PTZ capabilities
-    caps->PTZ = soap_new_tt__PTZCapabilities(soap);
-    caps->PTZ->XAddr = "http://" + cfg_.deviceIp + ":" + std::to_string(cfg_.httpPort) + "/onvif/ptz";
+    caps->Media->XAddr = base + "/onvif/media";
+    caps->Media->StreamingCapabilities = soap_new_tt__RealTimeStreamingCapabilities(soap);
+    caps->Media->StreamingCapabilities->RTPMulticast              = B(false);
+    caps->Media->StreamingCapabilities->RTP_USCORETCP             = B(true);
+    caps->Media->StreamingCapabilities->RTP_USCORERTSP_USCORETCP  = B(true);
+
+    // ── Events (Profile T mandatory: PullPoint) ───────────────────────────
+    caps->Events = soap_new_tt__EventCapabilities(soap);
+    caps->Events->XAddr = base + "/onvif/event";
+    caps->Events->WSSubscriptionPolicySupport                    = true;
+    caps->Events->WSPullPointSupport                             = true;
+    caps->Events->WSPausableSubscriptionManagerInterfaceSupport  = false;
+
+    // ── Imaging (Profile T mandatory) ─────────────────────────────────────
+    caps->Imaging = soap_new_tt__ImagingCapabilities(soap);
+    caps->Imaging->XAddr = base + "/onvif/imaging";
+
+    // PTZ KHÔNG quảng bá: đây là Fixed Camera, không hỗ trợ PTZ trong Profile T.
 
     tds__GetCapabilitiesResponse.Capabilities = caps;
 
@@ -145,32 +186,24 @@ int DeviceService::GetServices(
     this->soap->header = nullptr;
     auto soap = this->soap;
 
-    // 1. Device Service
-    auto deviceSvc = soap_new_tds__Service(soap);
-    deviceSvc->Namespace = "http://www.onvif.org/ver10/device/wsdl";
-    deviceSvc->XAddr = "http://" + cfg_.deviceIp + ":" + std::to_string(cfg_.httpPort) + "/onvif/device";
-    deviceSvc->Version = soap_new_tt__OnvifVersion(soap);
-    deviceSvc->Version->Major = 21;
-    deviceSvc->Version->Minor = 12;
-    tds__GetServicesResponse.Service.push_back(deviceSvc);
+    const std::string base = "http://" + cfg_.deviceIp + ":" + std::to_string(cfg_.httpPort);
 
-    // 2. Media Service (VMS might query this)
-    auto mediaSvc = soap_new_tds__Service(soap);
-    mediaSvc->Namespace = "http://www.onvif.org/ver20/media/wsdl";
-    mediaSvc->XAddr = "http://" + cfg_.deviceIp + ":" + std::to_string(cfg_.httpPort) + "/onvif/media";
-    mediaSvc->Version = soap_new_tt__OnvifVersion(soap);
-    mediaSvc->Version->Major = 20;
-    mediaSvc->Version->Minor = 12;
-    tds__GetServicesResponse.Service.push_back(mediaSvc);
+    // Danh sách service phải NHẤT QUÁN với GetCapabilities (test consistency)
+    auto add = [&](const char* ns, const std::string& path, int major, int minor) {
+        auto s = soap_new_tds__Service(soap);
+        s->Namespace = ns;
+        s->XAddr = base + path;
+        s->Version = soap_new_tt__OnvifVersion(soap);
+        s->Version->Major = major;
+        s->Version->Minor = minor;
+        // Capabilities (xsd:any) để trống — populate cần thao tác DOM, làm ở vòng sau.
+        tds__GetServicesResponse.Service.push_back(s);
+    };
 
-    // 3. Event Service (Mandatory for Profile T)
-    auto eventSvc = soap_new_tds__Service(soap);
-    eventSvc->Namespace = "http://www.onvif.org/ver10/events/wsdl";
-    eventSvc->XAddr = "http://" + cfg_.deviceIp + ":" + std::to_string(cfg_.httpPort) + "/onvif/event";
-    eventSvc->Version = soap_new_tt__OnvifVersion(soap);
-    eventSvc->Version->Major = 21;
-    eventSvc->Version->Minor = 12;
-    tds__GetServicesResponse.Service.push_back(eventSvc);
+    add("http://www.onvif.org/ver10/device/wsdl",  "/onvif/device_service", 21, 12); // Device
+    add("http://www.onvif.org/ver20/media/wsdl",   "/onvif/media",          21, 12); // Media2 (Profile T)
+    add("http://www.onvif.org/ver10/events/wsdl",  "/onvif/event",          21, 12); // Events (Profile T)
+    add("http://www.onvif.org/ver20/imaging/wsdl", "/onvif/imaging",        21, 12); // Imaging (Profile T)
 
     return SOAP_OK;
 }

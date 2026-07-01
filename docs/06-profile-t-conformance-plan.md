@@ -69,6 +69,12 @@ Tài liệu này tổng hợp toàn bộ vấn đề còn tồn đọng để pa
 - Test consistency: `GetServices` ↔ `GetServiceCapabilities` phải **khớp** (DEVICE-1-1-19, 1-1-30).
 - Khai báo namespace đúng (DEVICE-6-x).
 
+**STATUS (01/07/2026) — ĐÃ LÀM (đã compile-check trên server, pass):**
+- `GetCapabilities`: bổ sung **Device** (Network/System/Security sub-caps), **Media** (StreamingCapabilities RTP_TCP/RTP_RTSP_TCP), **Events** (WSPullPointSupport), **Imaging**. **Bỏ PTZ** (Fixed Camera).
+- `GetServices`: liệt kê nhất quán Device + Media2 + Events + Imaging, đều có Version, XAddr khớp GetCapabilities.
+- **Còn tồn:** `_tds__Service_Capabilities` là xsd:any (class rỗng) → chưa populate được capabilities lồng trong GetServices khi `IncludeCapability=true` → **DEVICE-1-1-19 (GetServices↔GetServiceCapabilities consistency) có thể vẫn fail**; cần thao tác DOM, để vòng sau.
+- **Chưa làm:** DeviceIO service (cần WSDL binding riêng); Analytics capability.
+
 ### 🟡 Nhóm 7 — Media2 (MEDIA2-x)
 - Bổ sung **OSD** (mandatory Profile T: `GetOSDs`, `GetOSDOptions`, `CreateOSD`, `SetOSD`, `DeleteOSD`).
 - **Metadata configuration** + **Media2 Events** (ProfileChanged, ConfigurationChanged).
@@ -168,6 +174,17 @@ Lý do:
 5. Gửi Hello khi `OnvifServer::start()`, Bye khi `stop()`.
 6. Bổ sung `GetDiscoveryMode`/`SetDiscoveryMode` trong DeviceService.
 7. Đồng bộ Scopes giữa Discovery và `DeviceService::GetScopes` (test kiểm tra tính nhất quán).
+
+### 5.7-STATUS ✅ Trạng thái (01/07/2026)
+- **Code WS-Discovery: HOÀN THÀNH & đã kiểm chứng.**
+  - `Hello` (start) / `Bye` (stop) phát ra multicast đúng chuẩn — xác nhận qua `tcpdump`.
+  - `Probe → ProbeMatch` trả về đúng (Types, Scopes có `Profile/T`, XAddrs, MetadataVersion)
+    — xác nhận bằng script `probe.py` chạy cùng subnet với server.
+- **Còn tồn (môi trường, KHÔNG phải code):** test tool đang ở subnet `192.168.8.x`,
+  server ở `192.168.254.x` → multicast không qua router. Cần đưa test tool + server
+  **cùng subnet** để nhóm DISCOVERY-1-1-* / 2-1-* pass chính thức.
+- **Chưa làm (vòng sau):** `GetDiscoveryMode`/`SetDiscoveryMode` (DISCOVERY-1-1-9),
+  `SetScopes` động (DISCOVERY-1-1-11).
 
 ### 5.7 Tiêu chí hoàn thành (Definition of Done)
 - Tab **Discovery** của test tool tìm thấy thiết bị tự động (không cần thêm IP thủ công).
