@@ -286,7 +286,11 @@ std::string MockSubscriptionManager::handleUnsubscribe(const std::string& subId,
     std::string rel = extractTag(req, "MessageID");
     {
         std::lock_guard<std::mutex> lk(mtx_);
-        subscriptions_.erase(subId);
+        auto it = subscriptions_.find(subId);
+        if (it == subscriptions_.end())
+            return soapFault("wsnt:UnableToDestroySubscriptionFault",
+                             "Subscription not found: " + subId);
+        subscriptions_.erase(it);
     }
     std::cout << "[Event] Unsubscribe " << subId << std::endl;
     return wrapEnvelope(ACT_UNSUB, rel, "<wsnt:UnsubscribeResponse/>");
