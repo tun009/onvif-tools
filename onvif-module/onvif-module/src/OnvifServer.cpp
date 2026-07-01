@@ -240,8 +240,7 @@ void OnvifServer::listenLoop() {
 
             if (path.find("/onvif/event") != std::string::npos) {
                 std::string headers = g_current_headers;
-                std::string responseXml = "";
-                
+
                 std::string subId = "";
                 size_t subPos = path.find("/onvif/event/");
                 if (subPos != std::string::npos) {
@@ -249,16 +248,8 @@ void OnvifServer::listenLoop() {
                 }
 
                 auto& manager = MockSubscriptionManager::getInstance();
-
-                if (headers.find("CreatePullPointSubscription") != std::string::npos) {
-                    responseXml = manager.handleCreateSubscription(cfg_.deviceIp, cfg_.httpPort, headers);
-                } else if (headers.find("PullMessages") != std::string::npos) {
-                    responseXml = manager.handlePullMessages(subId, headers);
-                } else if (headers.find("Renew") != std::string::npos) {
-                    responseXml = manager.handleRenew(subId, headers);
-                } else if (headers.find("Unsubscribe") != std::string::npos) {
-                    responseXml = manager.handleUnsubscribe(subId, headers);
-                }
+                std::string responseXml =
+                    manager.dispatch(cfg_.deviceIp, cfg_.httpPort, subId, headers);
 
                 if (!responseXml.empty()) {
                     soap->error = SOAP_OK;

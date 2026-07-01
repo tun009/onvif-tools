@@ -52,6 +52,17 @@ Tài liệu này tổng hợp toàn bộ vấn đề còn tồn đọng để pa
     - **Media2 events**: ProfileChanged, ConfigurationChanged
 - **EVENT-7 (MQTT / Event Broker)** = **optional**, có thể bỏ qua.
 
+**STATUS (01/07/2026) — Event Service viết lại (XML thủ công đúng chuẩn):**
+- Đập bỏ `MockSubscriptionManager` cũ (sai namespace, thiếu ops), viết lại đầy đủ 7 operation:
+  `GetServiceCapabilities` (MaxPullPoints=2), `GetEventProperties` (TopicSet + ItemFilter dialect),
+  `CreatePullPointSubscription`, `PullMessages`, `Renew`, `Unsubscribe`, `SetSynchronizationPoint`.
+- Namespace chuẩn: `wsnt` (WS-BaseNotification), `wsa` 2005/08, `wstop`, `tns1`, `tt`.
+- Routing `OnvifServer` gộp về 1 `dispatch()` — nhận diện operation theo body, xử lý cả GetEventProperties/SetSynchronizationPoint (trước đây rơi vào DeviceService).
+- TopicSet khai báo: `tns1:VideoSource/MotionAlarm`, `tns1:Media/ProfileChanged`, `tns1:Media/ConfigurationChanged`.
+- Hỗ trợ ≥2 subscription đồng thời (map + mutex).
+- Đã compile-check trên server (pass).
+- **Chưa làm:** EVENT-2 Basic Notification (push/Notify — cần device gọi ngược client); EVENT-6 Seek; EVENT-7 MQTT (đều ngoài Profile T bắt buộc hoặc optional).
+
 ### 🟠 Nhóm 3 — Device Network (DEVICE-2-x, IPCONFIG)
 - `GetNetworkInterfaces`/`Set`, `GetDNS`/`Set`, `GetNetworkDefaultGateway`/`Set`,
   `GetNetworkProtocols`/`Set`, `GetHostname`/`Set`, DHCP IPv4.

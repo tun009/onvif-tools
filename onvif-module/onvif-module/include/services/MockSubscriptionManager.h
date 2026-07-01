@@ -1,41 +1,57 @@
 #pragma once
+// MockSubscriptionManager — ONVIF Event Service (WS-BaseNotification) bằng XML thủ công.
+// Xử lý toàn bộ event ops mà Profile T yêu cầu:
+//   GetServiceCapabilities, GetEventProperties, CreatePullPointSubscription,
+//   PullMessages, Renew, Unsubscribe, SetSynchronizationPoint.
+//
+// Vì các phần TopicSet / NotificationMessage của schema là xsd:any (gSOAP sinh
+// class rỗng, không gắn được), toàn bộ được dựng bằng XML chuẩn tay để kiểm
+// soát chính xác wire-format mà ONVIF Device Test Tool mong đợi.
+
 #include <string>
 #include <map>
-#include <vector>
+#include <mutex>
 #include <chrono>
 
 struct SubscriptionState {
     std::string id;
     std::chrono::steady_clock::time_point terminationTime;
-    int timeoutSeconds;
+    int timeoutSeconds = 60;
 };
 
 class MockSubscriptionManager {
 public:
-    MockSubscriptionManager() = default;
-    ~MockSubscriptionManager() = default;
-
-    // Singleton instance
     static MockSubscriptionManager& getInstance();
 
-    // Xử lý tạo subscription mới
-    std::string handleCreateSubscription(const std::string& clientIp, int port, const std::string& rawRequest);
-
-    // Xử lý kéo tin nhắn sự kiện
-    std::string handlePullMessages(const std::string& subId, const std::string& rawRequest);
-
-    // Xử lý gia hạn subscription
-    std::string handleRenew(const std::string& subId, const std::string& rawRequest);
-
-    // Xử lý hủy subscription
-    std::string handleUnsubscribe(const std::string& subId, const std::string& rawRequest);
+    // Điểm vào duy nhất: nhận request thô + subId (rỗng nếu gửi tới /onvif/event),
+    // trả về XML SOAP response. Trả "" nếu không nhận diện được operation.
+    std::string dispatch(const std::string& deviceIp, int port,
+                         const std::string& subId, const std::string& rawRequest);
 
 private:
-    // Helper lấy thời gian UTC hiện tại định dạng XML (ví dụ: 2026-06-29T04:40:00Z)
+    // ── Handlers từng operation ───────────────────────────────────────────
+    std::string handleGetServiceCapabilities(const std::string& req);
+    std::string handleGetEventProperties(const std::string& req);
+    std::string handleCreateSubscription(const std::string& deviceIp, int port,
+                                         const std::string& req);
+    std::string handlePullMessages(const std::string& subId, const std::string& req);
+    std::string handleRenew(const std::string& subId, const std::string& req);
+    std::string handleUnsubscribe(const std::string& subId, const std::string& req);
+    std::string handleSetSynchronizationPoint(const std::string& subId,
+                                              const std::string& req);
+
+    // ── Helpers ───────────────────────────────────────────────────────────
     static std::string getXmlUtcTime(int offsetSeconds = 0);
-
-    // Helper tạo Subscription ID ngẫu nhiên
     static std::string generateSubId();
+    static std::string newMessageId();
+    // Trích nội dung phần tử <...local>VALUE</...local> đầu tiên (bỏ qua prefix).
+    static std::string extractTag(const std::string& xml, const std::string& localName);
+    // Khung envelope + header (Action, MessageID, RelatesTo) + body.
+    std::string wrapEnvelope(const std::string& action,
+                             const std::string& relatesTo,
+                             const std::string& bodyXml) const;
+    static std::string soapFault(const std::string& subcode, const std::string& reason);
 
+    std::mutex mtx_;
     std::map<std::string, SubscriptionState> subscriptions_;
 };
