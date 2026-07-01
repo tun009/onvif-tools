@@ -4,6 +4,8 @@
 
 #include "services/ImagingService.h"
 #include <iostream>
+#include <cstring>
+#include <sstream>
 
 std::mutex ImagingService::cacheMtx_;
 std::map<std::string, ImagingSettings> ImagingService::cache_;
@@ -22,6 +24,33 @@ bool ImagingService::isValidSettings(const ImagingSettings& s) {
     auto in = [](float v) { return v >= 0.0f && v <= 100.0f; };
     return in(s.brightness) && in(s.contrast)
         && in(s.saturation) && in(s.sharpness);
+}
+
+// Build fault XML thủ công — gSOAP không tự thêm xmlns:ter cho prefix trong
+// subcode Value (text content), khiến tool báo "undeclared prefix". Ta trả raw
+// XML với xmlns:ter declared để tool parse được.
+static int sendOnvifFault(struct soap* soap,
+                          const char* code,      // "SOAP-ENV:Sender" | "SOAP-ENV:Receiver"
+                          const char* subcode,   // "ter:SettingsInvalid" ...
+                          const char* reason) {
+    std::ostringstream os;
+    os << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+       << "<SOAP-ENV:Envelope"
+       << " xmlns:SOAP-ENV=\"http://www.w3.org/2003/05/soap-envelope\""
+       << " xmlns:ter=\"http://www.onvif.org/ver10/error\">"
+       << "<SOAP-ENV:Body><SOAP-ENV:Fault>"
+       << "<SOAP-ENV:Code><SOAP-ENV:Value>" << code << "</SOAP-ENV:Value>"
+       << "<SOAP-ENV:Subcode><SOAP-ENV:Value>" << subcode
+       << "</SOAP-ENV:Value></SOAP-ENV:Subcode></SOAP-ENV:Code>"
+       << "<SOAP-ENV:Reason><SOAP-ENV:Text xml:lang=\"en\">"
+       << reason << "</SOAP-ENV:Text></SOAP-ENV:Reason>"
+       << "</SOAP-ENV:Fault></SOAP-ENV:Body></SOAP-ENV:Envelope>";
+    std::string xml = os.str();
+    soap->http_content = "application/soap+xml; charset=utf-8";
+    soap_response(soap, SOAP_FILE);          // HTTP 200 + custom content-type
+    soap_send_raw(soap, xml.data(), xml.size());
+    soap_end_send(soap);
+    return SOAP_STOP;   // báo dispatcher không tự sinh fault nữa
 }
 
 ImagingBindingService* ImagingService::copy() {
@@ -69,8 +98,8 @@ int ImagingService::GetImagingSettings(
 
     const std::string tok = req ? req->VideoSourceToken : "";
     if (!isValidToken(tok)) {
-        return soap_sender_fault_subcode(soap, "ter:NoSource",
-                                         "Sender", "Invalid VideoSourceToken");
+        return sendOnvifFault(soap, "SOAP-ENV:Sender", "ter:NoSource",
+                              "Invalid VideoSourceToken");
     }
 
     // Đọc từ cache trước, fallback backend nếu chưa có.
@@ -84,6 +113,15 @@ int ImagingService::GetImagingSettings(
             catch (const std::exception& e) {
                 std::cerr << "[ImagingService] backend error: " << e.what() << "\n";
             }
+            // Backend có thể mang state bậy từ session trước → clamp
+            // về 0..100 để đảm bảo Get luôn trả valid range (test 1-1-15/16).
+            auto clamp = [](float v) {
+                return v < 0.0f ? 0.0f : (v > 100.0f ? 100.0f : v);
+            };
+            s.brightness = clamp(s.brightness);
+            s.contrast   = clamp(s.contrast);
+            s.saturation = clamp(s.saturation);
+            s.sharpness  = clamp(s.sharpness);
             cache_[tok] = s;
         }
     }
@@ -137,12 +175,12 @@ int ImagingService::SetImagingSettings(
     this->soap->header = nullptr;
 
     if (!req || !req->ImagingSettings) {
-        return soap_sender_fault_subcode(this->soap, "ter:InvalidArgVal",
-                                         "Sender", "Missing ImagingSettings");
+        return sendOnvifFault(this->soap, "SOAP-ENV:Sender", "ter:InvalidArgVal",
+                              "Missing ImagingSettings");
     }
     if (!isValidToken(req->VideoSourceToken)) {
-        return soap_sender_fault_subcode(this->soap, "ter:NoSource",
-                                         "Sender", "Invalid VideoSourceToken");
+        return sendOnvifFault(this->soap, "SOAP-ENV:Sender", "ter:NoSource",
+                              "Invalid VideoSourceToken");
     }
 
     ImagingSettings s;
@@ -171,9 +209,9 @@ int ImagingService::SetImagingSettings(
 
     // Validate range — settings ngoài [0,100] → fault (IMAGING-1-1-8).
     if (!isValidSettings(s)) {
-        return soap_sender_fault_subcode(this->soap, "ter:SettingsInvalid",
-                                         "Sender",
-                                         "Imaging settings out of range");
+        return sendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                              "ter:SettingsInvalid",
+                              "Imaging settings out of range");
     }
 
     // Ghi cache + best-effort push xuống backend.
@@ -199,8 +237,8 @@ int ImagingService::GetOptions(
     auto soap = this->soap;
 
     if (!req || !isValidToken(req->VideoSourceToken)) {
-        return soap_sender_fault_subcode(soap, "ter:NoSource",
-                                         "Sender", "Invalid VideoSourceToken");
+        return sendOnvifFault(soap, "SOAP-ENV:Sender", "ter:NoSource",
+                              "Invalid VideoSourceToken");
     }
 
     auto opts = soap_new_tt__ImagingOptions20(soap);

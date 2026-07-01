@@ -108,6 +108,12 @@ Tài liệu này tổng hợp toàn bộ vấn đề còn tồn đọng để pa
   - IMAGING-3-1-2 (GetServices consistency) — cần xsd:any Capabilities (đã note ở nhóm 6).
   - IMAGING-4-1-* Events tampering (ImageTooBlurry/Dark/Bright/MotionAlarm) — cần backend phát event thật, ngoài scope mock.
 
+**STATUS (01/07/2026) — Imaging vòng 5 (theo ressult10.xml):**
+- **Regression tìm được:** vòng 4 fault sinh bởi gSOAP có `ter:SettingsInvalid` nhưng response envelope **không declare `xmlns:ter`** → tool báo "undeclared prefix". Root cause: gSOAP không scan text content trong subcode Value để tự thêm xmlns.
+- **Fix 1:** viết helper `sendOnvifFault()` build fault XML thủ công có `xmlns:ter` declared, dùng `soap_send_raw` + return `SOAP_STOP`. Áp dụng cho cả 3 fault path (InvalidArgVal, NoSource, SettingsInvalid).
+- **Fix 2 (root cause phụ):** backend có thể mang state bậy từ session trước (vd Brightness=101 do vòng trước chưa có validate). Clamp giá trị đọc từ backend về 0..100 khi khởi tạo cache → Get luôn trả valid range → Restore không fault.
+- Compile-check pass.
+
 ### 🟠 Nhóm 3 — Device Network (DEVICE-2-x, IPCONFIG)
 - `GetNetworkInterfaces`/`Set`, `GetDNS`/`Set`, `GetNetworkDefaultGateway`/`Set`,
   `GetNetworkProtocols`/`Set`, `GetHostname`/`Set`, DHCP IPv4.
