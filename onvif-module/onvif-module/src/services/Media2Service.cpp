@@ -152,7 +152,7 @@ int Media2Service::GetStreamUri(
         std::string rtspPortStr = ":" + std::to_string(cfg_.rtspPort);
         size_t portPos = uri.find(rtspPortStr);
         if (portPos != std::string::npos) {
-            std::string httpPortStr = ":" + std::to_string(cfg_.publicHttpPort);
+            std::string httpPortStr = ":" + std::to_string(cfg_.httpPort);
             uri.replace(portPos, rtspPortStr.length(), httpPortStr);
         }
 
@@ -190,7 +190,7 @@ int Media2Service::GetSnapshotUri(
     }
 
     if (u.uri.empty()) {
-        u.uri = "http://" + cfg_.deviceIp + ":" + std::to_string(cfg_.publicHttpPort)
+        u.uri = "http://" + cfg_.deviceIp + ":" + std::to_string(cfg_.httpPort)
                 + "/snapshot?token=" + profileToken;
     }
 
