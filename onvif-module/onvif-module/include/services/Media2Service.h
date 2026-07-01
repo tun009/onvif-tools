@@ -68,6 +68,15 @@ public:
         _ns1__GetServiceCapabilities *ns1__GetServiceCapabilities,
         _ns1__GetServiceCapabilitiesResponse &ns1__GetServiceCapabilitiesResponse) override;
 
+    // Profile T Media Profile Management (mục 7.8)
+    virtual int CreateProfile(
+        _ns1__CreateProfile *req,
+        _ns1__CreateProfileResponse &resp) override;
+
+    virtual int DeleteProfile(
+        _ns1__DeleteProfile *req,
+        _ns1__DeleteProfileResponse &resp) override;
+
 private:
     bool validateAuth();
     ServiceConfig cfg_;

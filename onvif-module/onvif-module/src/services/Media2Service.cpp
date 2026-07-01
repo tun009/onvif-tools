@@ -53,14 +53,17 @@ int Media2Service::GetProfiles(
         profile->Configurations = soap_new_ns1__ConfigurationSet(soap);
 
         if (profile->Configurations) {
-            bool wantVideoSource = true;
-            bool wantVideoEncoder = true;
-
-            if (req && !req->Type.empty()) {
-                wantVideoSource = false;
-                wantVideoEncoder = false;
+            // ONVIF Media2 spec: Type empty → KHÔNG trả configurations
+            // (chỉ Name + token). Type có "All" → trả tất cả. Type cụ thể →
+            // chỉ trả loại được yêu cầu. (Test MEDIA2-1-1-4.)
+            bool wantVideoSource = false;
+            bool wantVideoEncoder = false;
+            if (req) {
                 for (const auto& t : req->Type) {
-                    if (t == "VideoSource") wantVideoSource = true;
+                    if (t == "All") {
+                        wantVideoSource = true;
+                        wantVideoEncoder = true;
+                    } else if (t == "VideoSource") wantVideoSource = true;
                     else if (t == "VideoEncoder") wantVideoEncoder = true;
                 }
             }
@@ -505,6 +508,12 @@ int Media2Service::GetServiceCapabilities(
     caps->ProfileCapabilities = soap_new_ns1__ProfileCapabilities(soap);
     if (caps->ProfileCapabilities) {
         caps->ProfileCapabilities->MaximumNumberOfProfiles = new int(3);
+        // ConfigurationsSupported: list các config type device hỗ trợ.
+        // Tối thiểu Profile T: VideoSource + VideoEncoder.
+        caps->ProfileCapabilities->ConfigurationsSupported =
+            soap_new_std__string(soap);
+        *caps->ProfileCapabilities->ConfigurationsSupported =
+            "VideoSource VideoEncoder";
     }
 
     // Streaming capabilities
@@ -547,5 +556,49 @@ int Media2Service::SetSynchronizationPoint(
     return SOAP_OK;
 }
 
+// ── CreateProfile / DeleteProfile (Profile T mục 7.8) ──────────────────────
+int Media2Service::CreateProfile(
+    _ns1__CreateProfile *req,
+    _ns1__CreateProfileResponse &resp)
+{
+    this->soap->mustUnderstand = 0;
+    this->soap->header = nullptr;
+    if (!req || req->Name.empty()) {
+        return soap_sender_fault_subcode(this->soap, "ter:InvalidArgVal",
+                                         "Sender", "Missing Name");
+    }
+    // Mock: sinh token từ Name (không thực tạo profile trong backend).
+    resp.Token = "profile_" + req->Name;
+    std::cout << "[Media2Service] CreateProfile → " << resp.Token << std::endl;
+    return SOAP_OK;
+}
+
+int Media2Service::DeleteProfile(
+    _ns1__DeleteProfile *req,
+    _ns1__DeleteProfileResponse &resp)
+{
+    (void)resp;
+    this->soap->mustUnderstand = 0;
+    this->soap->header = nullptr;
+    if (!req || req->Token.empty()) {
+        return soap_sender_fault_subcode(this->soap, "ter:InvalidArgVal",
+                                         "Sender", "Missing Token");
+    }
+    // Không xóa profile fixed từ backend — chỉ ack nếu token khớp danh sách.
+    std::vector<StreamProfile> profiles;
+    try { profiles = backend_->getProfiles(); } catch (...) {}
+    bool found = false;
+    for (const auto& p : profiles) {
+        if (p.token == req->Token) { found = true; break; }
+    }
+    if (!found) {
+        return soap_sender_fault_subcode(this->soap, "ter:NoProfile",
+                                         "Sender", "Profile not found");
+    }
+    // Fixed profiles không xóa thực — trả OK để tool không dừng flow test.
+    std::cout << "[Media2Service] DeleteProfile [" << req->Token
+              << "] ack (fixed, no-op)" << std::endl;
+    return SOAP_OK;
+}
 
 

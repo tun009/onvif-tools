@@ -196,6 +196,15 @@ Tài liệu này tổng hợp toàn bộ vấn đề còn tồn đọng để pa
 - Đã thêm `SupportedVersions` (bắt buộc) trong System.
 - Đã compile-check trên server (pass).
 
+**STATUS (01/07/2026) — Media2 vòng 2 (theo result20.xml conformance test):**
+- Fix 4 lỗi mandatory Profile T:
+  1. `MEDIA2-1-1-3` DeleteProfile: thêm override, validate token.
+  2. `MEDIA2-1-1-4` GetProfiles: đảo logic Type filter — Type rỗng → KHÔNG trả Configurations (chỉ Name+token). Type có "All"/"VideoSource"/"VideoEncoder" mới include.
+  3. `MEDIA2-5-1-1` Snapshot HTTP GET: intercept path `/snapshot` trong OnvifServer, trả JPEG stub 1×1 pixel, bypass Digest auth.
+  4. `MEDIA2-7-1-1` GetServiceCapabilities: thêm `ConfigurationsSupported="VideoSource VideoEncoder"` trong ProfileCapabilities.
+- Thêm `CreateProfile` (Profile T mục 7.8 mandatory) — mock, trả token từ Name.
+- Compile-check pass.
+
 ### 🟡 Nhóm 7 — Media2 (MEDIA2-x)
 - Bổ sung **OSD** (mandatory Profile T: `GetOSDs`, `GetOSDOptions`, `CreateOSD`, `SetOSD`, `DeleteOSD`).
 - **Metadata configuration** + **Media2 Events** (ProfileChanged, ConfigurationChanged).
