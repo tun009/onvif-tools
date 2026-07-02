@@ -152,7 +152,7 @@ std::string DiscoveryService::buildProbeMatch(const std::string& relatesTo) cons
        << "<SOAP-ENV:Envelope"
        << " xmlns:SOAP-ENV=\"" << NS_SOAP << "\""
        << " xmlns:wsa=\"" << NS_WSA << "\""
-       << " xmlns:d=\"" << NS_WSD << "\""
+       << " xmlns:wsdd=\"" << NS_WSD << "\""
        << " xmlns:tdn=\"" << NS_DN << "\""
        << " xmlns:tds=\"" << NS_TDS << "\">"
        << "<SOAP-ENV:Header>"
@@ -160,18 +160,18 @@ std::string DiscoveryService::buildProbeMatch(const std::string& relatesTo) cons
        << "<wsa:RelatesTo>" << relatesTo << "</wsa:RelatesTo>"
        << "<wsa:To>" << ANON << "</wsa:To>"
        << "<wsa:Action>" << ACT_PROBE_MATCHES << "</wsa:Action>"
-       << "<d:AppSequence InstanceId=\"" << instanceId_
+       << "<wsdd:AppSequence InstanceId=\"" << instanceId_
        << "\" MessageNumber=\"" << (++messageNumber_) << "\"/>"
        << "</SOAP-ENV:Header>"
        << "<SOAP-ENV:Body>"
-       << "<d:ProbeMatches><d:ProbeMatch>"
+       << "<wsdd:ProbeMatches><wsdd:ProbeMatch>"
        << "<wsa:EndpointReference><wsa:Address>" << endpointRef()
        << "</wsa:Address></wsa:EndpointReference>"
-       << "<d:Types>tdn:NetworkVideoTransmitter tds:Device</d:Types>"
-       << "<d:Scopes>" << scopesLine() << "</d:Scopes>"
-       << "<d:XAddrs>" << xaddr() << "</d:XAddrs>"
-       << "<d:MetadataVersion>1</d:MetadataVersion>"
-       << "</d:ProbeMatch></d:ProbeMatches>"
+       << "<wsdd:Types>tdn:NetworkVideoTransmitter tds:Device</wsdd:Types>"
+       << "<wsdd:Scopes>" << scopesLine() << "</wsdd:Scopes>"
+       << "<wsdd:XAddrs>" << xaddr() << "</wsdd:XAddrs>"
+       << "<wsdd:MetadataVersion>1</wsdd:MetadataVersion>"
+       << "</wsdd:ProbeMatch></wsdd:ProbeMatches>"
        << "</SOAP-ENV:Body></SOAP-ENV:Envelope>";
     return os.str();
 }
@@ -182,7 +182,7 @@ std::string DiscoveryService::buildResolveMatch(const std::string& relatesTo) co
        << "<SOAP-ENV:Envelope"
        << " xmlns:SOAP-ENV=\"" << NS_SOAP << "\""
        << " xmlns:wsa=\"" << NS_WSA << "\""
-       << " xmlns:d=\"" << NS_WSD << "\""
+       << " xmlns:wsdd=\"" << NS_WSD << "\""
        << " xmlns:tdn=\"" << NS_DN << "\""
        << " xmlns:tds=\"" << NS_TDS << "\">"
        << "<SOAP-ENV:Header>"
@@ -190,18 +190,18 @@ std::string DiscoveryService::buildResolveMatch(const std::string& relatesTo) co
        << "<wsa:RelatesTo>" << relatesTo << "</wsa:RelatesTo>"
        << "<wsa:To>" << ANON << "</wsa:To>"
        << "<wsa:Action>" << ACT_RESOLVE_MATCHES << "</wsa:Action>"
-       << "<d:AppSequence InstanceId=\"" << instanceId_
+       << "<wsdd:AppSequence InstanceId=\"" << instanceId_
        << "\" MessageNumber=\"" << (++messageNumber_) << "\"/>"
        << "</SOAP-ENV:Header>"
        << "<SOAP-ENV:Body>"
-       << "<d:ResolveMatches><d:ResolveMatch>"
+       << "<wsdd:ResolveMatches><wsdd:ResolveMatch>"
        << "<wsa:EndpointReference><wsa:Address>" << endpointRef()
        << "</wsa:Address></wsa:EndpointReference>"
-       << "<d:Types>tdn:NetworkVideoTransmitter tds:Device</d:Types>"
-       << "<d:Scopes>" << scopesLine() << "</d:Scopes>"
-       << "<d:XAddrs>" << xaddr() << "</d:XAddrs>"
-       << "<d:MetadataVersion>1</d:MetadataVersion>"
-       << "</d:ResolveMatch></d:ResolveMatches>"
+       << "<wsdd:Types>tdn:NetworkVideoTransmitter tds:Device</wsdd:Types>"
+       << "<wsdd:Scopes>" << scopesLine() << "</wsdd:Scopes>"
+       << "<wsdd:XAddrs>" << xaddr() << "</wsdd:XAddrs>"
+       << "<wsdd:MetadataVersion>1</wsdd:MetadataVersion>"
+       << "</wsdd:ResolveMatch></wsdd:ResolveMatches>"
        << "</SOAP-ENV:Body></SOAP-ENV:Envelope>";
     return os.str();
 }
@@ -212,25 +212,25 @@ std::string DiscoveryService::buildHello() const {
        << "<SOAP-ENV:Envelope"
        << " xmlns:SOAP-ENV=\"" << NS_SOAP << "\""
        << " xmlns:wsa=\"" << NS_WSA << "\""
-       << " xmlns:d=\"" << NS_WSD << "\""
+       << " xmlns:wsdd=\"" << NS_WSD << "\""
        << " xmlns:tdn=\"" << NS_DN << "\""
        << " xmlns:tds=\"" << NS_TDS << "\">"
        << "<SOAP-ENV:Header>"
        << "<wsa:MessageID>" << newMessageId() << "</wsa:MessageID>"
        << "<wsa:To>" << TO_DISCOVERY << "</wsa:To>"
        << "<wsa:Action>" << ACT_HELLO << "</wsa:Action>"
-       << "<d:AppSequence InstanceId=\"" << instanceId_
+       << "<wsdd:AppSequence InstanceId=\"" << instanceId_
        << "\" MessageNumber=\"" << (++messageNumber_) << "\"/>"
        << "</SOAP-ENV:Header>"
        << "<SOAP-ENV:Body>"
-       << "<d:Hello>"
+       << "<wsdd:Hello>"
        << "<wsa:EndpointReference><wsa:Address>" << endpointRef()
        << "</wsa:Address></wsa:EndpointReference>"
-       << "<d:Types>tdn:NetworkVideoTransmitter tds:Device</d:Types>"
-       << "<d:Scopes>" << scopesLine() << "</d:Scopes>"
-       << "<d:XAddrs>" << xaddr() << "</d:XAddrs>"
-       << "<d:MetadataVersion>1</d:MetadataVersion>"
-       << "</d:Hello>"
+       << "<wsdd:Types>tdn:NetworkVideoTransmitter tds:Device</wsdd:Types>"
+       << "<wsdd:Scopes>" << scopesLine() << "</wsdd:Scopes>"
+       << "<wsdd:XAddrs>" << xaddr() << "</wsdd:XAddrs>"
+       << "<wsdd:MetadataVersion>1</wsdd:MetadataVersion>"
+       << "</wsdd:Hello>"
        << "</SOAP-ENV:Body></SOAP-ENV:Envelope>";
     return os.str();
 }
@@ -241,25 +241,25 @@ std::string DiscoveryService::buildBye() const {
        << "<SOAP-ENV:Envelope"
        << " xmlns:SOAP-ENV=\"" << NS_SOAP << "\""
        << " xmlns:wsa=\"" << NS_WSA << "\""
-       << " xmlns:d=\"" << NS_WSD << "\""
+       << " xmlns:wsdd=\"" << NS_WSD << "\""
        << " xmlns:tdn=\"" << NS_DN << "\""
        << " xmlns:tds=\"" << NS_TDS << "\">"
        << "<SOAP-ENV:Header>"
        << "<wsa:MessageID>" << newMessageId() << "</wsa:MessageID>"
        << "<wsa:To>" << TO_DISCOVERY << "</wsa:To>"
        << "<wsa:Action>" << ACT_BYE << "</wsa:Action>"
-       << "<d:AppSequence InstanceId=\"" << instanceId_
+       << "<wsdd:AppSequence InstanceId=\"" << instanceId_
        << "\" MessageNumber=\"" << (++messageNumber_) << "\"/>"
        << "</SOAP-ENV:Header>"
        << "<SOAP-ENV:Body>"
-       << "<d:Bye>"
+       << "<wsdd:Bye>"
        << "<wsa:EndpointReference><wsa:Address>" << endpointRef()
        << "</wsa:Address></wsa:EndpointReference>"
-       << "<d:Types>tdn:NetworkVideoTransmitter tds:Device</d:Types>"
-       << "<d:Scopes>" << scopesLine() << "</d:Scopes>"
-       << "<d:XAddrs>" << xaddr() << "</d:XAddrs>"
-       << "<d:MetadataVersion>1</d:MetadataVersion>"
-       << "</d:Bye>"
+       << "<wsdd:Types>tdn:NetworkVideoTransmitter tds:Device</wsdd:Types>"
+       << "<wsdd:Scopes>" << scopesLine() << "</wsdd:Scopes>"
+       << "<wsdd:XAddrs>" << xaddr() << "</wsdd:XAddrs>"
+       << "<wsdd:MetadataVersion>1</wsdd:MetadataVersion>"
+       << "</wsdd:Bye>"
        << "</SOAP-ENV:Body></SOAP-ENV:Envelope>";
     return os.str();
 }
