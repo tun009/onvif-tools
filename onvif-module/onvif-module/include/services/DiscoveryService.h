@@ -24,8 +24,17 @@ public:
     // Gửi Bye, đóng socket, dừng thread.
     void stop();
 
+    // Giả lập reboot: gửi Bye ra multicast, chờ 1s, gửi Hello lại.
+    // Dùng cho SystemReboot / SetSystemFactoryDefault để test tool detect
+    // được lifecycle Bye→Hello sau reboot (DISCOVERY-1-1-2/1-1-8).
+    void announceReboot();
+
+    // Truy cập instance đang chạy (singleton nhẹ) — để DeviceService gọi.
+    static DiscoveryService* current();
+
 private:
     void recvLoop();
+    void sendMulticast(const std::string& xml);   // gửi 1 gói UDP ra multicast
 
     // ── Dựng bản tin ──────────────────────────────────────────────
     std::string buildProbeMatch(const std::string& relatesTo) const;

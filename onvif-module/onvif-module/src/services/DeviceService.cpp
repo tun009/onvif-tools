@@ -1,4 +1,5 @@
 #include "services/DeviceService.h"
+#include "services/DiscoveryService.h"
 #include "auth/WsSecurityHandler.h"
 #include <iostream>
 #include <ctime>
@@ -826,8 +827,10 @@ int DeviceService::SetSystemFactoryDefault(_tds__SetSystemFactoryDefault* req,
     (void)req; (void)resp;
     this->soap->mustUnderstand = 0;
     this->soap->header = nullptr;
-    // Không thực sự reset — chỉ ack. Có thể clear cache trong tương lai.
     std::cout << "[DeviceService] SetSystemFactoryDefault ack (mock)\n";
+    // Giả lập reboot: phát Bye + Hello ra multicast để test tool nhận diện
+    // (DISCOVERY-1-1-2/1-1-8, DEVICE-3-1-6/3-1-7).
+    if (auto* d = DiscoveryService::current()) d->announceReboot();
     return SOAP_OK;
 }
 
@@ -838,6 +841,8 @@ int DeviceService::SystemReboot(_tds__SystemReboot* req,
     this->soap->header = nullptr;
     resp.Message = "Rebooting in 5 seconds";
     std::cout << "[DeviceService] SystemReboot ack (mock)\n";
+    // Giả lập reboot: phát Bye + Hello (test tool chờ Hello sau SystemReboot).
+    if (auto* d = DiscoveryService::current()) d->announceReboot();
     return SOAP_OK;
 }
 

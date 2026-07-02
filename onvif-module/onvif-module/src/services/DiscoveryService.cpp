@@ -14,6 +14,13 @@
 #include <sstream>
 #include <iostream>
 #include <vector>
+#include <thread>
+#include <chrono>
+
+// Singleton pointer để DeviceService::SystemReboot triệu hồi.
+static DiscoveryService* g_discoveryInstance = nullptr;
+
+DiscoveryService* DiscoveryService::current() { return g_discoveryInstance; }
 
 namespace {
 constexpr const char* MCAST_ADDR = "239.255.255.250";
@@ -285,10 +292,19 @@ bool DiscoveryService::start() {
         return false;
     }
 
-    // Join multicast group
+    // Bind multicast trên đúng interface có deviceIp (tránh kernel chọn nhầm
+    // Docker bridge / WireGuard interface khi server có nhiều NIC).
+    struct in_addr localIf{};
+    localIf.s_addr = inet_addr(cfg_.deviceIp.c_str());
+    if (localIf.s_addr == INADDR_NONE || localIf.s_addr == 0) {
+        // Fallback: kernel tự chọn
+        localIf.s_addr = htonl(INADDR_ANY);
+    }
+
+    // Join multicast group trên interface có deviceIp
     ip_mreq mreq{};
     mreq.imr_multiaddr.s_addr = inet_addr(MCAST_ADDR);
-    mreq.imr_interface.s_addr = htonl(INADDR_ANY);
+    mreq.imr_interface.s_addr = localIf.s_addr;
     if (setsockopt(sock_, IPPROTO_IP, IP_ADD_MEMBERSHIP,
                    &mreq, sizeof(mreq)) < 0) {
         std::cerr << "[Discovery] IP_ADD_MEMBERSHIP failed\n";
@@ -297,9 +313,20 @@ bool DiscoveryService::start() {
         return false;
     }
 
+    // Outbound multicast: buộc dùng interface có deviceIp (không để kernel
+    // tùy ý chọn docker0/wg0/br-*).
+    if (setsockopt(sock_, IPPROTO_IP, IP_MULTICAST_IF,
+                   &localIf, sizeof(localIf)) < 0) {
+        std::cerr << "[Discovery] IP_MULTICAST_IF failed (non-fatal)\n";
+    }
+
     // TTL cho gói multicast gửi đi
     unsigned char ttl = 1;
     setsockopt(sock_, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl));
+
+    // Bật loopback cho gói multicast (để probe.py cùng máy nhận được)
+    unsigned char loop = 1;
+    setsockopt(sock_, IPPROTO_IP, IP_MULTICAST_LOOP, &loop, sizeof(loop));
 
     // Recv timeout 1s để vòng lặp kiểm tra running_
     timeval tv{};
@@ -310,20 +337,40 @@ bool DiscoveryService::start() {
     running_ = true;
     thread_ = std::thread(&DiscoveryService::recvLoop, this);
 
+    // Đăng ký singleton để DeviceService::SystemReboot triệu hồi.
+    g_discoveryInstance = this;
+
     // Gửi Hello ra multicast
-    {
-        sockaddr_in dst{};
-        dst.sin_family = AF_INET;
-        dst.sin_addr.s_addr = inet_addr(MCAST_ADDR);
-        dst.sin_port = htons(MCAST_PORT);
-        std::string hello = buildHello();
-        ::sendto(sock_, hello.data(), hello.size(), 0,
-                 reinterpret_cast<sockaddr*>(&dst), sizeof(dst));
-    }
+    sendMulticast(buildHello());
 
     std::cout << "[Discovery] WS-Discovery listening on "
               << MCAST_ADDR << ":" << MCAST_PORT << "\n";
     return true;
+}
+
+void DiscoveryService::sendMulticast(const std::string& xml) {
+    if (sock_ < 0) return;
+    sockaddr_in dst{};
+    dst.sin_family = AF_INET;
+    dst.sin_addr.s_addr = inet_addr(MCAST_ADDR);
+    dst.sin_port = htons(MCAST_PORT);
+    ::sendto(sock_, xml.data(), xml.size(), 0,
+             reinterpret_cast<sockaddr*>(&dst), sizeof(dst));
+}
+
+void DiscoveryService::announceReboot() {
+    // Test tool test SystemReboot/FactoryDefault sẽ chờ Bye rồi Hello.
+    // Gửi Bye → tăng InstanceId (mô phỏng process mới sau reboot) → gửi Hello.
+    std::cout << "[Discovery] Announce reboot: Bye + Hello\n";
+    sendMulticast(buildBye());
+    // Nhỏ delay để tool phân biệt 2 event
+    std::thread([this]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        // Update instance ID để tool nhận diện device đã "reboot"
+        instanceId_ = static_cast<uint32_t>(::time(nullptr));
+        messageNumber_ = 0;
+        sendMulticast(buildHello());
+    }).detach();
 }
 
 void DiscoveryService::stop() {
@@ -331,13 +378,7 @@ void DiscoveryService::stop() {
 
     // Gửi Bye trước khi đóng
     if (sock_ >= 0) {
-        sockaddr_in dst{};
-        dst.sin_family = AF_INET;
-        dst.sin_addr.s_addr = inet_addr(MCAST_ADDR);
-        dst.sin_port = htons(MCAST_PORT);
-        std::string bye = buildBye();
-        ::sendto(sock_, bye.data(), bye.size(), 0,
-                 reinterpret_cast<sockaddr*>(&dst), sizeof(dst));
+        sendMulticast(buildBye());
     }
 
     running_ = false;
@@ -347,6 +388,7 @@ void DiscoveryService::stop() {
         ::close(sock_);
         sock_ = -1;
     }
+    g_discoveryInstance = nullptr;
 }
 
 void DiscoveryService::recvLoop() {
