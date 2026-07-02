@@ -4,6 +4,8 @@
 #include <string>
 #include <sstream>
 #include <cstring>
+#include <map>
+#include <mutex>
 
 // Forward declaration — định nghĩa cuối file. Cần cho các op gọi fault sớm.
 static int m2SendOnvifFault(struct soap* soap,
@@ -719,4 +721,185 @@ int Media2Service::DeleteProfile(
     return SOAP_OK;
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// Profile T §7.8 GetVideoEncoderInstances — MaxNumberOfConcurrentStreams
+// ══════════════════════════════════════════════════════════════════════════
+int Media2Service::GetVideoEncoderInstances(
+    _ns1__GetVideoEncoderInstances* req,
+    _ns1__GetVideoEncoderInstancesResponse& resp)
+{
+    (void)req;
+    this->soap->mustUnderstand = 0;
+    this->soap->header = nullptr;
+    auto soap = this->soap;
+
+    auto info = soap_new_ns1__EncoderInstanceInfo(soap);
+    info->Total = 3;   // Mock: hỗ trợ tối đa 3 stream đồng thời
+    resp.Info = info;
+    return SOAP_OK;
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// Profile T §7.15 GetMetadataConfigurationOptions
+// ══════════════════════════════════════════════════════════════════════════
+int Media2Service::GetMetadataConfigurationOptions(
+    ns1__GetConfiguration* req,
+    _ns1__GetMetadataConfigurationOptionsResponse& resp)
+{
+    (void)req;
+    this->soap->mustUnderstand = 0;
+    this->soap->header = nullptr;
+    auto soap = this->soap;
+
+    auto opt = soap_new_tt__MetadataConfigurationOptions(soap);
+    auto* mcfs = (int*)soap_malloc(soap, sizeof(int));
+    *mcfs = 1024;   // MaxContentFilterSize
+    opt->MaxContentFilterSize = mcfs;
+    resp.Options = opt;
+    return SOAP_OK;
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// Profile T §7.18 OSD (On-Screen Display) — 5 op mandatory
+// ══════════════════════════════════════════════════════════════════════════
+namespace {
+struct MockOSD {
+    std::string token;
+    std::string vsToken;   // VideoSourceConfigurationToken
+    std::string type;      // "Text" | "Image"
+    std::string text;
+    float posX = 0.5f, posY = 0.5f;
+    std::string posType = "Custom";
+};
+static std::mutex g_osdMtx;
+static std::map<std::string, MockOSD> g_osds;
+static int g_osdNextId = 1;
+}
+
+int Media2Service::CreateOSD(_ns1__CreateOSD* req,
+                             _ns1__CreateOSDResponse& resp) {
+    this->soap->mustUnderstand = 0;
+    this->soap->header = nullptr;
+    if (!req || !req->OSD) {
+        return m2SendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                "ter:InvalidArgVal", nullptr, "Missing OSD");
+    }
+    std::lock_guard<std::mutex> lk(g_osdMtx);
+    MockOSD osd;
+    osd.token = "osd_" + std::to_string(g_osdNextId++);
+    if (req->OSD->VideoSourceConfigurationToken)
+        osd.vsToken = req->OSD->VideoSourceConfigurationToken->__item;
+    if (req->OSD->TextString && req->OSD->TextString->PlainText)
+        osd.text = *req->OSD->TextString->PlainText;
+    osd.type = "Text";
+    g_osds[osd.token] = osd;
+    resp.OSDToken = osd.token;
+    std::cout << "[Media2Service] CreateOSD → " << osd.token << std::endl;
+    return SOAP_OK;
+}
+
+int Media2Service::DeleteOSD(_ns1__DeleteOSD* req,
+                             ns1__SetConfigurationResponse& resp) {
+    (void)resp;
+    this->soap->mustUnderstand = 0;
+    this->soap->header = nullptr;
+    std::lock_guard<std::mutex> lk(g_osdMtx);
+    auto it = g_osds.find(req ? req->OSDToken : "");
+    if (it == g_osds.end()) {
+        return m2SendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                "ter:InvalidArgVal", "ter:NoConfig",
+                                "OSD not found");
+    }
+    g_osds.erase(it);
+    return SOAP_OK;
+}
+
+int Media2Service::GetOSDs(_ns1__GetOSDs* req,
+                           _ns1__GetOSDsResponse& resp) {
+    this->soap->mustUnderstand = 0;
+    this->soap->header = nullptr;
+    auto soap = this->soap;
+    std::string filterToken = (req && req->OSDToken) ? *req->OSDToken : "";
+    std::lock_guard<std::mutex> lk(g_osdMtx);
+    for (const auto& kv : g_osds) {
+        if (!filterToken.empty() && kv.first != filterToken) continue;
+        auto o = soap_new_tt__OSDConfiguration(soap);
+        o->token = kv.second.token;
+        o->VideoSourceConfigurationToken = soap_new_tt__OSDReference(soap);
+        o->VideoSourceConfigurationToken->__item = kv.second.vsToken.empty()
+            ? "video_source_config" : kv.second.vsToken;
+        // Set Type=Text (enum), Position, TextString
+        // tt__OSDType enum: Text=0, Image=1, Extended=2 (thứ tự tùy generator)
+        // Chỉ set Position + TextString là đủ (Type dùng default).
+        o->Position = soap_new_tt__OSDPosConfiguration(soap);
+        o->Position->Type = kv.second.posType;
+        o->TextString = soap_new_tt__OSDTextConfiguration(soap);
+        o->TextString->Type = "Plain";
+        auto* txt = soap_new_std__string(soap);
+        *txt = kv.second.text.empty() ? "MockCam" : kv.second.text;
+        o->TextString->PlainText = txt;
+        resp.OSDs.push_back(o);
+    }
+    return SOAP_OK;
+}
+
+int Media2Service::GetOSDOptions(_ns1__GetOSDOptions* req,
+                                 _ns1__GetOSDOptionsResponse& resp) {
+    (void)req;
+    this->soap->mustUnderstand = 0;
+    this->soap->header = nullptr;
+    auto soap = this->soap;
+    auto opt = soap_new_tt__OSDConfigurationOptions(soap);
+    // Max OSDs
+    opt->MaximumNumberOfOSDs = soap_new_tt__MaximumNumberOfOSDs(soap);
+    opt->MaximumNumberOfOSDs->Total = 4;
+    auto* zero = (int*)soap_malloc(soap, sizeof(int)); *zero = 0;
+    auto* four = (int*)soap_malloc(soap, sizeof(int)); *four = 4;
+    opt->MaximumNumberOfOSDs->Image = zero;
+    opt->MaximumNumberOfOSDs->PlainText = four;
+    opt->MaximumNumberOfOSDs->Date = four;
+    opt->MaximumNumberOfOSDs->Time = four;
+    opt->MaximumNumberOfOSDs->DateAndTime = four;
+    // Position options
+    opt->PositionOption.push_back("UpperLeft");
+    opt->PositionOption.push_back("UpperRight");
+    opt->PositionOption.push_back("LowerLeft");
+    opt->PositionOption.push_back("LowerRight");
+    opt->PositionOption.push_back("Custom");
+    // Text options
+    opt->TextOption = soap_new_tt__OSDTextOptions(soap);
+    opt->TextOption->Type.push_back("Plain");
+    opt->TextOption->Type.push_back("Date");
+    opt->TextOption->Type.push_back("Time");
+    opt->TextOption->Type.push_back("DateAndTime");
+    opt->TextOption->FontSizeRange = soap_new_tt__IntRange(soap);
+    opt->TextOption->FontSizeRange->Min = 10;
+    opt->TextOption->FontSizeRange->Max = 48;
+    opt->TextOption->DateFormat.push_back("MM/dd/yyyy");
+    opt->TextOption->DateFormat.push_back("yyyy-MM-dd");
+    opt->TextOption->TimeFormat.push_back("HH:mm:ss");
+    resp.OSDOptions = opt;
+    return SOAP_OK;
+}
+
+int Media2Service::SetOSD(_ns1__SetOSD* req,
+                          ns1__SetConfigurationResponse& resp) {
+    (void)resp;
+    this->soap->mustUnderstand = 0;
+    this->soap->header = nullptr;
+    if (!req || !req->OSD || req->OSD->token.empty()) {
+        return m2SendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                "ter:InvalidArgVal", nullptr, "Missing OSD");
+    }
+    std::lock_guard<std::mutex> lk(g_osdMtx);
+    auto it = g_osds.find(req->OSD->token);
+    if (it == g_osds.end()) {
+        return m2SendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                "ter:InvalidArgVal", "ter:NoConfig",
+                                "OSD not found");
+    }
+    if (req->OSD->TextString && req->OSD->TextString->PlainText)
+        it->second.text = *req->OSD->TextString->PlainText;
+    return SOAP_OK;
+}
 

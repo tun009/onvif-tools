@@ -77,6 +77,33 @@ public:
         _ns1__DeleteProfile *req,
         _ns1__DeleteProfileResponse &resp) override;
 
+    // Profile T §7.8: MaxNumberOfConcurrentStreams per config
+    virtual int GetVideoEncoderInstances(
+        _ns1__GetVideoEncoderInstances *req,
+        _ns1__GetVideoEncoderInstancesResponse &resp) override;
+
+    // Profile T §7.15: Metadata configuration options
+    virtual int GetMetadataConfigurationOptions(
+        ns1__GetConfiguration *req,
+        _ns1__GetMetadataConfigurationOptionsResponse &resp) override;
+
+    // Profile T §7.18: OSD (On-Screen Display) 5 op mandatory
+    virtual int CreateOSD(
+        _ns1__CreateOSD *req,
+        _ns1__CreateOSDResponse &resp) override;
+    virtual int DeleteOSD(
+        _ns1__DeleteOSD *req,
+        ns1__SetConfigurationResponse &resp) override;
+    virtual int GetOSDs(
+        _ns1__GetOSDs *req,
+        _ns1__GetOSDsResponse &resp) override;
+    virtual int GetOSDOptions(
+        _ns1__GetOSDOptions *req,
+        _ns1__GetOSDOptionsResponse &resp) override;
+    virtual int SetOSD(
+        _ns1__SetOSD *req,
+        ns1__SetConfigurationResponse &resp) override;
+
 private:
     bool validateAuth();
     ServiceConfig cfg_;

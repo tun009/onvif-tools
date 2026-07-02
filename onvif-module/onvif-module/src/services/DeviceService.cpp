@@ -972,3 +972,13 @@ int DeviceService::SetUser(_tds__SetUser* req,
     }
     return SOAP_OK;
 }
+
+// ── GetWsdlUrl (Profile T §7.2 mandatory) ─────────────────────────────────
+int DeviceService::GetWsdlUrl(_tds__GetWsdlUrl* req, _tds__GetWsdlUrlResponse& resp) {
+    (void)req;
+    this->soap->mustUnderstand = 0;
+    this->soap->header = nullptr;
+    resp.WsdlUrl = "http://" + cfg_.deviceIp + ":" + std::to_string(cfg_.httpPort)
+                 + "/wsdl/";
+    return SOAP_OK;
+}

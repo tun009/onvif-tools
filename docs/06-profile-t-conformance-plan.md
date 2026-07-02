@@ -205,6 +205,17 @@ Tài liệu này tổng hợp toàn bộ vấn đề còn tồn đọng để pa
 - Fix prefix `dn` → `tdn` cho namespace `ver10/network/wsdl` (test tool ONVIF parse literal, camera thật ELCOM dùng `tdn`).
 - Kết quả: DISCOVERY 2 → 4 pass (+2). tcpdump xác nhận ProbeMatch đã đi ra eno1 tới tool.
 
+**STATUS (02/07/2026) — Bổ sung feature mandatory còn thiếu (vòng 4):**
+- **§7.2 `GetWsdlUrl`**: implement (trả URL `http://<ip>:<port>/wsdl/`).
+- **§7.8 `GetVideoEncoderInstances`**: implement, trả Total=3 (mock 3 stream đồng thời).
+- **§7.15 `GetMetadataConfigurationOptions`**: implement, trả `MaxContentFilterSize=1024`.
+- **§7.18 OSD** — implement đầy đủ 5 op mandatory (CreateOSD, DeleteOSD, GetOSDs, GetOSDOptions, SetOSD) với state static `MockOSD` map + mutex:
+  - CreateOSD sinh token `osd_N`, add vào map.
+  - GetOSDs trả list từ map (có filter theo token).
+  - GetOSDOptions trả options: MaximumNumberOfOSDs, PositionOption (5 giá trị), TextOption (Type/FontSize/Format).
+  - SetOSD update, DeleteOSD xóa (fault `ter:NoConfig` khi token không tồn tại).
+- Compile-check pass 3 file (DeviceService, Media2Service, DiscoveryService).
+
 **STATUS (02/07/2026) — Discovery vòng 3 (kết luận):**
 - Đã thử: đổi prefix `d:`→`wsdd:`, tắt Windows Firewall — không cải thiện (vẫn 4/14).
 - Bằng chứng đã có: tcpdump xác nhận server gửi ProbeMatch tới tool `192.168.8.116:1000` length 1364; Hello/Bye multicast tool nhận OK (4 test pass).

@@ -53,6 +53,9 @@ public:
     virtual int DeleteUsers(_tds__DeleteUsers *req, _tds__DeleteUsersResponse &resp) override;
     virtual int SetUser(_tds__SetUser *req, _tds__SetUserResponse &resp) override;
 
+    // ── Profile T mandatory misc ─────────────────────────────────────────
+    virtual int GetWsdlUrl(_tds__GetWsdlUrl *req, _tds__GetWsdlUrlResponse &resp) override;
+
 private:
     bool validateAuth();
 
