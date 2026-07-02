@@ -78,7 +78,7 @@ private:
 
         // IPv4 config
         bool        ipv4DhcpEnabled = false;
-        std::string ipv4Manual      = "192.168.254.119";
+        std::string ipv4Manual      = "192.168.8.36";
         int         prefixLength    = 24;
 
         std::vector<std::string> gatewayIPv4 = {"192.168.254.1"};
