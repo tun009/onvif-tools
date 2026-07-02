@@ -94,6 +94,14 @@ sudo ufw allow 8001/udp  # RTCP Video control
 sudo ufw reload
 ```
 
+### Kiểm tra port trống trước khi chạy (khi triển khai lên server chia sẻ)
+
+Trước khi chạy mediamtx, kiểm tra các port sẽ dùng có bị chiếm không:
+```bash
+sudo ss -tlnp | grep -E ':8554|:9997|:8080|:3702'
+```
+Các port mặc định mediamtx bind mà **rtsp/mediamtx.yml đã disable** để tránh xung đột: `1935` (RTMP), `8888` (HLS), `8889` (WebRTC), `8890` (SRT). Nếu 8554 hoặc 9997 vẫn bận, sửa `rtspAddress`/`apiAddress` trong `rtsp/mediamtx.yml` và cập nhật `rtsp_port` trong `mock-camera-backend/config/mock.conf` cho khớp.
+
 ### Khắc phục lỗi thường gặp
 
 * **Lỗi: `chrono_duration.cpp: error: 'std::chrono' has not been declared`**
@@ -102,6 +110,10 @@ sudo ufw reload
     ```bash
     make gen && make clean && make full
     ```
+* **Lỗi: `listen tcp :8889: bind: address already in use` (hoặc port 1935/8888/8890)**
+  * **Nguyên nhân:** mediamtx mặc định bind cả RTMP/HLS/WebRTC/SRT dù không dùng.
+  * **Khắc phục:** đảm bảo `rtsp/mediamtx.yml` có 4 dòng disable: `rtmp: no`, `hls: no`, `webrtc: no`, `srt: no`.
+
 * **Lỗi: `Cannot connect to /tmp/mock-camera.sock`**
   * **Nguyên nhân:** File socket cũ chưa được dọn dẹp hoặc Mock Camera Backend chưa chạy.
   * **Khắc phục:** Xóa socket cũ và đảm bảo `mock-camera-server` đang chạy:

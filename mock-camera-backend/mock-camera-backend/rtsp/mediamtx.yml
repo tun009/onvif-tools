@@ -1,7 +1,13 @@
 rtspAddress:  :8554
 protocols:    [udp, multicast, tcp]
-rtmpAddress:  :1935
-hlsAddress:   :8888
+
+# Disable các service không dùng (tránh xung đột port trên server chia sẻ).
+# Mock camera chỉ cần RTSP + control API.
+rtmp:         no
+hls:          no
+webrtc:       no
+srt:          no
+
 api:          yes
 apiAddress:   :9997
 logLevel:     info
