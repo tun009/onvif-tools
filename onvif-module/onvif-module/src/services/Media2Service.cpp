@@ -75,10 +75,8 @@ int Media2Service::GetProfiles(
     // Xác định Type filter mà tool yêu cầu
     bool wantVideoSource = false;
     bool wantVideoEncoder = false;
-    bool anyType = false;
     if (req) {
         for (const auto& t : req->Type) {
-            anyType = true;
             if (t == "All") { wantVideoSource = true; wantVideoEncoder = true; }
             else if (t == "VideoSource") wantVideoSource = true;
             else if (t == "VideoEncoder") wantVideoEncoder = true;
@@ -791,10 +789,10 @@ int Media2Service::CreateProfile(
     p.name  = req->Name;
     // Configuration ban đầu — tool có thể gửi vector configs (VideoSource, VideoEncoder, ...)
     for (auto* c : req->Configuration) {
-        if (!c) continue;
-        if (c->Type == "VideoSource")  p.vsToken = c->Token;
-        else if (c->Type == "VideoEncoder") p.veToken = c->Token;
-        else if (c->Type == "Metadata")     p.mdToken = c->Token;
+        if (!c || !c->Token) continue;
+        if (c->Type == "VideoSource")       p.vsToken = *c->Token;
+        else if (c->Type == "VideoEncoder") p.veToken = *c->Token;
+        else if (c->Type == "Metadata")     p.mdToken = *c->Token;
     }
     {
         std::lock_guard<std::mutex> lk(g_profMtx);
