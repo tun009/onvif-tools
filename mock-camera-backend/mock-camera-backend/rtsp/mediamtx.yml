@@ -9,7 +9,7 @@ webrtc:       no
 srt:          no
 
 api:          yes
-apiAddress:   :9997
+apiAddress:   :19997
 logLevel:     info
 
 paths:
