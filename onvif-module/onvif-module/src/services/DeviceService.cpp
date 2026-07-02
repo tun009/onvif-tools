@@ -472,24 +472,30 @@ int DeviceService::SetDiscoveryMode(_tds__SetDiscoveryMode* req,
     return SOAP_OK;
 }
 
+static void syncScopesToDiscovery(const std::vector<std::string>& scopes) {
+    if (auto* d = DiscoveryService::current()) d->setScopes(scopes);
+}
+
 int DeviceService::SetScopes(_tds__SetScopes* req,
                              _tds__SetScopesResponse& resp) {
     (void)resp;
     this->soap->mustUnderstand = 0;
     this->soap->header = nullptr;
     if (!req) return SOAP_OK;
-    std::lock_guard<std::mutex> lk(sysMtx_);
-    // Giữ Fixed scopes, thay Configurable = req->Scopes
     std::vector<std::string> newScopes;
-    for (const auto& uri : sys_.scopes) {
-        if (uri.find("/type/") != std::string::npos ||
-            uri.find("/hardware/") != std::string::npos ||
-            uri.find("/Profile/") != std::string::npos) {
-            newScopes.push_back(uri);
+    {
+        std::lock_guard<std::mutex> lk(sysMtx_);
+        for (const auto& uri : sys_.scopes) {
+            if (uri.find("/type/") != std::string::npos ||
+                uri.find("/hardware/") != std::string::npos ||
+                uri.find("/Profile/") != std::string::npos) {
+                newScopes.push_back(uri);
+            }
         }
+        for (const auto& u : req->Scopes) newScopes.push_back(u);
+        sys_.scopes = newScopes;
     }
-    for (const auto& u : req->Scopes) newScopes.push_back(u);
-    sys_.scopes = std::move(newScopes);
+    syncScopesToDiscovery(newScopes);
     return SOAP_OK;
 }
 
@@ -499,13 +505,17 @@ int DeviceService::AddScopes(_tds__AddScopes* req,
     this->soap->mustUnderstand = 0;
     this->soap->header = nullptr;
     if (!req) return SOAP_OK;
-    std::lock_guard<std::mutex> lk(sysMtx_);
-    for (const auto& u : req->ScopeItem) {
-        // Không thêm trùng
-        if (std::find(sys_.scopes.begin(), sys_.scopes.end(), u) == sys_.scopes.end()) {
-            sys_.scopes.push_back(u);
+    std::vector<std::string> snap;
+    {
+        std::lock_guard<std::mutex> lk(sysMtx_);
+        for (const auto& u : req->ScopeItem) {
+            if (std::find(sys_.scopes.begin(), sys_.scopes.end(), u) == sys_.scopes.end()) {
+                sys_.scopes.push_back(u);
+            }
         }
+        snap = sys_.scopes;
     }
+    syncScopesToDiscovery(snap);
     return SOAP_OK;
 }
 
@@ -514,19 +524,23 @@ int DeviceService::RemoveScopes(_tds__RemoveScopes* req,
     this->soap->mustUnderstand = 0;
     this->soap->header = nullptr;
     if (!req) return SOAP_OK;
-    std::lock_guard<std::mutex> lk(sysMtx_);
-    for (const auto& u : req->ScopeItem) {
-        // KHÔNG cho remove Fixed
-        bool isFixed = u.find("/type/") != std::string::npos ||
-                       u.find("/hardware/") != std::string::npos ||
-                       u.find("/Profile/") != std::string::npos;
-        if (isFixed) continue;
-        auto it = std::find(sys_.scopes.begin(), sys_.scopes.end(), u);
-        if (it != sys_.scopes.end()) {
-            sys_.scopes.erase(it);
-            resp.ScopeItem.push_back(u);
+    std::vector<std::string> snap;
+    {
+        std::lock_guard<std::mutex> lk(sysMtx_);
+        for (const auto& u : req->ScopeItem) {
+            bool isFixed = u.find("/type/") != std::string::npos ||
+                           u.find("/hardware/") != std::string::npos ||
+                           u.find("/Profile/") != std::string::npos;
+            if (isFixed) continue;
+            auto it = std::find(sys_.scopes.begin(), sys_.scopes.end(), u);
+            if (it != sys_.scopes.end()) {
+                sys_.scopes.erase(it);
+                resp.ScopeItem.push_back(u);
+            }
         }
+        snap = sys_.scopes;
     }
+    syncScopesToDiscovery(snap);
     return SOAP_OK;
 }
 

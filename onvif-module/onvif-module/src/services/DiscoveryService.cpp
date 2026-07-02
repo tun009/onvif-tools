@@ -22,6 +22,11 @@ static DiscoveryService* g_discoveryInstance = nullptr;
 
 DiscoveryService* DiscoveryService::current() { return g_discoveryInstance; }
 
+void DiscoveryService::setScopes(const std::vector<std::string>& s) {
+    std::lock_guard<std::mutex> lk(scopesMtx_);
+    scopes_ = s;
+}
+
 namespace {
 constexpr const char* MCAST_ADDR = "239.255.255.250";
 constexpr int         MCAST_PORT = 3702;
@@ -74,14 +79,21 @@ std::string DiscoveryService::endpointRef() const {
 
 // Danh sách scope PHẢI khớp DeviceService::GetScopes (test kiểm tra consistency)
 std::string DiscoveryService::scopesLine() const {
-    static const std::vector<std::string> scopes = {
-        "onvif://www.onvif.org/type/NetworkVideoTransmitter",
-        "onvif://www.onvif.org/type/video_encoder",
-        "onvif://www.onvif.org/name/MockCam-4K",
-        "onvif://www.onvif.org/hardware/JetsonOrinNX-8GB",
-        "onvif://www.onvif.org/Profile/Streaming",
-        "onvif://www.onvif.org/Profile/T"
-    };
+    std::vector<std::string> scopes;
+    {
+        std::lock_guard<std::mutex> lk(scopesMtx_);
+        scopes = scopes_;
+    }
+    if (scopes.empty()) {
+        scopes = {
+            "onvif://www.onvif.org/type/NetworkVideoTransmitter",
+            "onvif://www.onvif.org/type/video_encoder",
+            "onvif://www.onvif.org/name/MockCam-4K",
+            "onvif://www.onvif.org/hardware/JetsonOrinNX-8GB",
+            "onvif://www.onvif.org/Profile/Streaming",
+            "onvif://www.onvif.org/Profile/T"
+        };
+    }
     std::string out;
     for (size_t i = 0; i < scopes.size(); ++i) {
         if (i) out += " ";
@@ -144,11 +156,30 @@ std::string DiscoveryService::extractTag(const std::string& xml,
 }
 
 bool DiscoveryService::probeMatches(const std::string& probe) const {
-    // Types: rỗng → match; có thì phải chứa NetworkVideoTransmitter hoặc Device
+    // Types: rỗng → match; có thì PHẢI là NetworkVideoTransmitter (dn:) hoặc
+    // Device (tds:). DISCOVERY-1-1-9 gửi negative probe với type sai như
+    // "abc:BadType" — device không được respond.
     std::string types = extractTag(probe, "Types");
     if (!types.empty()) {
-        if (types.find("NetworkVideoTransmitter") == std::string::npos &&
-            types.find("Device") == std::string::npos) {
+        // Strict local-name match: chỉ chấp nhận local name đúng chuẩn ONVIF.
+        // "Device" substring cũ match cả "BadDevice" — quá lỏng.
+        auto hasLocal = [&](const std::string& local){
+            size_t p = 0;
+            while (p < types.size()) {
+                size_t q = types.find(local, p);
+                if (q == std::string::npos) return false;
+                // Trước local phải là ':' (prefix) hoặc space/start
+                bool prevOk = q == 0 || types[q-1] == ':' || types[q-1] == ' ';
+                // Sau local phải là space/end
+                size_t after = q + local.size();
+                bool nextOk = after >= types.size() ||
+                              types[after] == ' ' || types[after] == '\t';
+                if (prevOk && nextOk) return true;
+                p = q + 1;
+            }
+            return false;
+        };
+        if (!hasLocal("NetworkVideoTransmitter") && !hasLocal("Device")) {
             return false;
         }
     }

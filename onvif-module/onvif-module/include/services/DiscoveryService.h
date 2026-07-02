@@ -10,6 +10,8 @@
 
 #include "services/DeviceService.h"   // ServiceConfig
 #include <string>
+#include <vector>
+#include <mutex>
 #include <atomic>
 #include <thread>
 #include <cstdint>
@@ -31,6 +33,10 @@ public:
 
     // Truy cập instance đang chạy (singleton nhẹ) — để DeviceService gọi.
     static DiscoveryService* current();
+
+    // DeviceService::SetScopes/AddScopes/RemoveScopes gọi để sync scopes ra
+    // Hello + ProbeMatches. Nếu không set, dùng default hardcoded.
+    void setScopes(const std::vector<std::string>& s);
 
 private:
     void recvLoop();
@@ -59,6 +65,9 @@ private:
     // Windows WSDAPI / camera IP khác trong cùng LAN (tool 24.12 không filter
     // Hello theo Types nên hay bắt nhầm DUT sang máy khác sau reboot).
     std::thread heartbeatThread_;
+
+    mutable std::mutex scopesMtx_;
+    std::vector<std::string> scopes_;  // rỗng → dùng default trong scopesLine()
 
     // AppSequence: InstanceId cố định theo phiên chạy, MessageNumber tăng dần
     uint32_t instanceId_ = 0;
