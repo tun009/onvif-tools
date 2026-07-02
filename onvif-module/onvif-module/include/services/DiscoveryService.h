@@ -38,6 +38,14 @@ public:
     // Hello + ProbeMatches. Nếu không set, dùng default hardcoded.
     void setScopes(const std::vector<std::string>& s);
 
+    // Bật/tắt Discovery (SetDiscoveryMode). NonDiscoverable → không phát Hello
+    // heartbeat + không response Probe. DISCOVERY-1-1-9.
+    void setDiscoverable(bool on);
+
+    // Gửi Hello burst ngay lập tức (SetScopes/AddScopes cần Hello mới ngay
+    // để tool validation trong window ngắn — không đợi heartbeat 3s).
+    void announceHelloNow();
+
 private:
     void recvLoop();
     void sendMulticast(const std::string& xml);   // gửi 1 gói UDP ra multicast
@@ -68,6 +76,8 @@ private:
 
     mutable std::mutex scopesMtx_;
     std::vector<std::string> scopes_;  // rỗng → dùng default trong scopesLine()
+
+    std::atomic<bool> discoverable_{true};
 
     // AppSequence: InstanceId cố định theo phiên chạy, MessageNumber tăng dần
     uint32_t instanceId_ = 0;

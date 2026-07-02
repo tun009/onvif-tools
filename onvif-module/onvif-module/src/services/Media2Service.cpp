@@ -939,12 +939,8 @@ struct MockOSD {
     std::string posType = "UpperLeft";
     bool  hasFontSize = false;
     int   fontSize = 10;
-    bool  hasFontColor = false;
-    float fcR=1.0f, fcG=1.0f, fcB=1.0f;
-    std::string fcColorspace;
-    bool  hasBgColor = false;
-    float bgR=0.0f, bgG=0.0f, bgB=0.0f;
-    std::string bgColorspace;
+    std::string dateFormat;   // "yyyy-MM-dd"
+    std::string timeFormat;   // "HH:mm:ss"
 };
 static std::mutex g_osdMtx;
 static std::map<std::string, MockOSD> g_osds;
@@ -971,6 +967,8 @@ int Media2Service::CreateOSD(_ns1__CreateOSD* req,
             osd.hasFontSize = true;
             osd.fontSize = *req->OSD->TextString->FontSize;
         }
+        if (req->OSD->TextString->DateFormat) osd.dateFormat = *req->OSD->TextString->DateFormat;
+        if (req->OSD->TextString->TimeFormat) osd.timeFormat = *req->OSD->TextString->TimeFormat;
     }
     if (req->OSD->Position) {
         if (!req->OSD->Position->Type.empty()) osd.posType = req->OSD->Position->Type;
@@ -1036,6 +1034,16 @@ int Media2Service::GetOSDs(_ns1__GetOSDs* req,
             auto* fs = (int*)soap_malloc(soap, sizeof(int));
             *fs = kv.second.fontSize;
             o->TextString->FontSize = fs;
+        }
+        if (!kv.second.dateFormat.empty()) {
+            auto* df = soap_new_std__string(soap);
+            *df = kv.second.dateFormat;
+            o->TextString->DateFormat = df;
+        }
+        if (!kv.second.timeFormat.empty()) {
+            auto* tf = soap_new_std__string(soap);
+            *tf = kv.second.timeFormat;
+            o->TextString->TimeFormat = tf;
         }
         resp.OSDs.push_back(o);
     }
@@ -1111,6 +1119,8 @@ int Media2Service::SetOSD(_ns1__SetOSD* req,
             it->second.hasFontSize = true;
             it->second.fontSize = *req->OSD->TextString->FontSize;
         }
+        if (req->OSD->TextString->DateFormat) it->second.dateFormat = *req->OSD->TextString->DateFormat;
+        if (req->OSD->TextString->TimeFormat) it->second.timeFormat = *req->OSD->TextString->TimeFormat;
     }
     if (req->OSD->Position) {
         if (!req->OSD->Position->Type.empty())

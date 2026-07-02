@@ -467,8 +467,14 @@ int DeviceService::SetDiscoveryMode(_tds__SetDiscoveryMode* req,
     this->soap->mustUnderstand = 0;
     this->soap->header = nullptr;
     if (!req) return SOAP_OK;
-    std::lock_guard<std::mutex> lk(sysMtx_);
-    sys_.discoveryMode = static_cast<int>(req->DiscoveryMode);
+    int mode;
+    {
+        std::lock_guard<std::mutex> lk(sysMtx_);
+        sys_.discoveryMode = static_cast<int>(req->DiscoveryMode);
+        mode = sys_.discoveryMode;
+    }
+    // 0 = Discoverable, 1 = NonDiscoverable (tt__DiscoveryMode enum)
+    if (auto* d = DiscoveryService::current()) d->setDiscoverable(mode == 0);
     return SOAP_OK;
 }
 
@@ -496,6 +502,7 @@ int DeviceService::SetScopes(_tds__SetScopes* req,
         sys_.scopes = newScopes;
     }
     syncScopesToDiscovery(newScopes);
+    if (auto* d = DiscoveryService::current()) d->announceHelloNow();
     return SOAP_OK;
 }
 
@@ -516,6 +523,7 @@ int DeviceService::AddScopes(_tds__AddScopes* req,
         snap = sys_.scopes;
     }
     syncScopesToDiscovery(snap);
+    if (auto* d = DiscoveryService::current()) d->announceHelloNow();
     return SOAP_OK;
 }
 
@@ -541,6 +549,7 @@ int DeviceService::RemoveScopes(_tds__RemoveScopes* req,
         snap = sys_.scopes;
     }
     syncScopesToDiscovery(snap);
+    if (auto* d = DiscoveryService::current()) d->announceHelloNow();
     return SOAP_OK;
 }
 

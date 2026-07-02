@@ -27,6 +27,22 @@ void DiscoveryService::setScopes(const std::vector<std::string>& s) {
     scopes_ = s;
 }
 
+void DiscoveryService::setDiscoverable(bool on) {
+    discoverable_ = on;
+    std::cout << "[Discovery] setDiscoverable(" << (on ? "true" : "false") << ")\n";
+}
+
+void DiscoveryService::announceHelloNow() {
+    if (!discoverable_) return;
+    // Burst 3 Hello để Tool chắc chắn nhận trong window ngắn sau SetScopes.
+    std::thread([this]() {
+        for (int i = 0; i < 3; ++i) {
+            sendMulticast(buildHello());
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        }
+    }).detach();
+}
+
 namespace {
 constexpr const char* MCAST_ADDR = "239.255.255.250";
 constexpr int         MCAST_PORT = 3702;
@@ -399,15 +415,14 @@ bool DiscoveryService::start() {
         std::this_thread::sleep_for(std::chrono::milliseconds(300));
     }
 
-    // Heartbeat: phát Hello định kỳ mỗi 3 giây. Windows WSDAPI phát Hello
-    // chỉ ~15 phút/lần nên Hello của mình sẽ "override" cache last-seen của
-    // tool trong hầu hết mọi thời điểm. Đây là hành vi phổ biến ở camera IP
-    // thực (nhiều hãng gửi Hello 5-30s/lần).
+    // Heartbeat: phát Hello định kỳ mỗi 3 giây. Bỏ qua nếu discoverable_=false
+    // (SetDiscoveryMode NonDiscoverable — DISCOVERY-1-1-9).
     heartbeatThread_ = std::thread([this]() {
         using namespace std::chrono_literals;
         while (running_) {
             std::this_thread::sleep_for(3s);
             if (!running_) break;
+            if (!discoverable_) continue;
             sendMulticast(buildHello());
         }
     });
@@ -493,6 +508,9 @@ void DiscoveryService::recvLoop() {
         if (!isProbe && !isResolve) continue;
 
         std::string relatesTo = extractTag(msg, "MessageID");
+
+        // NonDiscoverable → không response cho Probe/Resolve (DISCOVERY-1-1-9).
+        if (!discoverable_) continue;
 
         std::string reply;
         if (isProbe) {
