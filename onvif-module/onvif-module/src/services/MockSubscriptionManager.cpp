@@ -197,18 +197,62 @@ std::string MockSubscriptionManager::handleGetEventProperties(const std::string&
         // TopicSet: topic leaf trống với wstop:topic="true".
         // Thêm MessageDescription khiến EVENT-3-1-25/38 fail; bỏ thì 4 test
         // filter (16, 33-35) fail. Không thêm MessageDescription — cực đại pass.
+        // Property events có tt:MessageDescription — cần cho EVENT-3-1-16/33/34/35
+        // (tool parse topic filter dùng MessageDescription để biết Source/Data).
+        // Non-property (Media/*) để dạng leaf trống.
         "<wstop:TopicSet>"
           "<tns1:VideoSource>"
-            "<tns1:MotionAlarm wstop:topic=\"true\"/>"
-            "<tns1:GlobalSceneChange wstop:topic=\"true\"/>"
-            "<tns1:ImageTooBlurry wstop:topic=\"true\"/>"
-            "<tns1:ImageTooDark wstop:topic=\"true\"/>"
-            "<tns1:ImageTooBright wstop:topic=\"true\"/>"
+            "<tns1:MotionAlarm wstop:topic=\"true\">"
+              "<tt:MessageDescription IsProperty=\"true\">"
+                "<tt:Source>"
+                  "<tt:SimpleItemDescription Name=\"Source\" Type=\"tt:ReferenceToken\"/>"
+                "</tt:Source>"
+                "<tt:Data>"
+                  "<tt:SimpleItemDescription Name=\"State\" Type=\"xs:boolean\"/>"
+                "</tt:Data>"
+              "</tt:MessageDescription>"
+            "</tns1:MotionAlarm>"
+            "<tns1:GlobalSceneChange wstop:topic=\"true\">"
+              "<tt:MessageDescription IsProperty=\"true\">"
+                "<tt:Source>"
+                  "<tt:SimpleItemDescription Name=\"Source\" Type=\"tt:ReferenceToken\"/>"
+                "</tt:Source>"
+                "<tt:Data>"
+                  "<tt:SimpleItemDescription Name=\"State\" Type=\"xs:boolean\"/>"
+                "</tt:Data>"
+              "</tt:MessageDescription>"
+            "</tns1:GlobalSceneChange>"
+            "<tns1:ImageTooBlurry wstop:topic=\"true\">"
+              "<tt:MessageDescription IsProperty=\"true\">"
+                "<tt:Source>"
+                  "<tt:SimpleItemDescription Name=\"Source\" Type=\"tt:ReferenceToken\"/>"
+                "</tt:Source>"
+                "<tt:Data>"
+                  "<tt:SimpleItemDescription Name=\"State\" Type=\"xs:boolean\"/>"
+                "</tt:Data>"
+              "</tt:MessageDescription>"
+            "</tns1:ImageTooBlurry>"
+            "<tns1:ImageTooDark wstop:topic=\"true\">"
+              "<tt:MessageDescription IsProperty=\"true\">"
+                "<tt:Source>"
+                  "<tt:SimpleItemDescription Name=\"Source\" Type=\"tt:ReferenceToken\"/>"
+                "</tt:Source>"
+                "<tt:Data>"
+                  "<tt:SimpleItemDescription Name=\"State\" Type=\"xs:boolean\"/>"
+                "</tt:Data>"
+              "</tt:MessageDescription>"
+            "</tns1:ImageTooDark>"
+            "<tns1:ImageTooBright wstop:topic=\"true\">"
+              "<tt:MessageDescription IsProperty=\"true\">"
+                "<tt:Source>"
+                  "<tt:SimpleItemDescription Name=\"Source\" Type=\"tt:ReferenceToken\"/>"
+                "</tt:Source>"
+                "<tt:Data>"
+                  "<tt:SimpleItemDescription Name=\"State\" Type=\"xs:boolean\"/>"
+                "</tt:Data>"
+              "</tt:MessageDescription>"
+            "</tns1:ImageTooBright>"
           "</tns1:VideoSource>"
-          "<tns1:Media>"
-            "<tns1:ProfileChanged wstop:topic=\"true\"/>"
-            "<tns1:ConfigurationChanged wstop:topic=\"true\"/>"
-          "</tns1:Media>"
         "</wstop:TopicSet>"
         "<wsnt:TopicExpressionDialect>http://www.onvif.org/ver10/tev/topicExpression/ConcreteSet</wsnt:TopicExpressionDialect>"
         "<wsnt:TopicExpressionDialect>http://docs.oasis-open.org/wsn/t-1/TopicExpression/Concrete</wsnt:TopicExpressionDialect>"
@@ -226,7 +270,9 @@ std::string MockSubscriptionManager::handleCreateSubscription(const std::string&
     std::string subId = generateSubId();
 
     // Honor InitialTerminationTime (vd PT20S) — cần cho test TIMEOUT.
-    int timeout = parseDurationSeconds(extractTag(req, "InitialTerminationTime"), 60);
+    // Default 300s (5 phút) thay vì 60s để tránh expire giữa test suite —
+    // EVENT-3-1-24 tool sleep + validation trước PullMessages có thể vượt 60s.
+    int timeout = parseDurationSeconds(extractTag(req, "InitialTerminationTime"), 300);
 
     // ── Parse + validate Filter ───────────────────────────────────────────
     std::string topicExpr, msgContent;

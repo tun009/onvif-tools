@@ -6,6 +6,25 @@
 #include <cstring>
 #include <map>
 #include <mutex>
+#include <set>
+
+// ── Profile state (Profile T §7.8) ─────────────────────────────────────────
+// - g_dynProfiles: profile do tool tạo (CreateProfile).
+// - g_removedConfigs: cho profile fixed từ backend — track loại config đã
+//   RemoveConfiguration (MEDIA2-1-1-6).
+namespace {
+struct DynProfile {
+    std::string token;
+    std::string name;
+    std::string vsToken;
+    std::string veToken;
+    std::string mdToken;
+};
+static std::mutex g_profMtx;
+static std::map<std::string, DynProfile> g_dynProfiles;
+static std::map<std::string, std::set<std::string>> g_removedConfigs;
+static std::set<std::string> g_deletedFixedTokens;
+}
 
 // Forward declaration — định nghĩa cuối file. Cần cho các op gọi fault sớm.
 static int m2SendOnvifFault(struct soap* soap,
@@ -53,44 +72,71 @@ int Media2Service::GetProfiles(
         return soap_receiver_fault(soap, "Internal error", nullptr);
     }
 
+    // Xác định Type filter mà tool yêu cầu
+    bool wantVideoSource = false;
+    bool wantVideoEncoder = false;
+    bool anyType = false;
+    if (req) {
+        for (const auto& t : req->Type) {
+            anyType = true;
+            if (t == "All") { wantVideoSource = true; wantVideoEncoder = true; }
+            else if (t == "VideoSource") wantVideoSource = true;
+            else if (t == "VideoEncoder") wantVideoEncoder = true;
+        }
+    }
+
+    // Lấy snapshot state
+    std::set<std::string> deletedFixed;
+    std::map<std::string, std::set<std::string>> removed;
+    std::vector<DynProfile> dyns;
+    {
+        std::lock_guard<std::mutex> lk(g_profMtx);
+        deletedFixed = g_deletedFixedTokens;
+        removed = g_removedConfigs;
+        for (auto& kv : g_dynProfiles) dyns.push_back(kv.second);
+    }
+
+    // Duyệt qua backend fixed profiles (bỏ profile đã Delete) + dynamic profiles
+    struct Entry { std::string token, name; bool isFixed; const StreamProfile* fp; };
+    std::vector<Entry> all;
     for (const auto& p : profiles) {
-        if (!filterToken.empty() && p.token != filterToken) continue;
+        if (deletedFixed.count(p.token)) continue;
+        all.push_back({p.token, p.name, true, &p});
+    }
+    for (const auto& d : dyns) {
+        all.push_back({d.token, d.name, false, nullptr});
+    }
+
+    for (const auto& e : all) {
+        if (!filterToken.empty() && e.token != filterToken) continue;
 
         auto profile = soap_new_ns1__MediaProfile(soap);
         if (!profile) continue;
-        profile->token = p.token;
-        profile->Name  = p.name;
-        profile->fixed          = nullptr;
+        profile->token = e.token;
+        profile->Name  = e.name;
+        profile->fixed = nullptr;
 
-        // ONVIF Media2 spec: Type empty → KHÔNG trả Configurations (element phải
-        // vắng mặt, không phải empty element — test MEDIA2-1-1-6). Type "All"
-        // hoặc cụ thể → trả các Configurations tương ứng.
-        bool wantVideoSource = false;
-        bool wantVideoEncoder = false;
-        if (req) {
-            for (const auto& t : req->Type) {
-                if (t == "All") {
-                    wantVideoSource = true;
-                    wantVideoEncoder = true;
-                } else if (t == "VideoSource") wantVideoSource = true;
-                else if (t == "VideoEncoder") wantVideoEncoder = true;
-            }
-        }
+        // Type filter rỗng (không có phần tử Type nào) → không kèm Configurations
+        // (MEDIA2-1-1-6 sau RemoveConfiguration All + GetProfiles Type=All vẫn
+        // check "does not contain configurations" nên phải tôn trọng removed).
+        const auto& rem = removed[e.token];
+        bool showVS = wantVideoSource && !rem.count("VideoSource") && !rem.count("All");
+        bool showVE = wantVideoEncoder && !rem.count("VideoEncoder") && !rem.count("All");
 
-        if (wantVideoSource || wantVideoEncoder) {
+        if (showVS || showVE) {
             profile->Configurations = soap_new_ns1__ConfigurationSet(soap);
         } else {
             profile->Configurations = nullptr;
         }
 
         if (profile->Configurations) {
-
-            if (wantVideoSource) {
+            const StreamProfile* fp = e.fp;
+            if (showVS) {
                 auto vsc = soap_new_tt__VideoSourceConfiguration(soap);
                 if (vsc) {
                     vsc->token = "video_source_config";
                     vsc->Name = "VideoSourceConfig";
-                    vsc->SourceToken = p.sourceToken.empty() ? "src_main" : p.sourceToken;
+                    vsc->SourceToken = (fp && !fp->sourceToken.empty()) ? fp->sourceToken : "src_main";
                     vsc->Bounds = soap_new_tt__IntRectangle(soap);
                     if (vsc->Bounds) {
                         vsc->Bounds->x = 0;
@@ -102,24 +148,22 @@ int Media2Service::GetProfiles(
                 }
             }
 
-            if (wantVideoEncoder) {
+            if (showVE) {
                 auto vec = soap_new_tt__VideoEncoder2Configuration(soap);
                 if (vec) {
-                    vec->token = p.token == "profile_main" ? "video_encoder_config" : ("video_encoder_config_" + p.token);
-                    vec->Name = p.token == "profile_main" ? "VideoEncoderConfig" : ("VideoEncoderConfig_" + p.token);
-                    vec->Encoding = p.videoConfig.codec == Codec::H265 ? "H265" : "H264";
+                    vec->token = (e.token == "profile_main") ? "video_encoder_config" : ("video_encoder_config_" + e.token);
+                    vec->Name = (e.token == "profile_main") ? "VideoEncoderConfig" : ("VideoEncoderConfig_" + e.token);
+                    vec->Encoding = (fp && fp->videoConfig.codec == Codec::H265) ? "H265" : "H264";
                     vec->Quality = 50.0f;
-                    
                     vec->Resolution = soap_new_tt__VideoResolution2(soap);
                     if (vec->Resolution) {
-                        vec->Resolution->Width = p.videoConfig.resolution.width;
-                        vec->Resolution->Height = p.videoConfig.resolution.height;
+                        vec->Resolution->Width  = fp ? fp->videoConfig.resolution.width  : 1920;
+                        vec->Resolution->Height = fp ? fp->videoConfig.resolution.height : 1080;
                     }
-
                     vec->RateControl = soap_new_tt__VideoRateControl2(soap);
                     if (vec->RateControl) {
-                        vec->RateControl->FrameRateLimit = p.videoConfig.framerate;
-                        vec->RateControl->BitrateLimit = p.videoConfig.bitrate;
+                        vec->RateControl->FrameRateLimit = fp ? fp->videoConfig.framerate : 30;
+                        vec->RateControl->BitrateLimit   = fp ? fp->videoConfig.bitrate   : 4000;
                     }
                     profile->Configurations->VideoEncoder = vec;
                 }
@@ -234,9 +278,24 @@ int Media2Service::GetVideoSourceConfigurations(
     this->soap->header = nullptr;
     auto soap = this->soap;
 
+    // MEDIA2-2-2-6: ConfigurationToken không tồn tại → fault
+    // env:Sender/ter:InvalidArgVal/ter:NoConfig.
+    std::string cfgToken;
+    std::string profToken;
+    if (req) {
+        if (req->ConfigurationToken) cfgToken = *req->ConfigurationToken;
+        if (req->ProfileToken)       profToken = *req->ProfileToken;
+    }
+    static const char* VALID_VS_CONFIG = "video_source_config";
+    if (!cfgToken.empty() && cfgToken != VALID_VS_CONFIG) {
+        return m2SendOnvifFault(soap, "SOAP-ENV:Sender",
+                                "ter:InvalidArgVal", "ter:NoConfig",
+                                "No such VideoSourceConfiguration");
+    }
+
     auto vsc = soap_new_tt__VideoSourceConfiguration(soap);
     if (vsc) {
-        vsc->token = "video_source_config";
+        vsc->token = VALID_VS_CONFIG;
         vsc->Name = "VideoSourceConfig";
         vsc->SourceToken = "src_main";
 
@@ -279,42 +338,66 @@ int Media2Service::GetVideoEncoderConfigurations(
         std::cerr << "[Media2Service] GetVideoEncoderConfigurations backend error: " << e.what() << std::endl;
     }
 
-    for (const auto& p : profiles) {
-        // Filter theo ProfileToken (nếu có)
-        if (!filterProfileToken.empty() && p.token != filterProfileToken) continue;
+    // Nếu tool filter theo ProfileToken là dynamic profile → trả VideoEncoderConfig
+    // mặc định (MEDIA2_RTSS-1-1-23 fail vì filter profile_testMedia).
+    bool profileIsDynamic = false;
+    if (!filterProfileToken.empty()) {
+        std::lock_guard<std::mutex> lk(g_profMtx);
+        profileIsDynamic = g_dynProfiles.count(filterProfileToken) > 0;
+    }
 
-        std::string cfgToken = (p.token == "profile_main")
-                             ? "video_encoder_config"
-                             : "video_encoder_config_" + p.token;
-
-        // Filter theo ConfigurationToken (nếu có) — MEDIA2-2-3-1 mong đúng 1
-        if (!filterConfigToken.empty() && cfgToken != filterConfigToken) continue;
-
+    auto addDefaultEncoderConfig = [&](const std::string& cfgToken,
+                                       const std::string& cfgName){
         auto enc = soap_new_tt__VideoEncoder2Configuration(soap);
-        if (enc) {
-            enc->token = cfgToken;
-            enc->Name = (p.token == "profile_main")
-                      ? "VideoEncoderConfig"
-                      : "VideoEncoderConfig_" + p.token;
-            enc->Encoding = p.videoConfig.codec == Codec::H265 ? "H265" : "H264";
-            enc->Quality = 50.0f;
+        if (!enc) return;
+        enc->token = cfgToken;
+        enc->Name  = cfgName;
+        enc->Encoding = "H264";
+        enc->Quality = 50.0f;
+        enc->Resolution = soap_new_tt__VideoResolution2(soap);
+        enc->Resolution->Width = 1920; enc->Resolution->Height = 1080;
+        enc->RateControl = soap_new_tt__VideoRateControl2(soap);
+        enc->RateControl->FrameRateLimit = 30.0f;
+        enc->RateControl->BitrateLimit = 4000;
+        resp.Configurations.push_back(enc);
+    };
 
-            enc->Resolution = soap_new_tt__VideoResolution2(soap);
-            if (enc->Resolution) {
-                enc->Resolution->Width = p.videoConfig.resolution.width;
-                enc->Resolution->Height = p.videoConfig.resolution.height;
-            }
+    if (profileIsDynamic) {
+        addDefaultEncoderConfig("video_encoder_config", "VideoEncoderConfig");
+    } else {
+        for (const auto& p : profiles) {
+            if (!filterProfileToken.empty() && p.token != filterProfileToken) continue;
 
-            enc->RateControl = soap_new_tt__VideoRateControl2(soap);
-            if (enc->RateControl) {
-                enc->RateControl->FrameRateLimit = (float)p.videoConfig.framerate;
-                enc->RateControl->BitrateLimit = p.videoConfig.bitrate;
+            std::string cfgToken = (p.token == "profile_main")
+                                 ? "video_encoder_config"
+                                 : "video_encoder_config_" + p.token;
+            if (!filterConfigToken.empty() && cfgToken != filterConfigToken) continue;
+
+            auto enc = soap_new_tt__VideoEncoder2Configuration(soap);
+            if (enc) {
+                enc->token = cfgToken;
+                enc->Name = (p.token == "profile_main")
+                          ? "VideoEncoderConfig"
+                          : "VideoEncoderConfig_" + p.token;
+                enc->Encoding = p.videoConfig.codec == Codec::H265 ? "H265" : "H264";
+                enc->Quality = 50.0f;
+                enc->Resolution = soap_new_tt__VideoResolution2(soap);
+                if (enc->Resolution) {
+                    enc->Resolution->Width = p.videoConfig.resolution.width;
+                    enc->Resolution->Height = p.videoConfig.resolution.height;
+                }
+                enc->RateControl = soap_new_tt__VideoRateControl2(soap);
+                if (enc->RateControl) {
+                    enc->RateControl->FrameRateLimit = (float)p.videoConfig.framerate;
+                    enc->RateControl->BitrateLimit = p.videoConfig.bitrate;
+                }
+                resp.Configurations.push_back(enc);
             }
-            resp.Configurations.push_back(enc);
         }
     }
 
-    std::cout << "[Media2Service] GetVideoEncoderConfigurations → returned " << resp.Configurations.size() << " configurations" << std::endl;
+    std::cout << "[Media2Service] GetVideoEncoderConfigurations → returned "
+              << resp.Configurations.size() << " configurations" << std::endl;
     return SOAP_OK;
 }
 
@@ -323,12 +406,21 @@ int Media2Service::AddConfiguration(
     _ns1__AddConfiguration *req,
     _ns1__AddConfigurationResponse &resp)
 {
+    (void)resp;
     this->soap->mustUnderstand = 0;
     if (!validateAuth()) {
         return soap_sender_fault_subcode(this->soap, "ter:NotAuthorized", "Sender", "Not Authorized");
     }
     this->soap->header = nullptr;
-    std::cout << "[Media2Service] AddConfiguration called" << std::endl;
+    if (!req) return SOAP_OK;
+    std::lock_guard<std::mutex> lk(g_profMtx);
+    // Xóa marker "removed" (nếu AddConfiguration lại type đã Remove trước đó)
+    for (auto* c : req->Configuration) {
+        if (!c) continue;
+        g_removedConfigs[req->ProfileToken].erase(c->Type);
+        if (c->Type == "All") g_removedConfigs[req->ProfileToken].clear();
+    }
+    std::cout << "[Media2Service] AddConfiguration [" << req->ProfileToken << "]" << std::endl;
     return SOAP_OK;
 }
 
@@ -337,12 +429,19 @@ int Media2Service::RemoveConfiguration(
     _ns1__RemoveConfiguration *req,
     _ns1__RemoveConfigurationResponse &resp)
 {
+    (void)resp;
     this->soap->mustUnderstand = 0;
     if (!validateAuth()) {
         return soap_sender_fault_subcode(this->soap, "ter:NotAuthorized", "Sender", "Not Authorized");
     }
     this->soap->header = nullptr;
-    std::cout << "[Media2Service] RemoveConfiguration called" << std::endl;
+    if (!req) return SOAP_OK;
+    std::lock_guard<std::mutex> lk(g_profMtx);
+    for (auto* c : req->Configuration) {
+        if (!c) continue;
+        g_removedConfigs[req->ProfileToken].insert(c->Type);
+    }
+    std::cout << "[Media2Service] RemoveConfiguration [" << req->ProfileToken << "]" << std::endl;
     return SOAP_OK;
 }
 
@@ -687,8 +786,21 @@ int Media2Service::CreateProfile(
         return m2SendOnvifFault(this->soap, "SOAP-ENV:Sender",
                                 "ter:InvalidArgVal", nullptr, "Missing Name");
     }
-    // Mock: sinh token từ Name (không thực tạo profile trong backend).
-    resp.Token = "profile_" + req->Name;
+    DynProfile p;
+    p.token = "profile_" + req->Name;
+    p.name  = req->Name;
+    // Configuration ban đầu — tool có thể gửi vector configs (VideoSource, VideoEncoder, ...)
+    for (auto* c : req->Configuration) {
+        if (!c) continue;
+        if (c->Type == "VideoSource")  p.vsToken = c->Token;
+        else if (c->Type == "VideoEncoder") p.veToken = c->Token;
+        else if (c->Type == "Metadata")     p.mdToken = c->Token;
+    }
+    {
+        std::lock_guard<std::mutex> lk(g_profMtx);
+        g_dynProfiles[p.token] = p;
+    }
+    resp.Token = p.token;
     std::cout << "[Media2Service] CreateProfile → " << resp.Token << std::endl;
     return SOAP_OK;
 }
@@ -704,22 +816,30 @@ int Media2Service::DeleteProfile(
         return m2SendOnvifFault(this->soap, "SOAP-ENV:Sender",
                                 "ter:InvalidArgVal", nullptr, "Missing Token");
     }
-    // Không xóa profile fixed từ backend — chỉ ack nếu token khớp danh sách.
+    // 1) Dynamic profile → xóa khỏi map
+    {
+        std::lock_guard<std::mutex> lk(g_profMtx);
+        auto it = g_dynProfiles.find(req->Token);
+        if (it != g_dynProfiles.end()) {
+            g_dynProfiles.erase(it);
+            std::cout << "[Media2Service] DeleteProfile [" << req->Token << "] dyn" << std::endl;
+            return SOAP_OK;
+        }
+    }
+    // 2) Fixed profile từ backend → mark deleted (không xóa thật)
     std::vector<StreamProfile> profiles;
     try { profiles = backend_->getProfiles(); } catch (...) {}
-    bool found = false;
     for (const auto& p : profiles) {
-        if (p.token == req->Token) { found = true; break; }
+        if (p.token == req->Token) {
+            std::lock_guard<std::mutex> lk(g_profMtx);
+            g_deletedFixedTokens.insert(req->Token);
+            std::cout << "[Media2Service] DeleteProfile [" << req->Token << "] fixed→marked" << std::endl;
+            return SOAP_OK;
+        }
     }
-    if (!found) {
-        return m2SendOnvifFault(this->soap, "SOAP-ENV:Sender",
-                                "ter:InvalidArgVal", "ter:NoProfile",
-                                "Profile not found");
-    }
-    // Fixed profiles không xóa thực — trả OK để tool không dừng flow test.
-    std::cout << "[Media2Service] DeleteProfile [" << req->Token
-              << "] ack (fixed, no-op)" << std::endl;
-    return SOAP_OK;
+    return m2SendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                            "ter:InvalidArgVal", "ter:NoProfile",
+                            "Profile not found");
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -769,8 +889,9 @@ struct MockOSD {
     std::string vsToken;   // VideoSourceConfigurationToken
     std::string type;      // "Text" | "Image"
     std::string text;
-    float posX = 0.5f, posY = 0.5f;
-    std::string posType = "Custom";
+    bool  hasPos = false;
+    float posX = 0.0f, posY = 0.0f;
+    std::string posType = "UpperLeft";
 };
 static std::mutex g_osdMtx;
 static std::map<std::string, MockOSD> g_osds;
@@ -792,6 +913,15 @@ int Media2Service::CreateOSD(_ns1__CreateOSD* req,
         osd.vsToken = req->OSD->VideoSourceConfigurationToken->__item;
     if (req->OSD->TextString && req->OSD->TextString->PlainText)
         osd.text = *req->OSD->TextString->PlainText;
+    // Lưu Position.Type + Pos (nếu Custom) — MEDIA2-6-1-1/4 kiểm tra echo lại
+    if (req->OSD->Position) {
+        if (!req->OSD->Position->Type.empty()) osd.posType = req->OSD->Position->Type;
+        if (req->OSD->Position->Pos) {
+            osd.hasPos = true;
+            osd.posX = req->OSD->Position->Pos->x;
+            osd.posY = req->OSD->Position->Pos->y;
+        }
+    }
     osd.type = "Text";
     g_osds[osd.token] = osd;
     resp.OSDToken = osd.token;
@@ -834,6 +964,13 @@ int Media2Service::GetOSDs(_ns1__GetOSDs* req,
         // Chỉ set Position + TextString là đủ (Type dùng default).
         o->Position = soap_new_tt__OSDPosConfiguration(soap);
         o->Position->Type = kv.second.posType;
+        if (kv.second.hasPos) {
+            o->Position->Pos = soap_new_tt__Vector(soap);
+            auto* px = (float*)soap_malloc(soap, sizeof(float)); *px = kv.second.posX;
+            auto* py = (float*)soap_malloc(soap, sizeof(float)); *py = kv.second.posY;
+            o->Position->Pos->x = px;
+            o->Position->Pos->y = py;
+        }
         o->TextString = soap_new_tt__OSDTextConfiguration(soap);
         o->TextString->Type = "Plain";
         auto* txt = soap_new_std__string(soap);
@@ -906,6 +1043,17 @@ int Media2Service::SetOSD(_ns1__SetOSD* req,
     }
     if (req->OSD->TextString && req->OSD->TextString->PlainText)
         it->second.text = *req->OSD->TextString->PlainText;
+    if (req->OSD->Position) {
+        if (!req->OSD->Position->Type.empty())
+            it->second.posType = req->OSD->Position->Type;
+        if (req->OSD->Position->Pos) {
+            it->second.hasPos = true;
+            it->second.posX = req->OSD->Position->Pos->x;
+            it->second.posY = req->OSD->Position->Pos->y;
+        } else {
+            it->second.hasPos = false;
+        }
+    }
     return SOAP_OK;
 }
 

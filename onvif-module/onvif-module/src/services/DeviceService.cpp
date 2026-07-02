@@ -434,22 +434,99 @@ int DeviceService::GetScopes(
     this->soap->header = nullptr;
     auto soap = this->soap;
 
-    std::vector<std::string> scopeUris = {
-        "onvif://www.onvif.org/type/NetworkVideoTransmitter",
-        "onvif://www.onvif.org/type/video_encoder",
-        "onvif://www.onvif.org/name/MockCam-4K",
-        "onvif://www.onvif.org/hardware/JetsonOrinNX-8GB",
-        "onvif://www.onvif.org/Profile/Streaming",
-        "onvif://www.onvif.org/Profile/T"
-    };
-
-    for (const auto& uri : scopeUris) {
+    std::lock_guard<std::mutex> lk(sysMtx_);
+    for (const auto& uri : sys_.scopes) {
         auto scope = soap_new_tt__Scope(soap);
-        scope->ScopeDef = tt__ScopeDefinition::Fixed;
+        // Fixed scopes: các scope hệ thống (bắt đầu bằng onvif://www.onvif.org/type|hardware).
+        // Configurable: các scope user set via SetScopes/AddScopes.
+        bool isFixed = uri.find("/type/") != std::string::npos ||
+                       uri.find("/hardware/") != std::string::npos ||
+                       uri.find("/Profile/") != std::string::npos;
+        scope->ScopeDef = isFixed ? tt__ScopeDefinition::Fixed
+                                  : tt__ScopeDefinition::Configurable;
         scope->ScopeItem = uri;
         tds__GetScopesResponse.Scopes.push_back(scope);
     }
+    return SOAP_OK;
+}
 
+// ── Discovery Mode & Scopes CRUD (Profile T §7.3) ────────────────────────────
+int DeviceService::GetDiscoveryMode(_tds__GetDiscoveryMode* req,
+                                    _tds__GetDiscoveryModeResponse& resp) {
+    (void)req;
+    this->soap->mustUnderstand = 0;
+    this->soap->header = nullptr;
+    std::lock_guard<std::mutex> lk(sysMtx_);
+    resp.DiscoveryMode = static_cast<tt__DiscoveryMode>(sys_.discoveryMode);
+    return SOAP_OK;
+}
+
+int DeviceService::SetDiscoveryMode(_tds__SetDiscoveryMode* req,
+                                    _tds__SetDiscoveryModeResponse& resp) {
+    (void)resp;
+    this->soap->mustUnderstand = 0;
+    this->soap->header = nullptr;
+    if (!req) return SOAP_OK;
+    std::lock_guard<std::mutex> lk(sysMtx_);
+    sys_.discoveryMode = static_cast<int>(req->DiscoveryMode);
+    return SOAP_OK;
+}
+
+int DeviceService::SetScopes(_tds__SetScopes* req,
+                             _tds__SetScopesResponse& resp) {
+    (void)resp;
+    this->soap->mustUnderstand = 0;
+    this->soap->header = nullptr;
+    if (!req) return SOAP_OK;
+    std::lock_guard<std::mutex> lk(sysMtx_);
+    // Giữ Fixed scopes, thay Configurable = req->Scopes
+    std::vector<std::string> newScopes;
+    for (const auto& uri : sys_.scopes) {
+        if (uri.find("/type/") != std::string::npos ||
+            uri.find("/hardware/") != std::string::npos ||
+            uri.find("/Profile/") != std::string::npos) {
+            newScopes.push_back(uri);
+        }
+    }
+    for (const auto& u : req->Scopes) newScopes.push_back(u);
+    sys_.scopes = std::move(newScopes);
+    return SOAP_OK;
+}
+
+int DeviceService::AddScopes(_tds__AddScopes* req,
+                             _tds__AddScopesResponse& resp) {
+    (void)resp;
+    this->soap->mustUnderstand = 0;
+    this->soap->header = nullptr;
+    if (!req) return SOAP_OK;
+    std::lock_guard<std::mutex> lk(sysMtx_);
+    for (const auto& u : req->ScopeItem) {
+        // Không thêm trùng
+        if (std::find(sys_.scopes.begin(), sys_.scopes.end(), u) == sys_.scopes.end()) {
+            sys_.scopes.push_back(u);
+        }
+    }
+    return SOAP_OK;
+}
+
+int DeviceService::RemoveScopes(_tds__RemoveScopes* req,
+                                _tds__RemoveScopesResponse& resp) {
+    this->soap->mustUnderstand = 0;
+    this->soap->header = nullptr;
+    if (!req) return SOAP_OK;
+    std::lock_guard<std::mutex> lk(sysMtx_);
+    for (const auto& u : req->ScopeItem) {
+        // KHÔNG cho remove Fixed
+        bool isFixed = u.find("/type/") != std::string::npos ||
+                       u.find("/hardware/") != std::string::npos ||
+                       u.find("/Profile/") != std::string::npos;
+        if (isFixed) continue;
+        auto it = std::find(sys_.scopes.begin(), sys_.scopes.end(), u);
+        if (it != sys_.scopes.end()) {
+            sys_.scopes.erase(it);
+            resp.ScopeItem.push_back(u);
+        }
+    }
     return SOAP_OK;
 }
 
@@ -601,11 +678,23 @@ int DeviceService::GetDNS(_tds__GetDNS* req, _tds__GetDNSResponse& resp) {
     std::lock_guard<std::mutex> lk(netMtx_);
     info->FromDHCP = net_.dnsFromDHCP;
     info->SearchDomain = net_.searchDomain;
-    for (const auto& ip : net_.dnsManual) {
-        auto a = soap_new_tt__IPAddress(soap);
-        a->Type = tt__IPType::IPv4;
-        a->IPv4Address = Sp(soap, ip);
-        info->DNSManual.push_back(a);
+    // Khi FromDHCP=true, DNS phải nằm ở DNSFromDHCP (không phải DNSManual).
+    // Test DEVICE-2-1-8 xác định điều này (check current DNS configuration).
+    if (net_.dnsFromDHCP) {
+        // Giả lập DHCP-provided DNS (mock)
+        for (const auto& ip : std::vector<std::string>{"192.168.8.1", "8.8.8.8"}) {
+            auto a = soap_new_tt__IPAddress(soap);
+            a->Type = tt__IPType::IPv4;
+            a->IPv4Address = Sp(soap, ip);
+            info->DNSFromDHCP.push_back(a);
+        }
+    } else {
+        for (const auto& ip : net_.dnsManual) {
+            auto a = soap_new_tt__IPAddress(soap);
+            a->Type = tt__IPType::IPv4;
+            a->IPv4Address = Sp(soap, ip);
+            info->DNSManual.push_back(a);
+        }
     }
     resp.DNSInformation = info;
     return SOAP_OK;
@@ -675,10 +764,20 @@ int DeviceService::SetNetworkInterfaces(_tds__SetNetworkInterfaces* req,
         return soap_sender_fault_subcode(this->soap, "ter:InvalidArgVal",
                                          "Sender", "Unknown InterfaceToken");
     }
-    // Cập nhật state — chỉ merge field có gửi
+    // Cập nhật state — merge field có gửi (DEVICE-2-1-18 verify appliance).
     if (req->NetworkInterface) {
         auto* ni = req->NetworkInterface;
-        (void)ni;  // struct fields optional; giữ đơn giản, không tự parse hết
+        if (ni->Enabled) net_.ifaceEnabled = *ni->Enabled;
+        if (ni->MTU)     net_.mtu = *ni->MTU;
+        if (ni->IPv4) {
+            auto* v4 = ni->IPv4;
+            if (v4->Enabled) { /* keep enabled */ }
+            if (v4->DHCP)    net_.ipv4DhcpEnabled = *v4->DHCP;
+            if (!v4->Manual.empty() && v4->Manual[0]) {
+                net_.ipv4Manual   = v4->Manual[0]->Address;
+                net_.prefixLength = v4->Manual[0]->PrefixLength;
+            }
+        }
     }
     resp.RebootNeeded = false;
     return SOAP_OK;

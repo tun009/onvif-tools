@@ -56,6 +56,13 @@ public:
     // ── Profile T mandatory misc ─────────────────────────────────────────
     virtual int GetWsdlUrl(_tds__GetWsdlUrl *req, _tds__GetWsdlUrlResponse &resp) override;
 
+    // ── Discovery Mode / Scopes (Profile T mandatory §7.3) ────────────────
+    virtual int GetDiscoveryMode(_tds__GetDiscoveryMode *req, _tds__GetDiscoveryModeResponse &resp) override;
+    virtual int SetDiscoveryMode(_tds__SetDiscoveryMode *req, _tds__SetDiscoveryModeResponse &resp) override;
+    virtual int SetScopes(_tds__SetScopes *req, _tds__SetScopesResponse &resp) override;
+    virtual int AddScopes(_tds__AddScopes *req, _tds__AddScopesResponse &resp) override;
+    virtual int RemoveScopes(_tds__RemoveScopes *req, _tds__RemoveScopesResponse &resp) override;
+
 private:
     bool validateAuth();
 
@@ -105,6 +112,16 @@ private:
         int  tzOffsetMin = 0;
         // Users
         std::vector<MockUser> users = {{"admin", "admin123", 0}};
+        // Discovery
+        int  discoveryMode = 0;  // 0=Discoverable, 1=NonDiscoverable
+        std::vector<std::string> scopes = {
+            "onvif://www.onvif.org/type/NetworkVideoTransmitter",
+            "onvif://www.onvif.org/type/video_encoder",
+            "onvif://www.onvif.org/name/MockCam-4K",
+            "onvif://www.onvif.org/hardware/JetsonOrinNX-8GB",
+            "onvif://www.onvif.org/Profile/Streaming",
+            "onvif://www.onvif.org/Profile/T"
+        };
     };
     static std::mutex sysMtx_;
     static SystemState sys_;
