@@ -196,6 +196,15 @@ Tài liệu này tổng hợp toàn bộ vấn đề còn tồn đọng để pa
 - Đã thêm `SupportedVersions` (bắt buộc) trong System.
 - Đã compile-check trên server (pass).
 
+**STATUS (02/07/2026) — Discovery vòng 2 (theo result24/25.xml, server 192.168.8.36):**
+- ✅ Fix Discovery routing với multi-interface: server mới có `eno1` + `wg0` + `docker0` + nhiều `br-*/veth*`. Kernel default chọn nhầm Docker bridge cho outbound multicast → tool 192.168.8.116 không nhận ProbeMatch.
+  - Bind `IP_ADD_MEMBERSHIP` với `imr_interface = cfg_.deviceIp`.
+  - Set `IP_MULTICAST_IF = cfg_.deviceIp` cho outbound.
+  - Set `IP_MULTICAST_LOOP = 1`.
+- ✅ Fix DISCOVERY-1-1-2 và 1-1-8 (SystemReboot Hello/Bye) — thêm `announceReboot()` gửi Bye → 500ms → Hello mới. `SystemReboot`/`SetSystemFactoryDefault` triệu hồi qua singleton `DiscoveryService::current()`.
+- Fix prefix `dn` → `tdn` cho namespace `ver10/network/wsdl` (test tool ONVIF parse literal, camera thật ELCOM dùng `tdn`).
+- Kết quả: DISCOVERY 2 → 4 pass (+2). tcpdump xác nhận ProbeMatch đã đi ra eno1 tới tool.
+
 **STATUS (02/07/2026) — Media2 vòng 3 (theo result23.xml):**
 - Fix 3 nguyên nhân:
   1. **Token inconsistency**: đổi hết `"video_source_token"` → `"src_main"` (khớp backend) trong Media2Service + MediaLegacyHandler; ImagingService accept cả 2 (MEDIA2-2-2-4).
