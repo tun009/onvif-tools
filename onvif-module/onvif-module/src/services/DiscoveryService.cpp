@@ -108,18 +108,39 @@ std::string DiscoveryService::newMessageId() const {
 // Trích nội dung phần tử <...localName>VALUE</...localName> đầu tiên (bỏ qua prefix).
 std::string DiscoveryService::extractTag(const std::string& xml,
                                          const std::string& localName) {
-    const std::string openEnd = localName + ">";
-    size_t p = xml.find(openEnd);
-    if (p == std::string::npos) return "";
-    size_t start = p + openEnd.size();
-    size_t end = xml.find('<', start);
-    if (end == std::string::npos) return "";
-    std::string v = xml.substr(start, end - start);
-    // trim
-    size_t a = v.find_first_not_of(" \t\r\n");
-    size_t b = v.find_last_not_of(" \t\r\n");
-    if (a == std::string::npos) return "";
-    return v.substr(a, b - a + 1);
+    // Tìm opening tag <...localName ...> hoặc <...localName>.
+    // Xử lý cả prefix (wsa:MessageID) và attribute (<wsa:MessageID xmlns=...>).
+    // Trước đó chỉ tìm "MessageID>" — sai khi tag có attribute vì `>` bị cách
+    // bởi xmlns=... nên match nhầm vào CLOSING tag, RelatesTo rỗng, tool
+    // không correlate được ProbeMatches → tất cả DISCOVERY test fail.
+    size_t search = 0;
+    while (search < xml.size()) {
+        size_t lt = xml.find('<', search);
+        if (lt == std::string::npos) return "";
+        size_t nameStart = lt + 1;
+        // Nếu đây là closing tag "</" → bỏ qua
+        if (nameStart < xml.size() && xml[nameStart] == '/') { search = lt + 1; continue; }
+        // Bỏ qua prefix "abc:"
+        size_t colon = xml.find(':', nameStart);
+        size_t gt = xml.find('>', nameStart);
+        if (gt == std::string::npos) return "";
+        size_t sp = xml.find_first_of(" \t\r\n/>", nameStart);
+        size_t nameEnd = std::min(sp, gt);
+        size_t start = (colon != std::string::npos && colon < nameEnd) ? colon + 1 : nameStart;
+        std::string tagName = xml.substr(start, nameEnd - start);
+        if (tagName != localName) { search = lt + 1; continue; }
+        // Self-closing "<Types />" → nội dung rỗng
+        if (xml[gt - 1] == '/') return "";
+        size_t contentStart = gt + 1;
+        size_t contentEnd = xml.find('<', contentStart);
+        if (contentEnd == std::string::npos) return "";
+        std::string v = xml.substr(contentStart, contentEnd - contentStart);
+        size_t a = v.find_first_not_of(" \t\r\n");
+        size_t b = v.find_last_not_of(" \t\r\n");
+        if (a == std::string::npos) return "";
+        return v.substr(a, b - a + 1);
+    }
+    return "";
 }
 
 bool DiscoveryService::probeMatches(const std::string& probe) const {

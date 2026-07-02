@@ -34,6 +34,45 @@ static int acceptMustUnderstandHeaders(struct soap* soap) {
     return SOAP_OK; // Mark all headers as "understood"
 }
 
+// JPEG stub (1×1 pixel) dùng cho HTTP GET /snapshot.
+static const unsigned char JPEG_STUB_BYTES[] = {
+    0xFF,0xD8,0xFF,0xE0,0x00,0x10,0x4A,0x46,0x49,0x46,0x00,0x01,
+    0x01,0x00,0x00,0x01,0x00,0x01,0x00,0x00,0xFF,0xDB,0x00,0x43,
+    0x00,0x08,0x06,0x06,0x07,0x06,0x05,0x08,0x07,0x07,0x07,0x09,
+    0x09,0x08,0x0A,0x0C,0x14,0x0D,0x0C,0x0B,0x0B,0x0C,0x19,0x12,
+    0x13,0x0F,0x14,0x1D,0x1A,0x1F,0x1E,0x1D,0x1A,0x1C,0x1C,0x20,
+    0x24,0x2E,0x27,0x20,0x22,0x2C,0x23,0x1C,0x1C,0x28,0x37,0x29,
+    0x2C,0x30,0x31,0x34,0x34,0x34,0x1F,0x27,0x39,0x3D,0x38,0x32,
+    0x3C,0x2E,0x33,0x34,0x32,0xFF,0xC0,0x00,0x0B,0x08,0x00,0x01,
+    0x00,0x01,0x01,0x01,0x11,0x00,0xFF,0xC4,0x00,0x1F,0x00,0x00,
+    0x01,0x05,0x01,0x01,0x01,0x01,0x01,0x01,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,
+    0x09,0x0A,0x0B,0xFF,0xC4,0x00,0xB5,0x10,0x00,0x02,0x01,0x03,
+    0x03,0x02,0x04,0x03,0x05,0x05,0x04,0x04,0x00,0x00,0x01,0x7D,
+    0x01,0x02,0x03,0x00,0x04,0x11,0x05,0x12,0x21,0x31,0x41,0x06,
+    0x13,0x51,0x61,0x07,0x22,0x71,0x14,0x32,0x81,0x91,0xA1,0x08,
+    0x23,0x42,0xB1,0xC1,0x15,0x52,0xD1,0xF0,0x24,0x33,0x62,0x72,
+    0x82,0xFF,0xDA,0x00,0x08,0x01,0x01,0x00,0x00,0x3F,0x00,0xFB,
+    0xD0,0xFF,0xD9
+};
+
+// gSOAP HTTP GET handler — được gọi tự động khi request là "GET /..." thay vì POST.
+// Thay cho peek trước soap_begin_serve (timing không tin cậy, tool nhận 405).
+// Xử lý /snapshot và /snapshot?token=xxx → trả JPEG stub 200 OK.
+static int onHttpGet(struct soap* soap) {
+    const char* path = soap->path ? soap->path : "";
+    if (std::strstr(path, "/snapshot") != nullptr) {
+        soap->http_content = "image/jpeg";
+        if (soap_response(soap, SOAP_FILE) != SOAP_OK) return soap->error;
+        if (soap_send_raw(soap,
+                          reinterpret_cast<const char*>(JPEG_STUB_BYTES),
+                          sizeof(JPEG_STUB_BYTES)) != SOAP_OK) return soap->error;
+        soap_end_send(soap);
+        return SOAP_OK;
+    }
+    return 404;  // Not Found cho các GET khác
+}
+
 static bool isAuthRequired(const std::string& headers) {
     // Các API được phép bypass xác thực theo đặc tả ONVIF
     if (headers.find("GetSystemDateAndTime") != std::string::npos ||
@@ -151,6 +190,9 @@ void OnvifServer::listenLoop() {
 
     // Chấp nhận wsse:Security header (mustUnderstand="1") không bị fault
     soap->fheader = acceptMustUnderstandHeaders;
+    // HTTP GET handler cho /snapshot (chuẩn gSOAP; tin cậy hơn peek trước
+    // soap_begin_serve). MEDIA2-5-1-1 SNAPSHOT URI.
+    soap->fget = onHttpGet;
 
     // Cấu hình timeouts và giải phóng địa chỉ port nhanh (REUSEADDR)
     soap->accept_timeout = 1; // 1 giây check running_ một lần
@@ -227,41 +269,7 @@ void OnvifServer::listenLoop() {
             0x82,0xFF,0xDA,0x00,0x08,0x01,0x01,0x00,0x00,0x3F,0x00,0xFB,
             0xD0,0xFF,0xD9
         };
-        // Peek HTTP method TRƯỚC soap_begin_serve. gSOAP tự trả HTTP 405 cho
-        // GET, không kịp intercept → phải xử lý bằng socket raw.
-        {
-            char peek[8] = {0};
-            ssize_t peeked = recv(soap->socket, peek, 7, MSG_PEEK);
-            if (peeked >= 4 && std::strncmp(peek, "GET ", 4) == 0) {
-                // Đọc toàn bộ HTTP request (header + optional body)
-                char rawbuf[4096]; std::string raw;
-                for (int i=0; i<10; ++i) {
-                    ssize_t n = recv(soap->socket, rawbuf, sizeof(rawbuf), MSG_DONTWAIT);
-                    if (n <= 0) break;
-                    raw.append(rawbuf, static_cast<size_t>(n));
-                    if (raw.find("\r\n\r\n") != std::string::npos) break;
-                }
-                if (raw.find("/snapshot") != std::string::npos) {
-                    // Trả HTTP 200 + JPEG stub thủ công qua socket
-                    char hdr[256];
-                    int hl = std::snprintf(hdr, sizeof(hdr),
-                        "HTTP/1.1 200 OK\r\n"
-                        "Content-Type: image/jpeg\r\n"
-                        "Content-Length: %zu\r\n"
-                        "Connection: close\r\n\r\n",
-                        sizeof(JPEG_STUB));
-                    send(soap->socket, hdr, hl, 0);
-                    send(soap->socket, JPEG_STUB, sizeof(JPEG_STUB), 0);
-                } else {
-                    const char* nf = "HTTP/1.1 404 Not Found\r\n"
-                                     "Content-Length: 0\r\n"
-                                     "Connection: close\r\n\r\n";
-                    send(soap->socket, nf, std::strlen(nf), 0);
-                }
-                soap_closesock(soap);
-                continue;
-            }
-        }
+        // HTTP GET /snapshot xử lý bởi soap->fget = onHttpGet (đăng ký ở init).
 
         int beginResult = soap_begin_serve(soap);
         auto serveJpeg = [&]() {

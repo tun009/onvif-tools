@@ -199,18 +199,22 @@ std::vector<StreamProfile> BackendConnector::getProfiles() {
     // Parse array - simplified: return 3 hardcoded profiles for now
     // TODO: implement full JSON array parser
     std::vector<StreamProfile> profiles;
+    // Mock camera có 1 VideoSource vật lý duy nhất (src_main); 3 profile là
+    // 3 encoding variants của cùng source. Nếu để mỗi profile 1 sourceToken
+    // riêng, VideoSourceConfiguration sẽ inconsistent giữa GetProfiles và
+    // GetVideoSourceConfigurations (MEDIA2-2-2-4).
     StreamProfile m; m.token="profile_main"; m.name="Main 4K";
     m.sourceToken="src_main"; m.streamType=StreamType::MAIN;
     m.videoConfig.codec=Codec::H264; m.videoConfig.resolution=RES_4K;
     m.videoConfig.framerate=30; m.videoConfig.bitrate=20000;
     profiles.push_back(m);
     StreamProfile s1; s1.token="profile_sub1"; s1.name="Sub1 1080p";
-    s1.sourceToken="src_sub1"; s1.streamType=StreamType::SUB1;
+    s1.sourceToken="src_main"; s1.streamType=StreamType::SUB1;
     s1.videoConfig.codec=Codec::H264; s1.videoConfig.resolution=RES_1080P;
     s1.videoConfig.framerate=15; s1.videoConfig.bitrate=4000;
     profiles.push_back(s1);
     StreamProfile s2; s2.token="profile_sub2"; s2.name="Sub2 480p";
-    s2.sourceToken="src_sub2"; s2.streamType=StreamType::SUB2;
+    s2.sourceToken="src_main"; s2.streamType=StreamType::SUB2;
     s2.videoConfig.codec=Codec::H265; s2.videoConfig.resolution=RES_480P;
     s2.videoConfig.framerate=10; s2.videoConfig.bitrate=512;
     profiles.push_back(s2);

@@ -861,6 +861,11 @@ int Media2Service::GetOSDOptions(_ns1__GetOSDOptions* req,
     opt->MaximumNumberOfOSDs->Date = four;
     opt->MaximumNumberOfOSDs->Time = four;
     opt->MaximumNumberOfOSDs->DateAndTime = four;
+    // Type: BẮT BUỘC theo schema tt:OSDConfigurationOptions (minOccurs=1,
+    // maxOccurs=unbounded). Bỏ qua sẽ khiến tool báo "invalid child element
+    // PositionOption. Expected: Type" (MEDIA2-6-1-1..6). Chỉ hỗ trợ Text
+    // (Image=0 trong MaximumNumberOfOSDs).
+    opt->Type.push_back(tt__OSDType::Text);
     // Position options
     opt->PositionOption.push_back("UpperLeft");
     opt->PositionOption.push_back("UpperRight");
