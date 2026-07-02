@@ -55,6 +55,10 @@ private:
     int sock_ = -1;
     std::atomic<bool> running_{false};
     std::thread thread_;
+    // Thread phát Hello định kỳ để "flood" multicast, chống nhiễu Hello của
+    // Windows WSDAPI / camera IP khác trong cùng LAN (tool 24.12 không filter
+    // Hello theo Types nên hay bắt nhầm DUT sang máy khác sau reboot).
+    std::thread heartbeatThread_;
 
     // AppSequence: InstanceId cố định theo phiên chạy, MessageNumber tăng dần
     uint32_t instanceId_ = 0;

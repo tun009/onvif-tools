@@ -340,11 +340,29 @@ bool DiscoveryService::start() {
     // Đăng ký singleton để DeviceService::SystemReboot triệu hồi.
     g_discoveryInstance = this;
 
-    // Gửi Hello ra multicast
-    sendMulticast(buildHello());
+    // Startup Hello burst: gửi 3 lần cách nhau 300ms để tăng khả năng tool
+    // catch được Hello của mình (thay vì Hello nhiễu từ WSDAPI/camera khác).
+    for (int i = 0; i < 3; ++i) {
+        sendMulticast(buildHello());
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    }
+
+    // Heartbeat: phát Hello định kỳ mỗi 3 giây. Windows WSDAPI phát Hello
+    // chỉ ~15 phút/lần nên Hello của mình sẽ "override" cache last-seen của
+    // tool trong hầu hết mọi thời điểm. Đây là hành vi phổ biến ở camera IP
+    // thực (nhiều hãng gửi Hello 5-30s/lần).
+    heartbeatThread_ = std::thread([this]() {
+        using namespace std::chrono_literals;
+        while (running_) {
+            std::this_thread::sleep_for(3s);
+            if (!running_) break;
+            sendMulticast(buildHello());
+        }
+    });
 
     std::cout << "[Discovery] WS-Discovery listening on "
-              << MCAST_ADDR << ":" << MCAST_PORT << "\n";
+              << MCAST_ADDR << ":" << MCAST_PORT
+              << " (Hello heartbeat 3s)\n";
     return true;
 }
 
@@ -360,16 +378,20 @@ void DiscoveryService::sendMulticast(const std::string& xml) {
 
 void DiscoveryService::announceReboot() {
     // Test tool test SystemReboot/FactoryDefault sẽ chờ Bye rồi Hello.
-    // Gửi Bye → tăng InstanceId (mô phỏng process mới sau reboot) → gửi Hello.
-    std::cout << "[Discovery] Announce reboot: Bye + Hello\n";
+    // Gửi Bye → tăng InstanceId (mô phỏng process mới sau reboot) → burst Hello.
+    // Burst 8 lần trong 4 giây để "áp đảo" bất kỳ Hello nhiễu nào từ Windows
+    // WSDAPI / camera khác trong LAN (tool 24.12 không filter theo Types/UUID).
+    std::cout << "[Discovery] Announce reboot: Bye + Hello burst (8x/4s)\n";
     sendMulticast(buildBye());
-    // Nhỏ delay để tool phân biệt 2 event
     std::thread([this]() {
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
         // Update instance ID để tool nhận diện device đã "reboot"
         instanceId_ = static_cast<uint32_t>(::time(nullptr));
         messageNumber_ = 0;
-        sendMulticast(buildHello());
+        for (int i = 0; i < 8; ++i) {
+            sendMulticast(buildHello());
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        }
     }).detach();
 }
 
@@ -383,6 +405,7 @@ void DiscoveryService::stop() {
 
     running_ = false;
     if (thread_.joinable()) thread_.join();
+    if (heartbeatThread_.joinable()) heartbeatThread_.join();
 
     if (sock_ >= 0) {
         ::close(sock_);
