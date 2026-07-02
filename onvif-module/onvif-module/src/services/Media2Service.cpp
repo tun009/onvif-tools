@@ -75,7 +75,7 @@ int Media2Service::GetProfiles(
                 if (vsc) {
                     vsc->token = "video_source_config";
                     vsc->Name = "VideoSourceConfig";
-                    vsc->SourceToken = p.sourceToken.empty() ? "video_source_token" : p.sourceToken;
+                    vsc->SourceToken = p.sourceToken.empty() ? "src_main" : p.sourceToken;
                     vsc->Bounds = soap_new_tt__IntRectangle(soap);
                     if (vsc->Bounds) {
                         vsc->Bounds->x = 0;
@@ -223,7 +223,7 @@ int Media2Service::GetVideoSourceConfigurations(
     if (vsc) {
         vsc->token = "video_source_config";
         vsc->Name = "VideoSourceConfig";
-        vsc->SourceToken = "video_source_token";
+        vsc->SourceToken = "src_main";
 
         vsc->Bounds = soap_new_tt__IntRectangle(soap);
         if (vsc->Bounds) {
@@ -327,7 +327,22 @@ int Media2Service::GetVideoSourceConfigurationOptions(
 
     auto opt = soap_new_tt__VideoSourceConfigurationOptions(soap);
     if (opt) {
-        opt->VideoSourceTokensAvailable.push_back("video_source_token");
+        opt->VideoSourceTokensAvailable.push_back("src_main");
+        // BoundsRange bắt buộc (schema): XRange/YRange/WidthRange/HeightRange
+        // (MEDIA2-2-2-1 "BoundsRange has incomplete content, expected XRange").
+        opt->BoundsRange = soap_new_tt__IntRectangleRange(soap);
+        auto R = [&](int lo, int hi) {
+            auto r = soap_new_tt__IntRange(soap);
+            r->Min = lo; r->Max = hi;
+            return r;
+        };
+        opt->BoundsRange->XRange      = R(0, 0);
+        opt->BoundsRange->YRange      = R(0, 0);
+        opt->BoundsRange->WidthRange  = R(320, 3840);
+        opt->BoundsRange->HeightRange = R(240, 2160);
+        auto* mnp = (int*)soap_malloc(soap, sizeof(int));
+        *mnp = 3;
+        opt->MaximumNumberOfProfiles = mnp;
         resp.Options = opt;
     }
 

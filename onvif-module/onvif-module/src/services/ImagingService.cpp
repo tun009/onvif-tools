@@ -17,7 +17,9 @@ ImagingService::ImagingService(struct soap* soap,
 
 // Token hợp lệ khớp với MediaLegacyHandler + Media2Service.
 bool ImagingService::isValidToken(const std::string& tok) {
-    return tok == "video_source_token";
+    // Chấp nhận cả token backend "src_main"/"src_sub*" và alias cũ.
+    return tok == "src_main" || tok == "src_sub1" || tok == "src_sub2"
+        || tok == "video_source_token";
 }
 
 bool ImagingService::isValidSettings(const ImagingSettings& s) {

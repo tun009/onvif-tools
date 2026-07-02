@@ -196,6 +196,13 @@ Tài liệu này tổng hợp toàn bộ vấn đề còn tồn đọng để pa
 - Đã thêm `SupportedVersions` (bắt buộc) trong System.
 - Đã compile-check trên server (pass).
 
+**STATUS (02/07/2026) — Media2 vòng 3 (theo result23.xml):**
+- Fix 3 nguyên nhân:
+  1. **Token inconsistency**: đổi hết `"video_source_token"` → `"src_main"` (khớp backend) trong Media2Service + MediaLegacyHandler; ImagingService accept cả 2 (MEDIA2-2-2-4).
+  2. **HTTP GET /snapshot** trả 405: gSOAP `soap_begin_serve` reject HTTP GET → snapshot handler không được vào. Move check ra ngoài, dùng `g_current_headers.startswith("GET ")` + có `/snapshot` (MEDIA2-5-1-1).
+  3. **GetVideoSourceConfigurationOptions**: thiếu `XRange/YRange/WidthRange/HeightRange` trong BoundsRange (schema bắt buộc) → thêm đầy đủ (MEDIA2-2-2-1).
+- Compile-check pass.
+
 **STATUS (02/07/2026) — Conformance test vòng 3 (result22.xml):**
 - Fix 3 vấn đề impact 10+ test:
   1. **Khôi phục `Media` element trong GetCapabilities** — trước đó bỏ với comment "Media2 dùng /onvif/media", nhưng test tool cần Media capability (DEVICE-1-1-2). XAddr trỏ chung `/onvif/media`.

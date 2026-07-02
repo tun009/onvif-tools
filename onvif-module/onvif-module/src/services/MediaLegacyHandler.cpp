@@ -45,11 +45,11 @@ std::string MediaLegacyHandler::wrap(const std::string& action,
 }
 
 std::string MediaLegacyHandler::handleGetVideoSources() {
-    // Trả 1 VideoSource với token khớp Media2Service (video_source_token).
+    // Trả 1 VideoSource với token khớp Media2Service (src_main).
     // Framerate/Resolution: 1080p @ 30 fps (mock).
     std::string body =
         "<trt:GetVideoSourcesResponse>"
-          "<trt:VideoSources token=\"video_source_token\">"
+          "<trt:VideoSources token=\"src_main\">"
             "<tt:Framerate>30.0</tt:Framerate>"
             "<tt:Resolution>"
               "<tt:Width>1920</tt:Width>"
