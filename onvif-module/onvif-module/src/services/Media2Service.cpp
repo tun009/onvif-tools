@@ -5,6 +5,13 @@
 #include <sstream>
 #include <cstring>
 
+// Forward declaration — định nghĩa cuối file. Cần cho các op gọi fault sớm.
+static int m2SendOnvifFault(struct soap* soap,
+                            const char* code,
+                            const char* subcode,
+                            const char* subSubcode,
+                            const char* reason);
+
 Media2Service::Media2Service(struct soap* soap,
                              const ServiceConfig& cfg,
                              std::shared_ptr<ICameraBackend> backend)
@@ -52,23 +59,29 @@ int Media2Service::GetProfiles(
         profile->token = p.token;
         profile->Name  = p.name;
         profile->fixed          = nullptr;
-        profile->Configurations = soap_new_ns1__ConfigurationSet(soap);
+
+        // ONVIF Media2 spec: Type empty → KHÔNG trả Configurations (element phải
+        // vắng mặt, không phải empty element — test MEDIA2-1-1-6). Type "All"
+        // hoặc cụ thể → trả các Configurations tương ứng.
+        bool wantVideoSource = false;
+        bool wantVideoEncoder = false;
+        if (req) {
+            for (const auto& t : req->Type) {
+                if (t == "All") {
+                    wantVideoSource = true;
+                    wantVideoEncoder = true;
+                } else if (t == "VideoSource") wantVideoSource = true;
+                else if (t == "VideoEncoder") wantVideoEncoder = true;
+            }
+        }
+
+        if (wantVideoSource || wantVideoEncoder) {
+            profile->Configurations = soap_new_ns1__ConfigurationSet(soap);
+        } else {
+            profile->Configurations = nullptr;
+        }
 
         if (profile->Configurations) {
-            // ONVIF Media2 spec: Type empty → KHÔNG trả configurations
-            // (chỉ Name + token). Type có "All" → trả tất cả. Type cụ thể →
-            // chỉ trả loại được yêu cầu. (Test MEDIA2-1-1-4.)
-            bool wantVideoSource = false;
-            bool wantVideoEncoder = false;
-            if (req) {
-                for (const auto& t : req->Type) {
-                    if (t == "All") {
-                        wantVideoSource = true;
-                        wantVideoEncoder = true;
-                    } else if (t == "VideoSource") wantVideoSource = true;
-                    else if (t == "VideoEncoder") wantVideoEncoder = true;
-                }
-            }
 
             if (wantVideoSource) {
                 auto vsc = soap_new_tt__VideoSourceConfiguration(soap);
@@ -251,6 +264,12 @@ int Media2Service::GetVideoEncoderConfigurations(
     this->soap->header = nullptr;
     auto soap = this->soap;
 
+    std::string filterConfigToken, filterProfileToken;
+    if (req) {
+        if (req->ConfigurationToken) filterConfigToken = *req->ConfigurationToken;
+        if (req->ProfileToken)       filterProfileToken = *req->ProfileToken;
+    }
+
     std::vector<StreamProfile> profiles;
     try {
         profiles = backend_->getProfiles();
@@ -259,10 +278,22 @@ int Media2Service::GetVideoEncoderConfigurations(
     }
 
     for (const auto& p : profiles) {
+        // Filter theo ProfileToken (nếu có)
+        if (!filterProfileToken.empty() && p.token != filterProfileToken) continue;
+
+        std::string cfgToken = (p.token == "profile_main")
+                             ? "video_encoder_config"
+                             : "video_encoder_config_" + p.token;
+
+        // Filter theo ConfigurationToken (nếu có) — MEDIA2-2-3-1 mong đúng 1
+        if (!filterConfigToken.empty() && cfgToken != filterConfigToken) continue;
+
         auto enc = soap_new_tt__VideoEncoder2Configuration(soap);
         if (enc) {
-            enc->token = p.token == "profile_main" ? "video_encoder_config" : ("video_encoder_config_" + p.token);
-            enc->Name = p.token == "profile_main" ? "VideoEncoderConfig" : ("VideoEncoderConfig_" + p.token);
+            enc->token = cfgToken;
+            enc->Name = (p.token == "profile_main")
+                      ? "VideoEncoderConfig"
+                      : "VideoEncoderConfig_" + p.token;
             enc->Encoding = p.videoConfig.codec == Codec::H265 ? "H265" : "H264";
             enc->Quality = 50.0f;
 
@@ -325,6 +356,17 @@ int Media2Service::GetVideoSourceConfigurationOptions(
     this->soap->header = nullptr;
     auto soap = this->soap;
 
+    // Validate ConfigurationToken (nếu client truyền). Token duy nhất hợp lệ:
+    // "video_source_config". Khác → fault ter:NoConfig (MEDIA2-2-2-6).
+    if (req && req->ConfigurationToken) {
+        const std::string& tok = *req->ConfigurationToken;
+        if (!tok.empty() && tok != "video_source_config") {
+            return m2SendOnvifFault(soap, "SOAP-ENV:Sender",
+                                    "ter:InvalidArgVal", "ter:NoConfig",
+                                    "Invalid ConfigurationToken");
+        }
+    }
+
     auto opt = soap_new_tt__VideoSourceConfigurationOptions(soap);
     if (opt) {
         opt->VideoSourceTokensAvailable.push_back("src_main");
@@ -369,7 +411,20 @@ int Media2Service::GetVideoEncoderConfigurationOptions(
         if (req->ProfileToken) profileToken = *req->ProfileToken;
     }
 
-    std::cout << "[Media2Service] GetVideoEncoderConfigurationOptions called for configToken=" 
+    // Validate ConfigurationToken (nếu truyền). Token hợp lệ: các encoder config
+    // đã tạo trong GetVideoEncoderConfigurations. Khác → fault ter:NoConfig.
+    auto isKnownEncoderConfig = [](const std::string& t){
+        return t == "video_encoder_config" ||
+               t == "video_encoder_config_profile_sub1" ||
+               t == "video_encoder_config_profile_sub2";
+    };
+    if (!configToken.empty() && !isKnownEncoderConfig(configToken)) {
+        return m2SendOnvifFault(soap, "SOAP-ENV:Sender",
+                                "ter:InvalidArgVal", "ter:NoConfig",
+                                "Invalid ConfigurationToken");
+    }
+
+    std::cout << "[Media2Service] GetVideoEncoderConfigurationOptions called for configToken="
               << configToken << ", profileToken=" << profileToken << std::endl;
 
     // Helper lambda để tạo Option cho một codec cụ thể
@@ -405,7 +460,21 @@ int Media2Service::GetVideoEncoderConfigurationOptions(
             opt->BitrateRange->Min = 64;
             opt->BitrateRange->Max = 20000; // Bitrate tối đa cho 4K là 20000 kbps
         }
-        
+
+        // FrameRatesSupported — bắt buộc để test tool validate "frame rate limit
+        // mapping" (MEDIA2-2-3-2/3). Cung cấp danh sách rời rạc phổ biến.
+        opt->FrameRatesSupported = soap_new_std__string(soap);
+        *opt->FrameRatesSupported = "30 25 15 10 5";
+
+        // ProfilesSupported (H.264/H.265 profile constants)
+        opt->ProfilesSupported = soap_new_std__string(soap);
+        *opt->ProfilesSupported = (codecName == "H265")
+                                ? "Main"
+                                : "Baseline Main High";
+
+        opt->GovLengthRange = soap_new_std__string(soap);
+        *opt->GovLengthRange = "1 60";
+
         return opt;
     };
 

@@ -205,7 +205,6 @@ void OnvifServer::listenLoop() {
         g_current_headers.clear();
         g_http_digest_authenticated = false;
         int serveResult = SOAP_OK;
-        int beginResult = soap_begin_serve(soap);
 
         // JPEG stub (1×1 pixel) dùng chung cho HTTP GET /snapshot.
         static const unsigned char JPEG_STUB[] = {
@@ -228,6 +227,43 @@ void OnvifServer::listenLoop() {
             0x82,0xFF,0xDA,0x00,0x08,0x01,0x01,0x00,0x00,0x3F,0x00,0xFB,
             0xD0,0xFF,0xD9
         };
+        // Peek HTTP method TRƯỚC soap_begin_serve. gSOAP tự trả HTTP 405 cho
+        // GET, không kịp intercept → phải xử lý bằng socket raw.
+        {
+            char peek[8] = {0};
+            ssize_t peeked = recv(soap->socket, peek, 7, MSG_PEEK);
+            if (peeked >= 4 && std::strncmp(peek, "GET ", 4) == 0) {
+                // Đọc toàn bộ HTTP request (header + optional body)
+                char rawbuf[4096]; std::string raw;
+                for (int i=0; i<10; ++i) {
+                    ssize_t n = recv(soap->socket, rawbuf, sizeof(rawbuf), MSG_DONTWAIT);
+                    if (n <= 0) break;
+                    raw.append(rawbuf, static_cast<size_t>(n));
+                    if (raw.find("\r\n\r\n") != std::string::npos) break;
+                }
+                if (raw.find("/snapshot") != std::string::npos) {
+                    // Trả HTTP 200 + JPEG stub thủ công qua socket
+                    char hdr[256];
+                    int hl = std::snprintf(hdr, sizeof(hdr),
+                        "HTTP/1.1 200 OK\r\n"
+                        "Content-Type: image/jpeg\r\n"
+                        "Content-Length: %zu\r\n"
+                        "Connection: close\r\n\r\n",
+                        sizeof(JPEG_STUB));
+                    send(soap->socket, hdr, hl, 0);
+                    send(soap->socket, JPEG_STUB, sizeof(JPEG_STUB), 0);
+                } else {
+                    const char* nf = "HTTP/1.1 404 Not Found\r\n"
+                                     "Content-Length: 0\r\n"
+                                     "Connection: close\r\n\r\n";
+                    send(soap->socket, nf, std::strlen(nf), 0);
+                }
+                soap_closesock(soap);
+                continue;
+            }
+        }
+
+        int beginResult = soap_begin_serve(soap);
         auto serveJpeg = [&]() {
             soap->http_content = "image/jpeg";
             soap_response(soap, SOAP_FILE);
@@ -235,17 +271,6 @@ void OnvifServer::listenLoop() {
                           sizeof(JPEG_STUB));
             soap_end_send(soap);
         };
-
-        // HTTP GET /snapshot?token=... — check trên header raw đã cache trong
-        // g_current_headers (soap_begin_serve có thể trả != OK cho GET, nhưng
-        // header đã được đọc). Nếu path chứa "/snapshot" → trả JPEG.
-        if (g_current_headers.find("/snapshot") != std::string::npos &&
-            g_current_headers.compare(0, 4, "GET ") == 0) {
-            serveJpeg();
-            soap_destroy(soap);
-            soap_end(soap);
-            continue;
-        }
 
         if (beginResult == SOAP_OK) {
             // Lấy path từ HTTP request (soap->path được gSOAP set sau soap_begin_serve)

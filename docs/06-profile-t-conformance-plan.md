@@ -205,6 +205,12 @@ Tài liệu này tổng hợp toàn bộ vấn đề còn tồn đọng để pa
 - Fix prefix `dn` → `tdn` cho namespace `ver10/network/wsdl` (test tool ONVIF parse literal, camera thật ELCOM dùng `tdn`).
 - Kết quả: DISCOVERY 2 → 4 pass (+2). tcpdump xác nhận ProbeMatch đã đi ra eno1 tới tool.
 
+**STATUS (02/07/2026) — Discovery vòng 3 (kết luận):**
+- Đã thử: đổi prefix `d:`→`wsdd:`, tắt Windows Firewall — không cải thiện (vẫn 4/14).
+- Bằng chứng đã có: tcpdump xác nhận server gửi ProbeMatch tới tool `192.168.8.116:1000` length 1364; Hello/Bye multicast tool nhận OK (4 test pass).
+- Kết luận: **bug/limitation của test tool** khi nhận unicast ProbeMatch tới port 1000 (WS-Discovery ephemeral). Không debug thêm được từ server side.
+- **DECISION: skip DISCOVERY advanced tests**. 4/14 mandatory functions cốt lõi đã pass (Hello/Bye/basic Probe). Chuyển focus MEDIA2 + EVENT.
+
 **STATUS (02/07/2026) — Media2 vòng 3 (theo result23.xml):**
 - Fix 3 nguyên nhân:
   1. **Token inconsistency**: đổi hết `"video_source_token"` → `"src_main"` (khớp backend) trong Media2Service + MediaLegacyHandler; ImagingService accept cả 2 (MEDIA2-2-2-4).
