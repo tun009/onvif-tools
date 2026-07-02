@@ -184,9 +184,8 @@ int ImagingService::GetImagingSettings(
     out->Exposure = soap_new_tt__Exposure20(soap);
     out->Exposure->Mode = static_cast<tt__ExposureMode>(ext.exposureMode);
 
-    // Focus mode từ cache
-    out->Focus = soap_new_tt__FocusConfiguration20(soap);
-    out->Focus->AutoFocusMode = static_cast<tt__AutoFocusMode>(ext.autoFocusMode);
+    // Fixed-focus camera: KHÔNG trả Focus block (khớp với GetOptions.Focus=null).
+    out->Focus = nullptr;
 
     resp.ImagingSettings = out;
     return SOAP_OK;
@@ -318,10 +317,9 @@ int ImagingService::GetOptions(
     opts->Exposure->Mode.push_back(tt__ExposureMode::AUTO);
     opts->Exposure->Mode.push_back(tt__ExposureMode::MANUAL);
 
-    // Focus options: AUTO/MANUAL
-    opts->Focus = soap_new_tt__FocusOptions20(soap);
-    opts->Focus->AutoFocusModes.push_back(tt__AutoFocusMode::AUTO);
-    opts->Focus->AutoFocusModes.push_back(tt__AutoFocusMode::MANUAL);
+    // Fixed-focus camera: KHÔNG declare Focus options → tool sẽ skip Focus Move
+    // tests (Profile T conditional §7.16 chỉ bắt buộc nếu có motorized lens).
+    opts->Focus = nullptr;
 
     resp.ImagingOptions = opts;
     return SOAP_OK;

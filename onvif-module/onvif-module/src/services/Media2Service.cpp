@@ -590,7 +590,8 @@ int Media2Service::GetServiceCapabilities(
     caps->SnapshotUri = new bool(true);
     caps->Rotation = new bool(false);
     caps->VideoSourceMode = new bool(false);
-    caps->OSD = new bool(false);
+    // OSD implemented (§7.18 mandatory): Create/Delete/Get/Set + Options
+    caps->OSD = new bool(true);
 
     // Profile T requires RTP multicast/unicast/RTSP
     caps->ProfileCapabilities = soap_new_ns1__ProfileCapabilities(soap);

@@ -354,7 +354,7 @@ int DeviceService::GetServices(
         // Media (ver10 legacy) — trỏ Media2 endpoint
         std::string mediaCaps =
             "<trt:Capabilities SnapshotUri=\"true\" Rotation=\"false\" "
-             "VideoSourceMode=\"false\" OSD=\"false\">"
+             "VideoSourceMode=\"false\" OSD=\"true\">"
               "<trt:ProfileCapabilities MaximumNumberOfProfiles=\"3\"/>"
               "<trt:StreamingCapabilities RTPMulticast=\"false\" "
                "RTP_TCP=\"true\" RTP_RTSP_TCP=\"true\" NonAggregateControl=\"false\"/>"
@@ -365,7 +365,7 @@ int DeviceService::GetServices(
         // Media2 (ver20 - Profile T mandatory)
         std::string media2Caps =
             "<tr2:Capabilities SnapshotUri=\"true\" Rotation=\"false\" "
-             "VideoSourceMode=\"false\" OSD=\"false\">"
+             "VideoSourceMode=\"false\" OSD=\"true\">"
               "<tr2:ProfileCapabilities MaximumNumberOfProfiles=\"3\" "
                "ConfigurationsSupported=\"VideoSource VideoEncoder\"/>"
               "<tr2:StreamingCapabilities RTPMulticast=\"false\" "
