@@ -966,10 +966,8 @@ int Media2Service::GetOSDs(_ns1__GetOSDs* req,
         o->Position->Type = kv.second.posType;
         if (kv.second.hasPos) {
             o->Position->Pos = soap_new_tt__Vector(soap);
-            auto* px = (float*)soap_malloc(soap, sizeof(float)); *px = kv.second.posX;
-            auto* py = (float*)soap_malloc(soap, sizeof(float)); *py = kv.second.posY;
-            o->Position->Pos->x = px;
-            o->Position->Pos->y = py;
+            o->Position->Pos->x = kv.second.posX;
+            o->Position->Pos->y = kv.second.posY;
         }
         o->TextString = soap_new_tt__OSDTextConfiguration(soap);
         o->TextString->Type = "Plain";
