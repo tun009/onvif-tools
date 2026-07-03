@@ -2,6 +2,7 @@
 #include "services/Media2Service.h"
 #include "services/ImagingService.h"
 #include "services/MediaLegacyHandler.h"
+#include "services/DeviceIOHandler.h"
 #include "soapH.h"
 #include "auth/DigestAuthHandler.h"
 #include "services/MockSubscriptionManager.h"
@@ -346,6 +347,21 @@ void OnvifServer::listenLoop() {
                 }
             }
 
+            // DeviceIO service (Profile T §7.10.3 mandate GetVideoSources).
+            // Xử lý manual XML — chỉ 4-5 op cơ bản.
+            if (path.find("/onvif/deviceIO") != std::string::npos) {
+                std::string ioResp = DeviceIOHandler::dispatch(g_current_headers);
+                if (!ioResp.empty()) {
+                    soap->error = SOAP_OK;
+                    soap_response(soap, SOAP_OK);
+                    soap_send_raw(soap, ioResp.c_str(), ioResp.size());
+                    soap_end_send(soap);
+                    soap_destroy(soap);
+                    soap_end(soap);
+                    continue;
+                }
+            }
+
             if (path.find("/onvif/media") != std::string::npos) {
                 // Intercept các op Media ver10 (legacy) — trả XML thủ công.
                 // Media2 (ver20) chuyển tiếp về gSOAP dispatcher như bình thường.
@@ -381,7 +397,49 @@ void OnvifServer::listenLoop() {
         if (serveResult != SOAP_OK && serveResult != SOAP_STOP) {
             std::cerr << "[OnvifServer] Error processing SOAP request:" << std::endl;
             soap_print_fault(soap, stderr);
-            soap_send_fault(soap);
+            // DEVICE-1-1-9 fix: gSOAP tự sinh fault với <Subcode/> rỗng khi
+            // enum parse fail (VD Category="XYZ"). Tool validate Subcode
+            // required Value → fail. Detect qua fault text và trả manual fault
+            // đúng format env:Sender/ter:InvalidArgVal/ter:MalformedData.
+            bool isValidationErr = false;
+            const char* faultstr = soap_fault_string(soap);
+            if (faultstr) {
+                std::string reason(faultstr);
+                if (reason.find("Validation constraint") != std::string::npos ||
+                    reason.find("invalid value") != std::string::npos)
+                    isValidationErr = true;
+            }
+            if (isValidationErr) {
+                const char* fault =
+                    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                    "<SOAP-ENV:Envelope"
+                    " xmlns:SOAP-ENV=\"http://www.w3.org/2003/05/soap-envelope\""
+                    " xmlns:ter=\"http://www.onvif.org/ver10/error\">"
+                    "<SOAP-ENV:Body>"
+                    "<SOAP-ENV:Fault>"
+                    "<SOAP-ENV:Code>"
+                    "<SOAP-ENV:Value>SOAP-ENV:Sender</SOAP-ENV:Value>"
+                    "<SOAP-ENV:Subcode>"
+                    "<SOAP-ENV:Value>ter:InvalidArgVal</SOAP-ENV:Value>"
+                    "<SOAP-ENV:Subcode>"
+                    "<SOAP-ENV:Value>ter:MalformedData</SOAP-ENV:Value>"
+                    "</SOAP-ENV:Subcode>"
+                    "</SOAP-ENV:Subcode>"
+                    "</SOAP-ENV:Code>"
+                    "<SOAP-ENV:Reason>"
+                    "<SOAP-ENV:Text xml:lang=\"en\">Invalid argument value</SOAP-ENV:Text>"
+                    "</SOAP-ENV:Reason>"
+                    "</SOAP-ENV:Fault>"
+                    "</SOAP-ENV:Body>"
+                    "</SOAP-ENV:Envelope>";
+                soap->error = 400;
+                soap->http_content = "application/soap+xml; charset=utf-8";
+                soap_response(soap, SOAP_FILE);
+                soap_send_raw(soap, fault, std::strlen(fault));
+                soap_end_send(soap);
+            } else {
+                soap_send_fault(soap);
+            }
         }
 
         // Giải phóng vùng nhớ của phiên kết nối này

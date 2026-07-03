@@ -321,6 +321,7 @@ int DeviceService::GetServices(
            << " xmlns:tr2=\"http://www.onvif.org/ver20/media/wsdl\""
            << " xmlns:tev=\"http://www.onvif.org/ver10/events/wsdl\""
            << " xmlns:timg=\"http://www.onvif.org/ver20/imaging/wsdl\""
+           << " xmlns:tmd=\"http://www.onvif.org/ver10/deviceIO/wsdl\""
            << ">"
            << "<SOAP-ENV:Body><tds:GetServicesResponse>";
 
@@ -391,6 +392,16 @@ int DeviceService::GetServices(
         svc("http://www.onvif.org/ver20/imaging/wsdl", "/onvif/imaging",
             21, 12, imgCaps);
 
+        // DeviceIO (Profile T §7.10.3 mandate GetVideoSources).
+        // Fix MEDIA2-2-2-1: tool helper HelperConfigureMediaProfileWithVideoSource
+        // gọi DeviceIO.GetVideoSources — nếu không có service crash NullRef.
+        std::string ioCaps =
+            "<tmd:Capabilities VideoSources=\"1\" VideoOutputs=\"0\" "
+             "AudioSources=\"0\" AudioOutputs=\"0\" RelayOutputs=\"0\" "
+             "DigitalInputs=\"0\" SerialPorts=\"0\"/>";
+        svc("http://www.onvif.org/ver10/deviceIO/wsdl", "/onvif/deviceIO",
+            21, 12, ioCaps);
+
         os << "</tds:GetServicesResponse></SOAP-ENV:Body></SOAP-ENV:Envelope>";
         std::string xml = os.str();
         soap->http_content = "application/soap+xml; charset=utf-8";
@@ -420,6 +431,7 @@ int DeviceService::GetServices(
     add("http://www.onvif.org/ver20/media/wsdl",   "/onvif/media",          21, 12); // Media2 (Profile T)
     add("http://www.onvif.org/ver10/events/wsdl",  "/onvif/event",          21, 12); // Events (Profile T)
     add("http://www.onvif.org/ver20/imaging/wsdl", "/onvif/imaging",        21, 12); // Imaging (Profile T)
+    add("http://www.onvif.org/ver10/deviceIO/wsdl", "/onvif/deviceIO",       21, 12); // DeviceIO (Profile T §7.10.3)
 
     return SOAP_OK;
 }
