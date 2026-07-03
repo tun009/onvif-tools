@@ -432,6 +432,18 @@ int Media2Service::GetVideoEncoderConfigurations(
         }
     }
 
+    // MEDIA2_RTSS-1-1-23 §5.1.1.4: GetVideoEncoderConfigurations(ProfileToken)
+    // phải trả cả các VEC "compatible but unassigned" — không chỉ VEC đang gán.
+    // Thêm 1 spare (nếu không match filterConfigToken cụ thể).
+    if (filterConfigToken.empty()) {
+        const std::string spareTok = "video_encoder_config_spare";
+        bool present = false;
+        for (auto* c : resp.Configurations) if (c && c->token == spareTok) { present = true; break; }
+        if (!present) {
+            addDefaultEncoderConfig(spareTok, "VideoEncoderConfigSpare");
+        }
+    }
+
     std::cout << "[Media2Service] GetVideoEncoderConfigurations → returned "
               << resp.Configurations.size() << " configurations" << std::endl;
     return SOAP_OK;
