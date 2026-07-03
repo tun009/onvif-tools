@@ -298,21 +298,27 @@ std::string MockSubscriptionManager::handlePullMessages(const std::string& subId
         filter = it->second.topicFilter;
     }
 
-    // Xác định topic nào cần phát dựa vào filter:
-    // - filter rỗng → phát tất cả
-    // - filter có "MotionAlarm" hoặc chứa VideoSource (sub-tree) → MotionAlarm
-    // - filter có "GlobalSceneChange" hoặc VideoSource sub-tree → GlobalSceneChange
-    // EVENT-3-1-33/34/35 (OR / sub-tree) đòi cả 2 loại event.
+    // MessageLimit từ request (tool set để giới hạn tối đa messages trả về).
+    // Default 100 nếu không chỉ định. Bỏ qua sẽ gây "Maximum number of
+    // messages exceeded" (EVENT-3-1-24/33/34/35/37).
+    int msgLimit = 100;
+    {
+        std::string lim = extractTag(req, "MessageLimit");
+        if (!lim.empty()) { try { msgLimit = std::stoi(lim); } catch (...) {} }
+        if (msgLimit < 1) msgLimit = 1;
+    }
+
+    // Xác định topic phát dựa vào filter WS-Topics.
+    // Sub-tree operator chuẩn WS-Topics là `//.` (descendant), KHÔNG phải
+    // đường dẫn cụ thể "VideoSource/MotionAlarm". Match sub-tree khi filter
+    // có `//.` (WS-Topics ConcreteSet sub-tree dialect).
     bool wantAll = filter.empty();
-    bool wantVSSubtree = filter.find("VideoSource//.") != std::string::npos ||
-                        filter.find("VideoSource/") != std::string::npos;
-    // Nếu filter chỉ nhắc VideoSource generic (sub-tree) → cả MotionAlarm + GlobalSceneChange
-    bool emitMotion = wantAll ||
-                      filter.find("MotionAlarm") != std::string::npos ||
-                      wantVSSubtree;
-    bool emitGSC    = wantAll ||
-                      filter.find("GlobalSceneChange") != std::string::npos ||
-                      wantVSSubtree;
+    bool subtreeVS = filter.find("VideoSource//.") != std::string::npos ||
+                     filter.find("VideoSource//*") != std::string::npos;
+    bool emitMotion = wantAll || subtreeVS ||
+                      filter.find("MotionAlarm") != std::string::npos;
+    bool emitGSC    = wantAll || subtreeVS ||
+                      filter.find("GlobalSceneChange") != std::string::npos;
 
     // Helper phát 1 NotificationMessage. Topic path phải đầy đủ prefix trên
     // MỌI segment: `tns1:VideoSource/tns1:MotionAlarm` (không phải
@@ -340,8 +346,15 @@ std::string MockSubscriptionManager::handlePullMessages(const std::string& subId
     body << "<tev:PullMessagesResponse>"
          << "<tev:CurrentTime>" << now << "</tev:CurrentTime>"
          << "<tev:TerminationTime>" << getXmlUtcTime(timeout) << "</tev:TerminationTime>";
-    if (emitMotion) emit(body, "tns1:VideoSource/tns1:MotionAlarm",       "VideoSourceToken", "false");
-    if (emitGSC)    emit(body, "tns1:VideoSource/tns1:GlobalSceneChange", "VideoSourceToken", "false");
+    int emitted = 0;
+    if (emitMotion && emitted < msgLimit) {
+        emit(body, "tns1:VideoSource/tns1:MotionAlarm", "VideoSourceToken", "false");
+        ++emitted;
+    }
+    if (emitGSC && emitted < msgLimit) {
+        emit(body, "tns1:VideoSource/tns1:GlobalSceneChange", "VideoSourceToken", "false");
+        ++emitted;
+    }
     body << "</tev:PullMessagesResponse>";
     return wrapEnvelope(ACT_PULL, rel, body.str());
 }
