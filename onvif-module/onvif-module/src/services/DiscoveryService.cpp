@@ -28,8 +28,22 @@ void DiscoveryService::setScopes(const std::vector<std::string>& s) {
 }
 
 void DiscoveryService::setDiscoverable(bool on) {
-    discoverable_ = on;
-    std::cout << "[Discovery] setDiscoverable(" << (on ? "true" : "false") << ")\n";
+    bool was = discoverable_.exchange(on);
+    std::cout << "[Discovery] setDiscoverable(" << (on ? "true" : "false")
+              << ") prev=" << (was ? "true" : "false") << "\n";
+    // Chuyển Discoverable → NonDiscoverable: gửi Bye 1 lần TRƯỚC khi flip (đã
+    // flip nhưng test tool nhận Bye trước khi silence). Thực ra spec chỉ yêu
+    // cầu silence, không cần Bye. → không gửi gì để tránh "Bye while NonDiscoverable".
+    // Chuyển NonDiscoverable → Discoverable: burst Hello.
+    if (on && !was) {
+        std::thread([this]() {
+            for (int i = 0; i < 3; ++i) {
+                if (!discoverable_) break;
+                sendMulticast(buildHello());
+                std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            }
+        }).detach();
+    }
 }
 
 void DiscoveryService::announceHelloNow() {
@@ -444,18 +458,20 @@ void DiscoveryService::sendMulticast(const std::string& xml) {
 }
 
 void DiscoveryService::announceReboot() {
+    if (!discoverable_) {
+        std::cout << "[Discovery] Skip reboot announce (NonDiscoverable)\n";
+        return;
+    }
     // Test tool test SystemReboot/FactoryDefault sẽ chờ Bye rồi Hello.
     // Gửi Bye → tăng InstanceId (mô phỏng process mới sau reboot) → burst Hello.
-    // Burst 8 lần trong 4 giây để "áp đảo" bất kỳ Hello nhiễu nào từ Windows
-    // WSDAPI / camera khác trong LAN (tool 24.12 không filter theo Types/UUID).
     std::cout << "[Discovery] Announce reboot: Bye + Hello burst (8x/4s)\n";
     sendMulticast(buildBye());
     std::thread([this]() {
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
-        // Update instance ID để tool nhận diện device đã "reboot"
         instanceId_ = static_cast<uint32_t>(::time(nullptr));
         messageNumber_ = 0;
         for (int i = 0; i < 8; ++i) {
+            if (!discoverable_) break;  // dừng nếu chuyển sang NonDiscoverable giữa chừng
             sendMulticast(buildHello());
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
         }

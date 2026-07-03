@@ -512,6 +512,9 @@ int DeviceService::AddScopes(_tds__AddScopes* req,
     this->soap->mustUnderstand = 0;
     this->soap->header = nullptr;
     if (!req) return SOAP_OK;
+    std::cout << "[DeviceService] AddScopes: " << req->ScopeItem.size() << " items";
+    for (const auto& u : req->ScopeItem) std::cout << " [" << u << "]";
+    std::cout << std::endl;
     std::vector<std::string> snap;
     {
         std::lock_guard<std::mutex> lk(sysMtx_);
