@@ -18,6 +18,9 @@ struct SubscriptionState {
     std::chrono::steady_clock::time_point terminationTime;
     int timeoutSeconds = 60;
     std::string topicFilter;   // nội dung TopicExpression (rỗng = không lọc)
+    // Counter tăng mỗi PullMessages call — dùng round-robin topic khi filter
+    // match nhiều topic (OR / sub-tree) mà msgLimit=1. EVENT-3-1-33/35.
+    unsigned long pullCount = 0;
 };
 
 class MockSubscriptionManager {

@@ -4,6 +4,7 @@
 #include <random>
 #include <iostream>
 #include <ctime>
+#include <vector>
 
 // ── Namespace + Action constants ────────────────────────────────────────────
 namespace {
@@ -284,6 +285,7 @@ std::string MockSubscriptionManager::handlePullMessages(const std::string& subId
     std::string rel = extractTag(req, "MessageID");
     std::string filter;
     int timeout = 60;
+    unsigned long pullNo = 0;
     {
         std::lock_guard<std::mutex> lk(mtx_);
         purgeExpired();
@@ -296,6 +298,7 @@ std::string MockSubscriptionManager::handlePullMessages(const std::string& subId
             std::chrono::seconds(it->second.timeoutSeconds);
         timeout = it->second.timeoutSeconds;
         filter = it->second.topicFilter;
+        pullNo = it->second.pullCount++;
     }
 
     // MessageLimit từ request (tool set để giới hạn tối đa messages trả về).
@@ -342,18 +345,25 @@ std::string MockSubscriptionManager::handlePullMessages(const std::string& subId
           << "</wsnt:NotificationMessage>";
     };
 
+    // Round-robin: khi msgLimit=1 và filter match nhiều topic → luân phiên theo
+    // pullCount để mọi topic đều được nhận (EVENT-3-1-33/35). Nếu msgLimit>=2
+    // trả cả 2 luôn.
+    std::vector<std::pair<const char*, const char*>> matched;
+    if (emitMotion) matched.push_back({"tns1:VideoSource/tns1:MotionAlarm",       "false"});
+    if (emitGSC)    matched.push_back({"tns1:VideoSource/tns1:GlobalSceneChange", "false"});
+
     std::ostringstream body;
     body << "<tev:PullMessagesResponse>"
          << "<tev:CurrentTime>" << now << "</tev:CurrentTime>"
          << "<tev:TerminationTime>" << getXmlUtcTime(timeout) << "</tev:TerminationTime>";
     int emitted = 0;
-    if (emitMotion && emitted < msgLimit) {
-        emit(body, "tns1:VideoSource/tns1:MotionAlarm", "VideoSourceToken", "false");
-        ++emitted;
-    }
-    if (emitGSC && emitted < msgLimit) {
-        emit(body, "tns1:VideoSource/tns1:GlobalSceneChange", "VideoSourceToken", "false");
-        ++emitted;
+    if (!matched.empty()) {
+        size_t start = pullNo % matched.size();
+        for (size_t i = 0; i < matched.size() && emitted < msgLimit; ++i) {
+            const auto& m = matched[(start + i) % matched.size()];
+            emit(body, m.first, "VideoSourceToken", m.second);
+            ++emitted;
+        }
     }
     body << "</tev:PullMessagesResponse>";
     return wrapEnvelope(ACT_PULL, rel, body.str());
