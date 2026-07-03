@@ -68,14 +68,12 @@ std::string DeviceIOHandler::handleGetServiceCapabilities() {
 }
 
 std::string DeviceIOHandler::handleGetVideoSources() {
-    // Profile T §7.10.3 mandatory: trả list VideoSource tokens.
-    // DeviceIO GetVideoSources trả tt:VideoSource item (khác Media1 trt:VideoSources).
-    // Schema: <tmd:VideoSources>...token...</tmd:VideoSources> — nội dung là tt:VideoSource
-    // hoặc chỉ token tuỳ WSDL version. Dùng dạng phổ biến nhất: element rỗng với
-    // attribute token.
+    // DeviceIO WSDL: response chứa list <tmd:Token> (tt:ReferenceToken).
+    // KHÁC Media1 (trt) format <trt:VideoSources token="..."/>. IMAGING-1-1-*
+    // tests validate strict theo schema DeviceIO.
     return
         "<tmd:GetVideoSourcesResponse>"
-          "<tmd:VideoSources token=\"src_main\"/>"
+          "<tmd:Token>src_main</tmd:Token>"
         "</tmd:GetVideoSourcesResponse>";
 }
 

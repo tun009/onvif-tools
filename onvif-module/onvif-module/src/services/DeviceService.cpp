@@ -261,6 +261,19 @@ int DeviceService::GetCapabilities(
     }
     } // end Device
 
+    // DeviceIO capabilities trong Extension (DEVICE-1-1-2 check step 6).
+    // Profile T §7.10.3 mandate DeviceIO service với GetVideoSources.
+    if (wantAll || wantDevice) {
+        caps->Extension = soap_new_tt__CapabilitiesExtension(soap);
+        caps->Extension->DeviceIO = soap_new_tt__DeviceIOCapabilities(soap);
+        caps->Extension->DeviceIO->XAddr = base + "/onvif/deviceIO";
+        caps->Extension->DeviceIO->VideoSources = 1;
+        caps->Extension->DeviceIO->VideoOutputs = 0;
+        caps->Extension->DeviceIO->AudioSources = 0;
+        caps->Extension->DeviceIO->AudioOutputs = 0;
+        caps->Extension->DeviceIO->RelayOutputs = 0;
+    }
+
     // ── Media (Profile T: streaming RTP/RTSP/TCP) ─────────────────────────
     // Test tool check "Media capabilities not found" khi Category=All hoặc =Media
     // (DEVICE-1-1-2, 1-1-4). Trỏ về /onvif/media (Media2 sẽ xử lý các op ver20).
