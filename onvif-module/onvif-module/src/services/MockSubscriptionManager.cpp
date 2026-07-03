@@ -282,7 +282,7 @@ std::string MockSubscriptionManager::handleCreateSubscription(const std::string&
 std::string MockSubscriptionManager::handlePullMessages(const std::string& subId,
                                                         const std::string& req) {
     std::string rel = extractTag(req, "MessageID");
-    bool emitMotion = true;
+    std::string filter;
     int timeout = 60;
     {
         std::lock_guard<std::mutex> lk(mtx_);
@@ -295,34 +295,53 @@ std::string MockSubscriptionManager::handlePullMessages(const std::string& subId
             std::chrono::steady_clock::now() +
             std::chrono::seconds(it->second.timeoutSeconds);
         timeout = it->second.timeoutSeconds;
-        // Chỉ phát MotionAlarm nếu filter rỗng hoặc lọc đúng topic MotionAlarm.
-        const std::string& f = it->second.topicFilter;
-        emitMotion = f.empty() || f.find("MotionAlarm") != std::string::npos;
+        filter = it->second.topicFilter;
     }
 
+    // Xác định topic nào cần phát dựa vào filter:
+    // - filter rỗng → phát tất cả
+    // - filter có "MotionAlarm" hoặc chứa VideoSource (sub-tree) → MotionAlarm
+    // - filter có "GlobalSceneChange" hoặc VideoSource sub-tree → GlobalSceneChange
+    // EVENT-3-1-33/34/35 (OR / sub-tree) đòi cả 2 loại event.
+    bool wantAll = filter.empty();
+    bool wantVSSubtree = filter.find("VideoSource//.") != std::string::npos ||
+                        filter.find("VideoSource/") != std::string::npos;
+    // Nếu filter chỉ nhắc VideoSource generic (sub-tree) → cả MotionAlarm + GlobalSceneChange
+    bool emitMotion = wantAll ||
+                      filter.find("MotionAlarm") != std::string::npos ||
+                      wantVSSubtree;
+    bool emitGSC    = wantAll ||
+                      filter.find("GlobalSceneChange") != std::string::npos ||
+                      wantVSSubtree;
+
+    // Helper phát 1 NotificationMessage. Topic path phải đầy đủ prefix trên
+    // MỌI segment: `tns1:VideoSource/tns1:MotionAlarm` (không phải
+    // `tns1:VideoSource/MotionAlarm`) — EVENT-3-1-16 tool validate strict.
     std::string now = getXmlUtcTime(0);
+    auto emit = [&](std::ostringstream& b, const char* topicPath,
+                    const char* srcVal, const char* stateVal) {
+        b << "<wsnt:NotificationMessage>"
+          << "<wsnt:Topic Dialect=\"" << TOPIC_DIALECT << "\">"
+          << topicPath << "</wsnt:Topic>"
+          << "<wsnt:Message>"
+          << "<tt:Message UtcTime=\"" << now << "\" PropertyOperation=\"Initialized\">"
+          << "<tt:Source>"
+          << "<tt:SimpleItem Name=\"Source\" Value=\"" << srcVal << "\"/>"
+          << "</tt:Source>"
+          << "<tt:Data>"
+          << "<tt:SimpleItem Name=\"State\" Value=\"" << stateVal << "\"/>"
+          << "</tt:Data>"
+          << "</tt:Message>"
+          << "</wsnt:Message>"
+          << "</wsnt:NotificationMessage>";
+    };
+
     std::ostringstream body;
     body << "<tev:PullMessagesResponse>"
          << "<tev:CurrentTime>" << now << "</tev:CurrentTime>"
          << "<tev:TerminationTime>" << getXmlUtcTime(timeout) << "</tev:TerminationTime>";
-    if (emitMotion) {
-        body
-         // Property event: VideoSource/MotionAlarm (State=false, Initialized)
-         << "<wsnt:NotificationMessage>"
-         << "<wsnt:Topic Dialect=\"" << TOPIC_DIALECT << "\">"
-         << "tns1:VideoSource/MotionAlarm</wsnt:Topic>"
-         << "<wsnt:Message>"
-         << "<tt:Message UtcTime=\"" << now << "\" PropertyOperation=\"Initialized\">"
-         << "<tt:Source>"
-         << "<tt:SimpleItem Name=\"Source\" Value=\"VideoSourceToken\"/>"
-         << "</tt:Source>"
-         << "<tt:Data>"
-         << "<tt:SimpleItem Name=\"State\" Value=\"false\"/>"
-         << "</tt:Data>"
-         << "</tt:Message>"
-         << "</wsnt:Message>"
-         << "</wsnt:NotificationMessage>";
-    }
+    if (emitMotion) emit(body, "tns1:VideoSource/tns1:MotionAlarm",       "VideoSourceToken", "false");
+    if (emitGSC)    emit(body, "tns1:VideoSource/tns1:GlobalSceneChange", "VideoSourceToken", "false");
     body << "</tev:PullMessagesResponse>";
     return wrapEnvelope(ACT_PULL, rel, body.str());
 }
