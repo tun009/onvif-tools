@@ -299,19 +299,23 @@ void OnvifServer::listenLoop() {
                 continue;
             }
 
-            // Kiểm tra xác thực HTTP Digest
-            if (isAuthRequired(g_current_headers)) {
+            // Kiểm tra xác thực HTTP Digest. Bỏ qua nếu request có WS-Security
+            // UsernameToken — ONVIF cho phép 1 trong 2 (SECURITY-1-1-1 test).
+            bool hasWsSecurity =
+                g_current_headers.find("UsernameToken") != std::string::npos ||
+                g_current_headers.find("wsse:Security") != std::string::npos;
+            if (isAuthRequired(g_current_headers) && !hasWsSecurity) {
                 DigestAuthHandler digestAuth(cfg_.username, cfg_.password);
                 std::string method = "POST";
-                
+
                 if (!digestAuth.validate(g_current_headers, method)) {
                     static std::string challenge;
                     challenge = digestAuth.generateChallenge();
-                    
+
                     soap->http_extra_header = challenge.c_str();
                     soap->error = 401;
                     soap_send_empty_response(soap, 401);
-                    
+
                     soap_destroy(soap);
                     soap_end(soap);
                     continue;

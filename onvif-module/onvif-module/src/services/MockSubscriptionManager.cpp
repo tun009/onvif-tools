@@ -395,6 +395,9 @@ std::string MockSubscriptionManager::handleBaseSubscribe(const std::string& devi
     std::string consumerUrl = extractTag(req, "Address");
     int timeout = parseDurationSeconds(
         extractTag(req, "InitialTerminationTime"), 300);
+    // Nếu tool yêu cầu timeout ngắn (PT10S) — server bỏ qua, giữ tối thiểu 60s
+    // để notify thread có đủ thời gian push (subscription không expire quá sớm).
+    if (timeout < 60) timeout = 60;
     std::string topicExpr;
     if (req.find("TopicExpression") != std::string::npos)
         topicExpr = extractTag(req, "TopicExpression");
@@ -459,19 +462,21 @@ void MockSubscriptionManager::notifyPushLoop() {
             }
         }
         if (targets.empty()) continue;
-        // Build Notify XML
         std::string now = getXmlUtcTime(0);
-        std::ostringstream env;
-        env << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-            << "<SOAP-ENV:Envelope"
-            << " xmlns:SOAP-ENV=\"http://www.w3.org/2003/05/soap-envelope\""
-            << " xmlns:wsa=\"http://www.w3.org/2005/08/addressing\""
-            << " xmlns:wsnt=\"http://docs.oasis-open.org/wsn/b-2\""
-            << " xmlns:tns1=\"http://www.onvif.org/ver10/topics\""
-            << " xmlns:tt=\"http://www.onvif.org/ver10/schema\">"
-            << "<SOAP-ENV:Header>"
-            << "<wsa:Action>http://docs.oasis-open.org/wsn/bw-2/NotificationConsumer/Notify</wsa:Action>"
-            << "</SOAP-ENV:Header>"
+        for (auto& t : targets) {
+            std::ostringstream env;
+            env << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                << "<SOAP-ENV:Envelope"
+                << " xmlns:SOAP-ENV=\"http://www.w3.org/2003/05/soap-envelope\""
+                << " xmlns:wsa=\"http://www.w3.org/2005/08/addressing\""
+                << " xmlns:wsnt=\"http://docs.oasis-open.org/wsn/b-2\""
+                << " xmlns:tns1=\"http://www.onvif.org/ver10/topics\""
+                << " xmlns:tt=\"http://www.onvif.org/ver10/schema\">"
+                << "<SOAP-ENV:Header>"
+                << "<wsa:Action>http://docs.oasis-open.org/wsn/bw-2/NotificationConsumer/Notify</wsa:Action>"
+                << "<wsa:To>" << t.first << "</wsa:To>"
+                << "<wsa:MessageID>" << newMessageId() << "</wsa:MessageID>"
+                << "</SOAP-ENV:Header>"
             << "<SOAP-ENV:Body>"
             << "<wsnt:Notify>"
             << "<wsnt:NotificationMessage>"
@@ -488,13 +493,14 @@ void MockSubscriptionManager::notifyPushLoop() {
             << "</tt:Data>"
             << "</tt:Message>"
             << "</wsnt:Message>"
-            << "</wsnt:NotificationMessage>"
-            << "</wsnt:Notify>"
-            << "</SOAP-ENV:Body>"
-            << "</SOAP-ENV:Envelope>";
-        std::string xml = env.str();
-        for (auto& t : targets) {
-            (void)httpPostNotify(t.first, xml);
+                << "</wsnt:NotificationMessage>"
+                << "</wsnt:Notify>"
+                << "</SOAP-ENV:Body>"
+                << "</SOAP-ENV:Envelope>";
+            std::string xml = env.str();
+            bool ok = httpPostNotify(t.first, xml);
+            std::cout << "[Event] Notify -> " << t.first
+                      << " sub=" << t.second << (ok ? " OK" : " FAIL") << std::endl;
         }
     }
 }

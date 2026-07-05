@@ -185,8 +185,15 @@ int ImagingService::GetImagingSettings(
     out->Exposure->Mode = static_cast<tt__ExposureMode>(ext.exposureMode);
 
     // Declare Focus mode (motorized lens mock) — Profile T conditional §7.16.
+    // IMAGING-1-1-14 kiểm NearLimit/FarLimit trong FocusConfiguration.
     out->Focus = soap_new_tt__FocusConfiguration20(soap);
     out->Focus->AutoFocusMode = static_cast<tt__AutoFocusMode>(ext.autoFocusMode);
+    auto* nl = (float*)soap_malloc(soap, sizeof(float)); *nl = 0.0f;
+    auto* fl = (float*)soap_malloc(soap, sizeof(float)); *fl = 100.0f;
+    auto* ds = (float*)soap_malloc(soap, sizeof(float)); *ds = 0.5f;
+    out->Focus->NearLimit = nl;
+    out->Focus->FarLimit = fl;
+    out->Focus->DefaultSpeed = ds;
 
     resp.ImagingSettings = out;
     return SOAP_OK;
@@ -396,6 +403,40 @@ int ImagingService::Move(_timg__Move* req, _timg__MoveResponse& resp) {
     if (!req->Focus) {
         return sendOnvifFault(this->soap, "SOAP-ENV:Sender",
                               "ter:InvalidArgVal", nullptr, "Missing Focus");
+    }
+    // Negative tests IMAGING-2-1-4/6/8: tool gửi position/speed vượt range,
+    // server PHẢI trả fault (không silently accept).
+    if (req->Focus->Absolute) {
+        float p = req->Focus->Absolute->Position;
+        if (p < 0.0f || p > 100.0f) {
+            return sendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                  "ter:InvalidArgVal", "ter:SettingsInvalid",
+                                  "Position out of range");
+        }
+        if (req->Focus->Absolute->Speed) {
+            float sp = *req->Focus->Absolute->Speed;
+            if (sp < 0.0f || sp > 1.0f) {
+                return sendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                      "ter:InvalidArgVal", "ter:SettingsInvalid",
+                                      "Speed out of range");
+            }
+        }
+    }
+    if (req->Focus->Relative) {
+        float d = req->Focus->Relative->Distance;
+        if (d < -100.0f || d > 100.0f) {
+            return sendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                  "ter:InvalidArgVal", "ter:SettingsInvalid",
+                                  "Distance out of range");
+        }
+    }
+    if (req->Focus->Continuous) {
+        float sp = req->Focus->Continuous->Speed;
+        if (sp < -1.0f || sp > 1.0f) {
+            return sendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                  "ter:InvalidArgVal", "ter:SettingsInvalid",
+                                  "Continuous speed out of range");
+        }
     }
     std::lock_guard<std::mutex> lk(g_focusMtx);
     auto& st = g_focus[req->VideoSourceToken];
