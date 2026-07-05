@@ -397,20 +397,36 @@ void OnvifServer::listenLoop() {
         if (serveResult != SOAP_OK && serveResult != SOAP_STOP) {
             std::cerr << "[OnvifServer] Error processing SOAP request:" << std::endl;
             soap_print_fault(soap, stderr);
-            // DEVICE-1-1-9 fix: gSOAP tự sinh fault với <Subcode/> rỗng khi
-            // enum parse fail (VD Category="XYZ"). Tool validate Subcode
-            // required Value → fail. Detect qua fault text và trả manual fault
-            // đúng format env:Sender/ter:InvalidArgVal/ter:MalformedData.
-            bool isValidationErr = false;
+            // gSOAP tự sinh fault với <Subcode/> rỗng — tool validate schema
+            // đòi Subcode phải có Value. 2 pattern quan trọng:
+            //  (a) DEVICE-1-1-9: enum parse fail ("Validation constraint")
+            //      → env:Sender / ter:InvalidArgVal / ter:MalformedData
+            //  (b) IMAGING-2-1-*: method not implemented (Focus Move ops)
+            //      → env:Sender / ter:ActionNotSupported
+            enum FaultKind { FK_NONE, FK_INVALID_ARG, FK_NOT_SUPPORTED };
+            FaultKind kind = FK_NONE;
             const char* faultstr = soap_fault_string(soap);
             if (faultstr) {
                 std::string reason(faultstr);
                 if (reason.find("Validation constraint") != std::string::npos ||
-                    reason.find("invalid value") != std::string::npos)
-                    isValidationErr = true;
+                    reason.find("invalid value") != std::string::npos) {
+                    kind = FK_INVALID_ARG;
+                } else if (reason.find("not implemented") != std::string::npos ||
+                           reason.find("not recognized") != std::string::npos ||
+                           reason.find("Method") != std::string::npos) {
+                    kind = FK_NOT_SUPPORTED;
+                }
             }
-            if (isValidationErr) {
-                const char* fault =
+            if (kind != FK_NONE) {
+                const char* subcode1 = "ter:InvalidArgVal";
+                const char* subcode2 = "ter:MalformedData";
+                const char* reasonText = "Invalid argument value";
+                if (kind == FK_NOT_SUPPORTED) {
+                    subcode1 = "ter:ActionNotSupported";
+                    subcode2 = nullptr;
+                    reasonText = "Action not supported";
+                }
+                std::string fault =
                     "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
                     "<SOAP-ENV:Envelope"
                     " xmlns:SOAP-ENV=\"http://www.w3.org/2003/05/soap-envelope\""
@@ -420,22 +436,29 @@ void OnvifServer::listenLoop() {
                     "<SOAP-ENV:Code>"
                     "<SOAP-ENV:Value>SOAP-ENV:Sender</SOAP-ENV:Value>"
                     "<SOAP-ENV:Subcode>"
-                    "<SOAP-ENV:Value>ter:InvalidArgVal</SOAP-ENV:Value>"
-                    "<SOAP-ENV:Subcode>"
-                    "<SOAP-ENV:Value>ter:MalformedData</SOAP-ENV:Value>"
-                    "</SOAP-ENV:Subcode>"
-                    "</SOAP-ENV:Subcode>"
-                    "</SOAP-ENV:Code>"
-                    "<SOAP-ENV:Reason>"
-                    "<SOAP-ENV:Text xml:lang=\"en\">Invalid argument value</SOAP-ENV:Text>"
-                    "</SOAP-ENV:Reason>"
-                    "</SOAP-ENV:Fault>"
-                    "</SOAP-ENV:Body>"
-                    "</SOAP-ENV:Envelope>";
+                    "<SOAP-ENV:Value>";
+                fault += subcode1;
+                fault += "</SOAP-ENV:Value>";
+                if (subcode2) {
+                    fault += "<SOAP-ENV:Subcode>"
+                             "<SOAP-ENV:Value>";
+                    fault += subcode2;
+                    fault += "</SOAP-ENV:Value></SOAP-ENV:Subcode>";
+                }
+                fault += "</SOAP-ENV:Subcode>"
+                         "</SOAP-ENV:Code>"
+                         "<SOAP-ENV:Reason>"
+                         "<SOAP-ENV:Text xml:lang=\"en\">";
+                fault += reasonText;
+                fault += "</SOAP-ENV:Text>"
+                         "</SOAP-ENV:Reason>"
+                         "</SOAP-ENV:Fault>"
+                         "</SOAP-ENV:Body>"
+                         "</SOAP-ENV:Envelope>";
                 soap->error = 400;
                 soap->http_content = "application/soap+xml; charset=utf-8";
                 soap_response(soap, SOAP_FILE);
-                soap_send_raw(soap, fault, std::strlen(fault));
+                soap_send_raw(soap, fault.data(), fault.size());
                 soap_end_send(soap);
             } else {
                 soap_send_fault(soap);

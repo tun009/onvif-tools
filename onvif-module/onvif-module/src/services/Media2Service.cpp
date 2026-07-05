@@ -434,13 +434,13 @@ int Media2Service::GetVideoEncoderConfigurations(
 
     // MEDIA2_RTSS-1-1-23 (spec §7.8.1): GetVideoEncoderInstances Total=3 →
     // phải có ≥3 VEC available cho VSC. Ngoài 3 VEC gán profile fixed, thêm
-    // 1 spare (chưa gán profile nào). GetVideoEncoderConfigurationOptions +
-    // SetVideoEncoderConfiguration cần accept token spare (đã bổ sung ở đó).
+    // 1 spare (chưa gán profile nào). Add cho MỌI filter (kể cả ProfileToken=dyn):
+    // tool expect list gồm "compatible-but-unassigned" configs, không chỉ attached.
     if (filterConfigToken.empty() || filterConfigToken == "video_encoder_config_spare") {
         bool spareAlready = false;
         for (auto* c : resp.Configurations)
             if (c && c->token == "video_encoder_config_spare") { spareAlready = true; break; }
-        if (!spareAlready && !profileIsDynamic) {
+        if (!spareAlready) {
             addDefaultEncoderConfig("video_encoder_config_spare", "VideoEncoderConfigSpare");
         }
     }
