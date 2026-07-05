@@ -466,7 +466,9 @@ void MockSubscriptionManager::notifyPushLoop() {
         std::this_thread::sleep_for(2s);
         // Snapshot subscriptions có consumerUrl + reset terminationTime để
         // tránh purge trong khi tool đang chờ notify.
-        std::vector<std::pair<std::string,std::string>> targets;
+        // Snapshot subscriptions có consumerUrl + filter + counter cho round-robin
+        struct Target { std::string url; std::string sub; std::string filter; unsigned long cnt; };
+        std::vector<Target> targets;
         {
             std::lock_guard<std::mutex> lk(mtx_);
             purgeExpired();
@@ -475,13 +477,31 @@ void MockSubscriptionManager::notifyPushLoop() {
                     kv.second.terminationTime =
                         std::chrono::steady_clock::now() +
                         std::chrono::seconds(kv.second.timeoutSeconds);
-                    targets.push_back({kv.second.consumerUrl, kv.first});
+                    targets.push_back({kv.second.consumerUrl, kv.first,
+                                       kv.second.topicFilter,
+                                       kv.second.pullCount++});
                 }
             }
         }
         if (targets.empty()) continue;
         std::string now = getXmlUtcTime(0);
         for (auto& t : targets) {
+            // Filter-aware: OR filter cần luân phiên topic (EVENT-2-1-25/27).
+            bool wantAll = t.filter.empty();
+            bool subtreeVS = t.filter.find("VideoSource//.") != std::string::npos ||
+                             t.filter.find("VideoSource//*") != std::string::npos;
+            bool wantMotion = wantAll || subtreeVS ||
+                              t.filter.find("MotionAlarm") != std::string::npos;
+            bool wantGSC = wantAll || subtreeVS ||
+                           t.filter.find("GlobalSceneChange") != std::string::npos;
+            std::vector<std::pair<const char*, const char*>> topics;
+            if (wantMotion) topics.push_back({"tns1:VideoSource/tns1:MotionAlarm", "false"});
+            if (wantGSC)    topics.push_back({"tns1:VideoSource/tns1:GlobalSceneChange", "false"});
+            if (topics.empty()) continue;
+            // Round-robin theo cnt để cả 2 topic đều được emit theo thời gian
+            size_t idx = t.cnt % topics.size();
+            const auto& tp = topics[idx];
+
             std::ostringstream env;
             env << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
                 << "<SOAP-ENV:Envelope"
@@ -492,33 +512,34 @@ void MockSubscriptionManager::notifyPushLoop() {
                 << " xmlns:tt=\"http://www.onvif.org/ver10/schema\">"
                 << "<SOAP-ENV:Header>"
                 << "<wsa:Action>http://docs.oasis-open.org/wsn/bw-2/NotificationConsumer/Notify</wsa:Action>"
-                << "<wsa:To>" << t.first << "</wsa:To>"
+                << "<wsa:To>" << t.url << "</wsa:To>"
                 << "<wsa:MessageID>" << newMessageId() << "</wsa:MessageID>"
                 << "</SOAP-ENV:Header>"
-            << "<SOAP-ENV:Body>"
-            << "<wsnt:Notify>"
-            << "<wsnt:NotificationMessage>"
-            << "<wsnt:Topic Dialect=\"http://www.onvif.org/ver10/tev/topicExpression/ConcreteSet\">"
-            << "tns1:VideoSource/tns1:MotionAlarm"
-            << "</wsnt:Topic>"
-            << "<wsnt:Message>"
-            << "<tt:Message UtcTime=\"" << now << "\" PropertyOperation=\"Initialized\">"
-            << "<tt:Source>"
-            << "<tt:SimpleItem Name=\"Source\" Value=\"VideoSourceToken\"/>"
-            << "</tt:Source>"
-            << "<tt:Data>"
-            << "<tt:SimpleItem Name=\"State\" Value=\"false\"/>"
-            << "</tt:Data>"
-            << "</tt:Message>"
-            << "</wsnt:Message>"
+                << "<SOAP-ENV:Body>"
+                << "<wsnt:Notify>"
+                << "<wsnt:NotificationMessage>"
+                << "<wsnt:Topic Dialect=\"http://www.onvif.org/ver10/tev/topicExpression/ConcreteSet\">"
+                << tp.first
+                << "</wsnt:Topic>"
+                << "<wsnt:Message>"
+                << "<tt:Message UtcTime=\"" << now << "\" PropertyOperation=\"Initialized\">"
+                << "<tt:Source>"
+                << "<tt:SimpleItem Name=\"Source\" Value=\"VideoSourceToken\"/>"
+                << "</tt:Source>"
+                << "<tt:Data>"
+                << "<tt:SimpleItem Name=\"State\" Value=\"" << tp.second << "\"/>"
+                << "</tt:Data>"
+                << "</tt:Message>"
+                << "</wsnt:Message>"
                 << "</wsnt:NotificationMessage>"
                 << "</wsnt:Notify>"
                 << "</SOAP-ENV:Body>"
                 << "</SOAP-ENV:Envelope>";
             std::string xml = env.str();
-            bool ok = httpPostNotify(t.first, xml);
-            std::cout << "[Event] Notify -> " << t.first
-                      << " sub=" << t.second << (ok ? " OK" : " FAIL") << std::endl;
+            bool ok = httpPostNotify(t.url, xml);
+            std::cout << "[Event] Notify -> " << t.url
+                      << " sub=" << t.sub << " topic=" << tp.first
+                      << (ok ? " OK" : " FAIL") << std::endl;
         }
     }
 }
