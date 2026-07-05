@@ -795,6 +795,14 @@ int DeviceService::GetNetworkInterfaces(_tds__GetNetworkInterfaces* req,
     manual->Address = net_.ipv4Manual;
     manual->PrefixLength = net_.prefixLength;
     iface->IPv4->Config->Manual.push_back(manual);
+    // IPCONFIG-1-1-3: khi DHCP=true, tool expect FromDHCP field có địa chỉ.
+    // Fake DHCP lease = same IP.
+    if (net_.ipv4DhcpEnabled) {
+        auto* fromDhcp = soap_new_tt__PrefixedIPv4Address(soap);
+        fromDhcp->Address = net_.ipv4Manual;
+        fromDhcp->PrefixLength = net_.prefixLength;
+        iface->IPv4->Config->FromDHCP = fromDhcp;
+    }
 
     resp.NetworkInterfaces.push_back(iface);
     return SOAP_OK;

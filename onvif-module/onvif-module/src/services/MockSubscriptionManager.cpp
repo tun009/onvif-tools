@@ -5,6 +5,9 @@
 #include <iostream>
 #include <ctime>
 #include <vector>
+#include <sys/socket.h>
+#include <netdb.h>
+#include <unistd.h>
 
 // ── Namespace + Action constants ────────────────────────────────────────────
 namespace {
@@ -157,6 +160,15 @@ std::string MockSubscriptionManager::dispatch(const std::string& deviceIp, int p
         return handleGetServiceCapabilities(req);
     if (req.find("CreatePullPointSubscription") != std::string::npos)
         return handleCreateSubscription(deviceIp, port, req);
+    // Basic Notification Subscribe (WS-BN) — element <Subscribe> namespace
+    // http://docs.oasis-open.org/wsn/b-2. Khác CreatePullPointSubscription.
+    if (req.find("<Subscribe") != std::string::npos ||
+        req.find(":Subscribe") != std::string::npos) {
+        // Chỉ khớp khi có ConsumerReference (Base Subscribe) — tránh match
+        // các word "Subscribe..." khác.
+        if (req.find("ConsumerReference") != std::string::npos)
+            return handleBaseSubscribe(deviceIp, port, req);
+    }
     if (req.find("PullMessages") != std::string::npos)
         return handlePullMessages(subId, req);
     if (req.find("SetSynchronizationPoint") != std::string::npos)
@@ -367,6 +379,172 @@ std::string MockSubscriptionManager::handlePullMessages(const std::string& subId
     }
     body << "</tev:PullMessagesResponse>";
     return wrapEnvelope(ACT_PULL, rel, body.str());
+}
+
+// ── Base Subscribe (WS-BaseNotification) ────────────────────────────────────
+// Khác CreatePullPointSubscription ở chỗ:
+//   - Element <Subscribe> namespace wsn/b-2 (không phải tev)
+//   - Có <ConsumerReference><Address>URL</Address></ConsumerReference>
+//   - Server phải POST Notify tới ConsumerReference URL định kỳ
+//   - Response: <SubscribeResponse> namespace wsn/b-2
+std::string MockSubscriptionManager::handleBaseSubscribe(const std::string& deviceIp,
+                                                         int port,
+                                                         const std::string& req) {
+    std::string rel = extractTag(req, "MessageID");
+    std::string subId = generateSubId();
+    std::string consumerUrl = extractTag(req, "Address");
+    int timeout = parseDurationSeconds(
+        extractTag(req, "InitialTerminationTime"), 300);
+    std::string topicExpr;
+    if (req.find("TopicExpression") != std::string::npos)
+        topicExpr = extractTag(req, "TopicExpression");
+
+    {
+        std::lock_guard<std::mutex> lk(mtx_);
+        purgeExpired();
+        SubscriptionState st;
+        st.id = subId;
+        st.timeoutSeconds = timeout;
+        st.topicFilter = topicExpr;
+        st.consumerUrl = consumerUrl;
+        st.terminationTime = std::chrono::steady_clock::now() +
+                             std::chrono::seconds(timeout);
+        subscriptions_[subId] = st;
+    }
+    // Bảo đảm notify thread đang chạy (idempotent).
+    startNotifyThread();
+
+    std::string xaddr = "http://" + deviceIp + ":" + std::to_string(port) +
+                        "/onvif/event/" + subId;
+    std::ostringstream body;
+    body << "<wsnt:SubscribeResponse>"
+         << "<wsnt:SubscriptionReference>"
+         << "<wsa:Address>" << xaddr << "</wsa:Address>"
+         << "</wsnt:SubscriptionReference>"
+         << "<wsnt:CurrentTime>" << getXmlUtcTime(0) << "</wsnt:CurrentTime>"
+         << "<wsnt:TerminationTime>" << getXmlUtcTime(timeout) << "</wsnt:TerminationTime>"
+         << "</wsnt:SubscribeResponse>";
+    std::cout << "[Event] BaseSubscribe -> " << subId
+              << " consumer=" << consumerUrl << std::endl;
+    // wsa:Action cho SubscribeResponse (Base Notification)
+    static const char* ACT_SUB_RESP =
+        "http://docs.oasis-open.org/wsn/bw-2/NotificationProducer/SubscribeResponse";
+    return wrapEnvelope(ACT_SUB_RESP, rel, body.str());
+}
+
+void MockSubscriptionManager::startNotifyThread() {
+    bool expected = false;
+    if (!notifyRunning_.compare_exchange_strong(expected, true)) return;
+    notifyThread_ = std::thread(&MockSubscriptionManager::notifyPushLoop, this);
+}
+
+void MockSubscriptionManager::stopNotifyThread() {
+    notifyRunning_ = false;
+    if (notifyThread_.joinable()) notifyThread_.join();
+}
+
+void MockSubscriptionManager::notifyPushLoop() {
+    using namespace std::chrono_literals;
+    while (notifyRunning_) {
+        std::this_thread::sleep_for(2s);
+        // Snapshot subscriptions có consumerUrl
+        std::vector<std::pair<std::string,std::string>> targets;
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            purgeExpired();
+            for (auto& kv : subscriptions_) {
+                if (!kv.second.consumerUrl.empty()) {
+                    targets.push_back({kv.second.consumerUrl, kv.first});
+                }
+            }
+        }
+        if (targets.empty()) continue;
+        // Build Notify XML
+        std::string now = getXmlUtcTime(0);
+        std::ostringstream env;
+        env << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+            << "<SOAP-ENV:Envelope"
+            << " xmlns:SOAP-ENV=\"http://www.w3.org/2003/05/soap-envelope\""
+            << " xmlns:wsa=\"http://www.w3.org/2005/08/addressing\""
+            << " xmlns:wsnt=\"http://docs.oasis-open.org/wsn/b-2\""
+            << " xmlns:tns1=\"http://www.onvif.org/ver10/topics\""
+            << " xmlns:tt=\"http://www.onvif.org/ver10/schema\">"
+            << "<SOAP-ENV:Header>"
+            << "<wsa:Action>http://docs.oasis-open.org/wsn/bw-2/NotificationConsumer/Notify</wsa:Action>"
+            << "</SOAP-ENV:Header>"
+            << "<SOAP-ENV:Body>"
+            << "<wsnt:Notify>"
+            << "<wsnt:NotificationMessage>"
+            << "<wsnt:Topic Dialect=\"http://www.onvif.org/ver10/tev/topicExpression/ConcreteSet\">"
+            << "tns1:VideoSource/tns1:MotionAlarm"
+            << "</wsnt:Topic>"
+            << "<wsnt:Message>"
+            << "<tt:Message UtcTime=\"" << now << "\" PropertyOperation=\"Initialized\">"
+            << "<tt:Source>"
+            << "<tt:SimpleItem Name=\"Source\" Value=\"VideoSourceToken\"/>"
+            << "</tt:Source>"
+            << "<tt:Data>"
+            << "<tt:SimpleItem Name=\"State\" Value=\"false\"/>"
+            << "</tt:Data>"
+            << "</tt:Message>"
+            << "</wsnt:Message>"
+            << "</wsnt:NotificationMessage>"
+            << "</wsnt:Notify>"
+            << "</SOAP-ENV:Body>"
+            << "</SOAP-ENV:Envelope>";
+        std::string xml = env.str();
+        for (auto& t : targets) {
+            (void)httpPostNotify(t.first, xml);
+        }
+    }
+}
+
+// HTTP POST đơn giản qua socket. Parse URL http://host:port/path.
+// Trả true nếu send được (không check response).
+bool MockSubscriptionManager::httpPostNotify(const std::string& url,
+                                             const std::string& xml) {
+    // Parse "http://host:port/path"
+    if (url.rfind("http://", 0) != 0) return false;
+    std::string rest = url.substr(7);
+    size_t slash = rest.find('/');
+    std::string hostport = (slash == std::string::npos) ? rest : rest.substr(0, slash);
+    std::string path = (slash == std::string::npos) ? "/" : rest.substr(slash);
+    size_t colon = hostport.find(':');
+    std::string host = hostport;
+    int port = 80;
+    if (colon != std::string::npos) {
+        host = hostport.substr(0, colon);
+        try { port = std::stoi(hostport.substr(colon + 1)); } catch (...) {}
+    }
+
+    // Resolve + connect
+    struct addrinfo hints{}; hints.ai_family = AF_INET; hints.ai_socktype = SOCK_STREAM;
+    struct addrinfo* res = nullptr;
+    if (getaddrinfo(host.c_str(), std::to_string(port).c_str(), &hints, &res) != 0) return false;
+    int sock = ::socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+    if (sock < 0) { freeaddrinfo(res); return false; }
+    // Non-blocking connect với timeout ngắn (500ms) để tránh block notify thread
+    struct timeval tv{}; tv.tv_sec = 1; tv.tv_usec = 0;
+    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    int rc = ::connect(sock, res->ai_addr, res->ai_addrlen);
+    freeaddrinfo(res);
+    if (rc < 0) { ::close(sock); return false; }
+
+    std::ostringstream hdr;
+    hdr << "POST " << path << " HTTP/1.1\r\n"
+        << "Host: " << host << ":" << port << "\r\n"
+        << "Content-Type: application/soap+xml; charset=utf-8;"
+        << " action=\"http://docs.oasis-open.org/wsn/bw-2/NotificationConsumer/Notify\"\r\n"
+        << "Content-Length: " << xml.size() << "\r\n"
+        << "Connection: close\r\n\r\n";
+    std::string request = hdr.str() + xml;
+    ::send(sock, request.data(), request.size(), 0);
+    // Đọc bỏ response
+    char buf[512];
+    ::recv(sock, buf, sizeof(buf), 0);
+    ::close(sock);
+    return true;
 }
 
 // ── Renew (WS-BaseNotification SubscriptionManager) ─────────────────────────

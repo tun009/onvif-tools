@@ -12,15 +12,18 @@
 #include <map>
 #include <mutex>
 #include <chrono>
+#include <atomic>
+#include <thread>
 
 struct SubscriptionState {
     std::string id;
     std::chrono::steady_clock::time_point terminationTime;
     int timeoutSeconds = 60;
     std::string topicFilter;   // nội dung TopicExpression (rỗng = không lọc)
-    // Counter tăng mỗi PullMessages call — dùng round-robin topic khi filter
-    // match nhiều topic (OR / sub-tree) mà msgLimit=1. EVENT-3-1-33/35.
     unsigned long pullCount = 0;
+    // Basic Notification: ConsumerReference URL để POST Notify tới.
+    // Rỗng nếu là PullPoint subscription (server không tự push, tool pull).
+    std::string consumerUrl;
 };
 
 class MockSubscriptionManager {
@@ -38,11 +41,21 @@ private:
     std::string handleGetEventProperties(const std::string& req);
     std::string handleCreateSubscription(const std::string& deviceIp, int port,
                                          const std::string& req);
+    std::string handleBaseSubscribe(const std::string& deviceIp, int port,
+                                    const std::string& req);
     std::string handlePullMessages(const std::string& subId, const std::string& req);
     std::string handleRenew(const std::string& subId, const std::string& req);
     std::string handleUnsubscribe(const std::string& subId, const std::string& req);
     std::string handleSetSynchronizationPoint(const std::string& subId,
                                               const std::string& req);
+
+    // Basic Notification: gửi HTTP POST Notify tới ConsumerReference URL.
+    // Chạy trong background thread — mỗi 5s scan subscriptions với consumerUrl
+    // và push MotionAlarm event.
+    void startNotifyThread();
+    void stopNotifyThread();
+    void notifyPushLoop();
+    static bool httpPostNotify(const std::string& url, const std::string& xml);
 
     // ── Helpers ───────────────────────────────────────────────────────────
     static std::string getXmlUtcTime(int offsetSeconds = 0);
@@ -63,4 +76,6 @@ private:
 
     std::mutex mtx_;
     std::map<std::string, SubscriptionState> subscriptions_;
+    std::atomic<bool> notifyRunning_{false};
+    std::thread notifyThread_;
 };

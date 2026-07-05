@@ -184,8 +184,9 @@ int ImagingService::GetImagingSettings(
     out->Exposure = soap_new_tt__Exposure20(soap);
     out->Exposure->Mode = static_cast<tt__ExposureMode>(ext.exposureMode);
 
-    // Fixed-focus camera: KHÔNG trả Focus block (khớp với GetOptions.Focus=null).
-    out->Focus = nullptr;
+    // Declare Focus mode (motorized lens mock) — Profile T conditional §7.16.
+    out->Focus = soap_new_tt__FocusConfiguration20(soap);
+    out->Focus->AutoFocusMode = static_cast<tt__AutoFocusMode>(ext.autoFocusMode);
 
     resp.ImagingSettings = out;
     return SOAP_OK;
@@ -317,10 +318,136 @@ int ImagingService::GetOptions(
     opts->Exposure->Mode.push_back(tt__ExposureMode::AUTO);
     opts->Exposure->Mode.push_back(tt__ExposureMode::MANUAL);
 
-    // Fixed-focus camera: KHÔNG declare Focus options → tool sẽ skip Focus Move
-    // tests (Profile T conditional §7.16 chỉ bắt buộc nếu có motorized lens).
-    opts->Focus = nullptr;
+    // Declare Focus support (motorized lens mock) — Profile T §7.16 conditional.
+    // Với declare, tool sẽ chạy 8 IMAGING-2-1-* Focus Move tests. Server có stub
+    // ops Move/Stop/GetStatus/GetMoveOptions ở dưới.
+    opts->Focus = soap_new_tt__FocusOptions20(soap);
+    opts->Focus->AutoFocusModes.push_back(tt__AutoFocusMode::AUTO);
+    opts->Focus->AutoFocusModes.push_back(tt__AutoFocusMode::MANUAL);
+    opts->Focus->DefaultSpeed = soap_new_tt__FloatRange(soap);
+    opts->Focus->DefaultSpeed->Min = 0.0f;
+    opts->Focus->DefaultSpeed->Max = 1.0f;
+    opts->Focus->NearLimit = soap_new_tt__FloatRange(soap);
+    opts->Focus->NearLimit->Min = 0.0f;
+    opts->Focus->NearLimit->Max = 100.0f;
+    opts->Focus->FarLimit = soap_new_tt__FloatRange(soap);
+    opts->Focus->FarLimit->Min = 0.0f;
+    opts->Focus->FarLimit->Max = 100.0f;
 
     resp.ImagingOptions = opts;
+    return SOAP_OK;
+}
+
+// ── Focus Move stubs (Profile T conditional §7.16) ─────────────────────────
+// State đơn giản: 1 position float per VideoSource, moveStatus IDLE.
+namespace {
+struct FocusState {
+    float position = 50.0f;
+    std::string moveStatus = "IDLE";   // IDLE | MOVING | UNKNOWN
+};
+static std::mutex g_focusMtx;
+static std::map<std::string, FocusState> g_focus;
+}
+
+int ImagingService::GetMoveOptions(_timg__GetMoveOptions* req,
+                                   _timg__GetMoveOptionsResponse& resp) {
+    this->soap->mustUnderstand = 0;
+    this->soap->header = nullptr;
+    auto soap = this->soap;
+    if (!req || !isValidToken(req->VideoSourceToken)) {
+        return sendOnvifFault(soap, "SOAP-ENV:Sender",
+                              "ter:InvalidArgVal", "ter:NoSource",
+                              "Invalid VideoSourceToken");
+    }
+    auto mo = soap_new_tt__MoveOptions20(soap);
+    // Absolute focus: hỗ trợ tuyệt đối với vị trí 0..100
+    mo->Absolute = soap_new_tt__AbsoluteFocusOptions(soap);
+    mo->Absolute->Position = soap_new_tt__FloatRange(soap);
+    mo->Absolute->Position->Min = 0.0f;
+    mo->Absolute->Position->Max = 100.0f;
+    mo->Absolute->Speed = soap_new_tt__FloatRange(soap);
+    mo->Absolute->Speed->Min = 0.0f;
+    mo->Absolute->Speed->Max = 1.0f;
+    // Relative + Continuous: cung cấp options tối thiểu
+    mo->Relative = soap_new_tt__RelativeFocusOptions20(soap);
+    mo->Relative->Distance = soap_new_tt__FloatRange(soap);
+    mo->Relative->Distance->Min = -100.0f;
+    mo->Relative->Distance->Max = 100.0f;
+    mo->Relative->Speed = soap_new_tt__FloatRange(soap);
+    mo->Relative->Speed->Min = 0.0f;
+    mo->Relative->Speed->Max = 1.0f;
+    mo->Continuous = soap_new_tt__ContinuousFocusOptions(soap);
+    mo->Continuous->Speed = soap_new_tt__FloatRange(soap);
+    mo->Continuous->Speed->Min = -1.0f;
+    mo->Continuous->Speed->Max = 1.0f;
+    resp.MoveOptions = mo;
+    return SOAP_OK;
+}
+
+int ImagingService::Move(_timg__Move* req, _timg__MoveResponse& resp) {
+    (void)resp;
+    this->soap->mustUnderstand = 0;
+    this->soap->header = nullptr;
+    if (!req || !isValidToken(req->VideoSourceToken)) {
+        return sendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                              "ter:InvalidArgVal", "ter:NoSource",
+                              "Invalid VideoSourceToken");
+    }
+    if (!req->Focus) {
+        return sendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                              "ter:InvalidArgVal", nullptr, "Missing Focus");
+    }
+    std::lock_guard<std::mutex> lk(g_focusMtx);
+    auto& st = g_focus[req->VideoSourceToken];
+    if (req->Focus->Absolute) {
+        st.position = req->Focus->Absolute->Position;
+        st.moveStatus = "IDLE";
+    } else if (req->Focus->Relative) {
+        st.position += req->Focus->Relative->Distance;
+        if (st.position < 0.0f) st.position = 0.0f;
+        if (st.position > 100.0f) st.position = 100.0f;
+        st.moveStatus = "IDLE";
+    } else if (req->Focus->Continuous) {
+        st.moveStatus = "MOVING";
+    }
+    return SOAP_OK;
+}
+
+int ImagingService::Stop(_timg__Stop* req, _timg__StopResponse& resp) {
+    (void)resp;
+    this->soap->mustUnderstand = 0;
+    this->soap->header = nullptr;
+    if (!req || !isValidToken(req->VideoSourceToken)) {
+        return sendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                              "ter:InvalidArgVal", "ter:NoSource",
+                              "Invalid VideoSourceToken");
+    }
+    std::lock_guard<std::mutex> lk(g_focusMtx);
+    g_focus[req->VideoSourceToken].moveStatus = "IDLE";
+    return SOAP_OK;
+}
+
+int ImagingService::GetStatus(_timg__GetStatus* req,
+                              _timg__GetStatusResponse& resp) {
+    this->soap->mustUnderstand = 0;
+    this->soap->header = nullptr;
+    auto soap = this->soap;
+    if (!req || !isValidToken(req->VideoSourceToken)) {
+        return sendOnvifFault(soap, "SOAP-ENV:Sender",
+                              "ter:InvalidArgVal", "ter:NoSource",
+                              "Invalid VideoSourceToken");
+    }
+    float pos; std::string mv;
+    {
+        std::lock_guard<std::mutex> lk(g_focusMtx);
+        auto& st = g_focus[req->VideoSourceToken];
+        pos = st.position; mv = st.moveStatus;
+    }
+    auto sts = soap_new_tt__ImagingStatus20(soap);
+    sts->FocusStatus20 = soap_new_tt__FocusStatus20(soap);
+    sts->FocusStatus20->Position = pos;
+    sts->FocusStatus20->MoveStatus =
+        (mv == "MOVING") ? tt__MoveStatus::MOVING : tt__MoveStatus::IDLE;
+    resp.Status = sts;
     return SOAP_OK;
 }

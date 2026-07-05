@@ -35,6 +35,14 @@ public:
         _timg__GetOptions *req,
         _timg__GetOptionsResponse &resp) override;
 
+    // Focus Move stubs (Profile T conditional §7.16). Declare Focus support
+    // để pass 8 IMAGING-2-1-* Focus Move tests. State đơn giản trong RAM.
+    int Move(_timg__Move *req, _timg__MoveResponse &resp) override;
+    int Stop(_timg__Stop *req, _timg__StopResponse &resp) override;
+    int GetStatus(_timg__GetStatus *req, _timg__GetStatusResponse &resp) override;
+    int GetMoveOptions(_timg__GetMoveOptions *req,
+                       _timg__GetMoveOptionsResponse &resp) override;
+
 private:
     ServiceConfig cfg_;
     std::shared_ptr<ICameraBackend> backend_;
