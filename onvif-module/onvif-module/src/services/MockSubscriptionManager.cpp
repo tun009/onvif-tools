@@ -8,6 +8,7 @@
 #include <sys/socket.h>
 #include <netdb.h>
 #include <unistd.h>
+#include <cerrno>
 
 // ── Namespace + Action constants ────────────────────────────────────────────
 namespace {
@@ -563,9 +564,19 @@ bool MockSubscriptionManager::httpPostNotify(const std::string& url,
         << "Connection: close\r\n\r\n";
     std::string request = hdr.str() + xml;
     ::send(sock, request.data(), request.size(), 0);
-    // Đọc bỏ response
-    char buf[512];
-    ::recv(sock, buf, sizeof(buf), 0);
+    // Đọc response để log HTTP status — debug tool có nhận đúng format không.
+    char buf[2048];
+    int n = ::recv(sock, buf, sizeof(buf) - 1, 0);
+    if (n > 0) {
+        buf[n] = 0;
+        // Log line đầu (status) + Content-Length nếu có
+        std::string resp(buf, n);
+        size_t eol = resp.find('\n');
+        std::string statusLine = (eol != std::string::npos) ? resp.substr(0, eol) : resp;
+        std::cerr << "[NotifyResp] " << statusLine << std::endl;
+    } else {
+        std::cerr << "[NotifyResp] recv returned " << n << " errno=" << errno << std::endl;
+    }
     ::close(sock);
     return true;
 }
