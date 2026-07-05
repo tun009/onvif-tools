@@ -392,7 +392,20 @@ std::string MockSubscriptionManager::handleBaseSubscribe(const std::string& devi
                                                          const std::string& req) {
     std::string rel = extractTag(req, "MessageID");
     std::string subId = generateSubId();
-    std::string consumerUrl = extractTag(req, "Address");
+    // ConsumerReference/Address KHÔNG dùng extractTag chung vì SOAP Header có
+    // <ReplyTo><Address>anonymous</Address></ReplyTo> đứng TRƯỚC — extractTag
+    // match nhầm. Cắt substring bên trong <ConsumerReference>...</ConsumerReference>.
+    std::string consumerUrl;
+    {
+        size_t p = req.find("ConsumerReference");
+        if (p != std::string::npos) {
+            size_t end = req.find("/ConsumerReference", p);
+            if (end != std::string::npos) {
+                std::string block = req.substr(p, end - p);
+                consumerUrl = extractTag(block, "Address");
+            }
+        }
+    }
     int timeout = parseDurationSeconds(
         extractTag(req, "InitialTerminationTime"), 300);
     // Nếu tool yêu cầu timeout ngắn (PT10S) — server bỏ qua, giữ tối thiểu 60s
