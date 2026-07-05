@@ -913,7 +913,10 @@ int Media2Service::GetVideoEncoderInstances(
     auto soap = this->soap;
 
     auto info = soap_new_ns1__EncoderInstanceInfo(soap);
-    info->Total = 3;   // Mock: hỗ trợ tối đa 3 stream đồng thời
+    // MEDIA2_RTSS-1-1-23 spec §7.8.1: device phải support ≥Total profiles
+    // dùng chung VSC. Giảm Total=1 (fixed camera 1 concurrent stream) để match
+    // số VEC ta trả (1 attached + 1 spare = 2 ≥ 1 OK).
+    info->Total = 1;
     resp.Info = info;
     return SOAP_OK;
 }
