@@ -86,13 +86,14 @@ bool WsSecurityHandler::validate(struct soap* soap) const {
 
     // 2. PasswordDigest
     if (passwordType == "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordDigest") {
-        // Nonce optional per WS-Security spec — nếu client omitted, dùng rỗng.
-        // SECURITY-1-1-1: tool test omitted Nonce, server phải chấp nhận.
-        std::string rawNonce;
-        if (token->Nonce && token->Nonce->__item) {
-            rawNonce = base64Decode(token->Nonce->__item);
+        // SECURITY-1-1-1: PasswordDigest yêu cầu Nonce + Created để verify.
+        // Nếu thiếu → reject (tool expect Sender/NotAuthorized fault).
+        if (!token->Nonce || !token->Nonce->__item || !token->wsu__Created) {
+            std::cerr << "[WsSecurity] Digest fail: Nonce/Created missing" << std::endl;
+            return false;
         }
-        std::string createdTime = token->wsu__Created ? token->wsu__Created : "";
+        std::string rawNonce = base64Decode(token->Nonce->__item);
+        std::string createdTime = token->wsu__Created;
 
         // Công thức: PasswordDigest = Base64 ( SHA-1 ( Nonce + Created + Password ) )
         SHA_CTX sha;

@@ -185,12 +185,12 @@ int ImagingService::GetImagingSettings(
     out->Exposure->Mode = static_cast<tt__ExposureMode>(ext.exposureMode);
 
     // Declare Focus mode (motorized lens mock) — Profile T conditional §7.16.
-    // IMAGING-1-1-14 kiểm NearLimit/FarLimit trong FocusConfiguration.
+    // IMAGING-1-1-14 kiểm NearLimit/FarLimit persist qua Set→Get.
     out->Focus = soap_new_tt__FocusConfiguration20(soap);
     out->Focus->AutoFocusMode = static_cast<tt__AutoFocusMode>(ext.autoFocusMode);
-    auto* nl = (float*)soap_malloc(soap, sizeof(float)); *nl = 0.0f;
-    auto* fl = (float*)soap_malloc(soap, sizeof(float)); *fl = 100.0f;
-    auto* ds = (float*)soap_malloc(soap, sizeof(float)); *ds = 0.5f;
+    auto* nl = (float*)soap_malloc(soap, sizeof(float)); *nl = ext.focusNearLimit;
+    auto* fl = (float*)soap_malloc(soap, sizeof(float)); *fl = ext.focusFarLimit;
+    auto* ds = (float*)soap_malloc(soap, sizeof(float)); *ds = ext.focusDefaultSpeed;
     out->Focus->NearLimit = nl;
     out->Focus->FarLimit = fl;
     out->Focus->DefaultSpeed = ds;
@@ -250,7 +250,12 @@ int ImagingService::SetImagingSettings(
             (in->WideDynamicRange->Mode == tt__WideDynamicMode::ON);
     if (in->Exposure)     ext.exposureMode     = static_cast<int>(in->Exposure->Mode);
     if (in->WhiteBalance) ext.whiteBalanceMode = static_cast<int>(in->WhiteBalance->Mode);
-    if (in->Focus)        ext.autoFocusMode    = static_cast<int>(in->Focus->AutoFocusMode);
+    if (in->Focus) {
+        ext.autoFocusMode = static_cast<int>(in->Focus->AutoFocusMode);
+        if (in->Focus->NearLimit)    ext.focusNearLimit    = *in->Focus->NearLimit;
+        if (in->Focus->FarLimit)     ext.focusFarLimit     = *in->Focus->FarLimit;
+        if (in->Focus->DefaultSpeed) ext.focusDefaultSpeed = *in->Focus->DefaultSpeed;
+    }
     if (in->IrCutFilter)  ext.irCutFilter      = static_cast<int>(*in->IrCutFilter);
 
     // Validate range — nested fault (IMAGING-1-1-8).
@@ -428,6 +433,14 @@ int ImagingService::Move(_timg__Move* req, _timg__MoveResponse& resp) {
             return sendOnvifFault(this->soap, "SOAP-ENV:Sender",
                                   "ter:InvalidArgVal", "ter:SettingsInvalid",
                                   "Distance out of range");
+        }
+        if (req->Focus->Relative->Speed) {
+            float sp = *req->Focus->Relative->Speed;
+            if (sp < 0.0f || sp > 1.0f) {
+                return sendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                      "ter:InvalidArgVal", "ter:SettingsInvalid",
+                                      "Relative speed out of range");
+            }
         }
     }
     if (req->Focus->Continuous) {

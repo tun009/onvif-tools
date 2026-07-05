@@ -56,6 +56,10 @@ private:
         int whiteBalanceMode = 0;          // 0=AUTO, 1=MANUAL
         int autoFocusMode = 0;             // 0=AUTO, 1=MANUAL
         int irCutFilter = 0;               // 0=ON, 1=OFF, 2=AUTO (enum tt__IrCutFilterMode)
+        // Focus params (IMAGING-1-1-14 persist test)
+        float focusNearLimit = 0.0f;
+        float focusFarLimit = 100.0f;
+        float focusDefaultSpeed = 0.5f;
         bool loaded = false;               // đã init từ backend?
     };
     static std::mutex cacheMtx_;

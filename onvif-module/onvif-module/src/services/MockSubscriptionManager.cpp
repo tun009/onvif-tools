@@ -450,13 +450,17 @@ void MockSubscriptionManager::notifyPushLoop() {
     using namespace std::chrono_literals;
     while (notifyRunning_) {
         std::this_thread::sleep_for(2s);
-        // Snapshot subscriptions có consumerUrl
+        // Snapshot subscriptions có consumerUrl + reset terminationTime để
+        // tránh purge trong khi tool đang chờ notify.
         std::vector<std::pair<std::string,std::string>> targets;
         {
             std::lock_guard<std::mutex> lk(mtx_);
             purgeExpired();
             for (auto& kv : subscriptions_) {
                 if (!kv.second.consumerUrl.empty()) {
+                    kv.second.terminationTime =
+                        std::chrono::steady_clock::now() +
+                        std::chrono::seconds(kv.second.timeoutSeconds);
                     targets.push_back({kv.second.consumerUrl, kv.first});
                 }
             }
@@ -540,8 +544,8 @@ bool MockSubscriptionManager::httpPostNotify(const std::string& url,
     std::ostringstream hdr;
     hdr << "POST " << path << " HTTP/1.1\r\n"
         << "Host: " << host << ":" << port << "\r\n"
-        << "Content-Type: application/soap+xml; charset=utf-8;"
-        << " action=\"http://docs.oasis-open.org/wsn/bw-2/NotificationConsumer/Notify\"\r\n"
+        << "Content-Type: application/soap+xml; charset=utf-8\r\n"
+        << "SOAPAction: \"http://docs.oasis-open.org/wsn/bw-2/NotificationConsumer/Notify\"\r\n"
         << "Content-Length: " << xml.size() << "\r\n"
         << "Connection: close\r\n\r\n";
     std::string request = hdr.str() + xml;

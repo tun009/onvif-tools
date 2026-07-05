@@ -5,6 +5,7 @@
 #include "services/DeviceIOHandler.h"
 #include "soapH.h"
 #include "auth/DigestAuthHandler.h"
+#include "auth/WsSecurityHandler.h"
 #include "services/MockSubscriptionManager.h"
 #include <iostream>
 #include <cstring>
@@ -304,6 +305,40 @@ void OnvifServer::listenLoop() {
             bool hasWsSecurity =
                 g_current_headers.find("UsernameToken") != std::string::npos ||
                 g_current_headers.find("wsse:Security") != std::string::npos;
+            // SECURITY-1-1-1: nếu request có UsernameToken invalid (VD thiếu
+            // Nonce với PasswordDigest), server phải trả SOAP fault
+            // ter:NotAuthorized (không phải 401 hay OK). Validate WsSecurity
+            // TRƯỚC khi dispatch, kể cả với GetDeviceInformation.
+            if (hasWsSecurity) {
+                WsSecurityHandler wss(cfg_.username, cfg_.password);
+                if (!wss.validate(soap)) {
+                    const char* fault =
+                        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                        "<SOAP-ENV:Envelope"
+                        " xmlns:SOAP-ENV=\"http://www.w3.org/2003/05/soap-envelope\""
+                        " xmlns:ter=\"http://www.onvif.org/ver10/error\">"
+                        "<SOAP-ENV:Body><SOAP-ENV:Fault>"
+                        "<SOAP-ENV:Code>"
+                        "<SOAP-ENV:Value>SOAP-ENV:Sender</SOAP-ENV:Value>"
+                        "<SOAP-ENV:Subcode>"
+                        "<SOAP-ENV:Value>ter:NotAuthorized</SOAP-ENV:Value>"
+                        "</SOAP-ENV:Subcode>"
+                        "</SOAP-ENV:Code>"
+                        "<SOAP-ENV:Reason>"
+                        "<SOAP-ENV:Text xml:lang=\"en\">Sender not authorized</SOAP-ENV:Text>"
+                        "</SOAP-ENV:Reason>"
+                        "</SOAP-ENV:Fault></SOAP-ENV:Body></SOAP-ENV:Envelope>";
+                    soap->error = 400;
+                    soap->http_content = "application/soap+xml; charset=utf-8";
+                    soap_response(soap, SOAP_FILE);
+                    soap_send_raw(soap, fault, std::strlen(fault));
+                    soap_end_send(soap);
+                    soap_destroy(soap);
+                    soap_end(soap);
+                    continue;
+                }
+                g_http_digest_authenticated = true;
+            }
             if (isAuthRequired(g_current_headers) && !hasWsSecurity) {
                 DigestAuthHandler digestAuth(cfg_.username, cfg_.password);
                 std::string method = "POST";
