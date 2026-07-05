@@ -463,7 +463,9 @@ void MockSubscriptionManager::stopNotifyThread() {
 void MockSubscriptionManager::notifyPushLoop() {
     using namespace std::chrono_literals;
     while (notifyRunning_) {
-        std::this_thread::sleep_for(2s);
+        // Interval 500ms để notify đầu tiên đến trước khi tool Unsubscribe
+        // (EVENT-2-1-25/26/27: tool unsub ngay sau nhận notify đầu, ~2s window).
+        std::this_thread::sleep_for(500ms);
         // Snapshot subscriptions có consumerUrl + reset terminationTime để
         // tránh purge trong khi tool đang chờ notify.
         // Snapshot subscriptions có consumerUrl + filter + counter cho round-robin
@@ -486,7 +488,7 @@ void MockSubscriptionManager::notifyPushLoop() {
         if (targets.empty()) continue;
         std::string now = getXmlUtcTime(0);
         for (auto& t : targets) {
-            // Filter-aware: OR filter cần luân phiên topic (EVENT-2-1-25/27).
+            // Filter-aware: match topics theo subscription filter.
             bool wantAll = t.filter.empty();
             bool subtreeVS = t.filter.find("VideoSource//.") != std::string::npos ||
                              t.filter.find("VideoSource//*") != std::string::npos;
@@ -498,10 +500,11 @@ void MockSubscriptionManager::notifyPushLoop() {
             if (wantMotion) topics.push_back({"tns1:VideoSource/tns1:MotionAlarm", "false"});
             if (wantGSC)    topics.push_back({"tns1:VideoSource/tns1:GlobalSceneChange", "false"});
             if (topics.empty()) continue;
-            // Round-robin theo cnt để cả 2 topic đều được emit theo thời gian
-            size_t idx = t.cnt % topics.size();
-            const auto& tp = topics[idx];
 
+            // EVENT-2-1-25/27: tool subscribe rồi Unsubscribe rất nhanh (~2s)
+            // sau lần Notify đầu tiên → round-robin không kịp send topic thứ 2.
+            // Fix: gom TẤT CẢ topics matching filter vào MỘT wsnt:Notify (nhiều
+            // <NotificationMessage>). Tool nhận đầy đủ ngay Notify đầu.
             std::ostringstream env;
             env << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
                 << "<SOAP-ENV:Envelope"
@@ -516,29 +519,31 @@ void MockSubscriptionManager::notifyPushLoop() {
                 << "<wsa:MessageID>" << newMessageId() << "</wsa:MessageID>"
                 << "</SOAP-ENV:Header>"
                 << "<SOAP-ENV:Body>"
-                << "<wsnt:Notify>"
-                << "<wsnt:NotificationMessage>"
-                << "<wsnt:Topic Dialect=\"http://www.onvif.org/ver10/tev/topicExpression/ConcreteSet\">"
-                << tp.first
-                << "</wsnt:Topic>"
-                << "<wsnt:Message>"
-                << "<tt:Message UtcTime=\"" << now << "\" PropertyOperation=\"Initialized\">"
-                << "<tt:Source>"
-                << "<tt:SimpleItem Name=\"Source\" Value=\"VideoSourceToken\"/>"
-                << "</tt:Source>"
-                << "<tt:Data>"
-                << "<tt:SimpleItem Name=\"State\" Value=\"" << tp.second << "\"/>"
-                << "</tt:Data>"
-                << "</tt:Message>"
-                << "</wsnt:Message>"
-                << "</wsnt:NotificationMessage>"
-                << "</wsnt:Notify>"
+                << "<wsnt:Notify>";
+            for (const auto& tp : topics) {
+                env << "<wsnt:NotificationMessage>"
+                    << "<wsnt:Topic Dialect=\"http://www.onvif.org/ver10/tev/topicExpression/ConcreteSet\">"
+                    << tp.first
+                    << "</wsnt:Topic>"
+                    << "<wsnt:Message>"
+                    << "<tt:Message UtcTime=\"" << now << "\" PropertyOperation=\"Initialized\">"
+                    << "<tt:Source>"
+                    << "<tt:SimpleItem Name=\"Source\" Value=\"VideoSourceToken\"/>"
+                    << "</tt:Source>"
+                    << "<tt:Data>"
+                    << "<tt:SimpleItem Name=\"State\" Value=\"" << tp.second << "\"/>"
+                    << "</tt:Data>"
+                    << "</tt:Message>"
+                    << "</wsnt:Message>"
+                    << "</wsnt:NotificationMessage>";
+            }
+            env << "</wsnt:Notify>"
                 << "</SOAP-ENV:Body>"
                 << "</SOAP-ENV:Envelope>";
             std::string xml = env.str();
             bool ok = httpPostNotify(t.url, xml);
-            std::cout << "[Event] Notify -> " << t.url
-                      << " sub=" << t.sub << " topic=" << tp.first
+            std::cout << "[Event] Notify -> " << t.url << " sub=" << t.sub
+                      << " topics=" << topics.size()
                       << (ok ? " OK" : " FAIL") << std::endl;
         }
     }
