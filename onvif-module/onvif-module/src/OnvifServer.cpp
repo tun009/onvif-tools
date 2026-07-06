@@ -10,6 +10,12 @@
 #include <iostream>
 #include <cstring>
 #include <string>
+#include <map>
+#include <mutex>
+#include <thread>
+#include <memory>
+#include <atomic>
+#include <vector>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -17,6 +23,7 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 #include <fcntl.h>
 #endif
 
@@ -61,6 +68,185 @@ static const unsigned char JPEG_STUB_BYTES[] = {
     0x01,0xff,0xd9
 };
 
+// ────────────────────────────────────────────────────────────────────────────
+// RTSP-over-HTTP tunnel (Apple 2002 spec) — RTSS-1-1-28/30/35/42/45 test HTTP
+// transport. mediamtx không native support → server ONVIF làm proxy:
+//   Client -GET /main HTTP/1.1 (Accept: application/x-rtsp-tunnelled)→ Server
+//   Server → 200 OK, giữ socket, spawn thread mediamtx→client relay
+//   Client -POST /main HTTP/1.1 (Content-Type: application/x-rtsp-tunnelled)→ Server
+//   Server decode base64 body → send tới mediamtx:8554 → response về qua GET
+//
+// Safety: tunnel handler CHỈ activate khi thấy header "x-sessioncookie" hoặc
+// content-type "x-rtsp-tunnelled". Anything else → passthrough. Nếu lỗi network,
+// return false → gSOAP xử lý bình thường (404 cho GET, SOAP fault cho POST).
+// ────────────────────────────────────────────────────────────────────────────
+
+#ifndef _WIN32
+struct TunnelSession {
+    int rtspSock{-1};
+    int getSock{-1};
+    std::atomic<bool> alive{true};
+    std::thread relay;
+    ~TunnelSession() {
+        alive = false;
+        if (relay.joinable()) relay.detach();
+        if (rtspSock >= 0) ::close(rtspSock);
+        if (getSock >= 0) ::close(getSock);
+    }
+};
+static std::map<std::string, std::shared_ptr<TunnelSession>> g_tunnelSessions;
+static std::mutex g_tunnelMtx;
+
+// Base64 decoder — RTSP tunnel client gửi base64 encoded RTSP commands.
+static std::string b64decode(const std::string& in) {
+    static int T[256];
+    static bool init = false;
+    if (!init) {
+        for (int i = 0; i < 256; ++i) T[i] = -1;
+        const char* alpha =
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        for (int i = 0; i < 64; ++i) T[(unsigned char)alpha[i]] = i;
+        T[(unsigned char)'='] = 64;
+        init = true;
+    }
+    std::string out;
+    int val = 0, valb = -8;
+    for (unsigned char c : in) {
+        if (c == '\r' || c == '\n' || c == ' ' || c == '\t') continue;
+        int v = T[c];
+        if (v < 0) continue;
+        if (v == 64) break;  // padding
+        val = (val << 6) | v;
+        valb += 6;
+        if (valb >= 0) {
+            out.push_back(char((val >> valb) & 0xFF));
+            valb -= 8;
+        }
+    }
+    return out;
+}
+
+// Lookup cookie value từ HTTP header text (g_current_headers thread-local).
+static std::string extractCookie(const std::string& headers) {
+    // Header: "x-sessioncookie: XXX\r\n" (case-insensitive)
+    auto find_ci = [&](const std::string& key) -> std::string {
+        std::string lower = headers;
+        for (auto& c : lower) c = (char)::tolower((unsigned char)c);
+        std::string lowerKey = key;
+        for (auto& c : lowerKey) c = (char)::tolower((unsigned char)c);
+        auto p = lower.find(lowerKey);
+        if (p == std::string::npos) return "";
+        p = headers.find(':', p);
+        if (p == std::string::npos) return "";
+        p++;
+        while (p < headers.size() && (headers[p] == ' ' || headers[p] == '\t')) p++;
+        auto e = headers.find_first_of("\r\n", p);
+        return headers.substr(p, (e == std::string::npos ? headers.size() : e) - p);
+    };
+    return find_ci("x-sessioncookie");
+}
+
+// Kết nối tới mediamtx :8554
+static int connectMediamtx() {
+#ifdef _WIN32
+    return -1;
+#else
+    int sock = ::socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0) return -1;
+    struct sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(8554);
+    inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+    if (::connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        ::close(sock);
+        return -1;
+    }
+    return sock;
+#endif
+}
+
+// Handle GET tunnel: hijack socket, connect mediamtx, spawn relay thread.
+// Returns true if handled (caller must NOT touch socket further).
+static bool handleTunnelGet(struct soap* soap, const std::string& path) {
+    // Extract cookie from full HTTP header buffer stored in g_current_headers
+    std::string cookie = extractCookie(g_current_headers);
+    if (cookie.empty()) return false;
+    // Only handle known stream paths
+    if (path != "/main" && path != "/jpeg" && path != "/sub1" && path != "/sub2") {
+        return false;
+    }
+    int rtspSock = connectMediamtx();
+    if (rtspSock < 0) {
+        std::cerr << "[Tunnel] mediamtx connect failed" << std::endl;
+        return false;
+    }
+    // Send tunnel response headers immediately
+    int clientSock = soap->socket;
+    const char* resp =
+        "HTTP/1.1 200 OK\r\n"
+        "Server: gSOAP/2.8\r\n"
+        "Content-Type: application/x-rtsp-tunnelled\r\n"
+        "Cache-Control: no-cache\r\n"
+        "Pragma: no-cache\r\n"
+        "Connection: close\r\n"
+        "\r\n";
+    ::send(clientSock, resp, std::strlen(resp), 0);
+
+    // Steal socket from gSOAP
+    soap->socket = SOAP_INVALID_SOCKET;
+
+    auto sess = std::make_shared<TunnelSession>();
+    sess->rtspSock = rtspSock;
+    sess->getSock = clientSock;
+    sess->relay = std::thread([sess]() {
+        char buf[8192];
+        while (sess->alive) {
+            ssize_t n = ::recv(sess->rtspSock, buf, sizeof(buf), 0);
+            if (n <= 0) break;
+            if (::send(sess->getSock, buf, n, MSG_NOSIGNAL) <= 0) break;
+        }
+        sess->alive = false;
+    });
+    {
+        std::lock_guard<std::mutex> lk(g_tunnelMtx);
+        g_tunnelSessions[cookie] = sess;
+    }
+    std::cerr << "[Tunnel] GET " << path << " cookie=" << cookie
+              << " session established" << std::endl;
+    return true;
+}
+
+// Handle POST tunnel: decode base64 body, forward to mediamtx socket.
+static bool handleTunnelPost(struct soap* soap, const std::string& path,
+                              const std::string& body) {
+    std::string cookie = extractCookie(g_current_headers);
+    if (cookie.empty()) return false;
+    if (path != "/main" && path != "/jpeg" && path != "/sub1" && path != "/sub2") {
+        return false;
+    }
+    std::shared_ptr<TunnelSession> sess;
+    {
+        std::lock_guard<std::mutex> lk(g_tunnelMtx);
+        auto it = g_tunnelSessions.find(cookie);
+        if (it == g_tunnelSessions.end()) return false;
+        sess = it->second;
+    }
+    if (!sess || !sess->alive) return false;
+    std::string decoded = b64decode(body);
+    if (!decoded.empty() && sess->rtspSock >= 0) {
+        ::send(sess->rtspSock, decoded.data(), decoded.size(), MSG_NOSIGNAL);
+    }
+    // Respond 200 OK, close POST connection
+    const char* resp =
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Length: 0\r\n"
+        "Connection: close\r\n"
+        "\r\n";
+    ::send(soap->socket, resp, std::strlen(resp), 0);
+    return true;
+}
+#endif  // !_WIN32
+
 // gSOAP HTTP GET handler — được gọi tự động khi request là "GET /..." thay vì POST.
 // Thay cho peek trước soap_begin_serve (timing không tin cậy, tool nhận 405).
 // Xử lý /snapshot và /snapshot?token=xxx → trả JPEG stub 200 OK.
@@ -80,6 +266,18 @@ static int onHttpGet(struct soap* soap) {
         soap_end_send(soap);
         return SOAP_OK;
     }
+#ifndef _WIN32
+    // Full B: RTSP-over-HTTP tunnel GET. Detect qua x-sessioncookie header.
+    if (!g_current_headers.empty() &&
+        (g_current_headers.find("x-sessioncookie") != std::string::npos ||
+         g_current_headers.find("X-Sessioncookie") != std::string::npos ||
+         g_current_headers.find("X-SessionCookie") != std::string::npos)) {
+        std::string pathStr(path);
+        if (handleTunnelGet(soap, pathStr)) {
+            return SOAP_OK;
+        }
+    }
+#endif
     return 404;  // Not Found cho các GET khác
 }
 
@@ -310,6 +508,25 @@ void OnvifServer::listenLoop() {
                 soap_end(soap);
                 continue;
             }
+
+#ifndef _WIN32
+            // Full B: RTSP-over-HTTP tunnel POST. Detect content-type + cookie.
+            if ((path == "/main" || path == "/jpeg" ||
+                 path == "/sub1" || path == "/sub2") &&
+                g_current_headers.find("x-rtsp-tunnelled") != std::string::npos) {
+                // Extract POST body từ full HTTP request buffer
+                std::string body;
+                auto hb = g_current_headers.find("\r\n\r\n");
+                if (hb != std::string::npos) {
+                    body = g_current_headers.substr(hb + 4);
+                }
+                if (handleTunnelPost(soap, path, body)) {
+                    soap_destroy(soap);
+                    soap_end(soap);
+                    continue;
+                }
+            }
+#endif
 
             // Kiểm tra xác thực HTTP Digest. Bỏ qua nếu request có WS-Security
             // UsernameToken — ONVIF cho phép 1 trong 2 (SECURITY-1-1-1 test).
