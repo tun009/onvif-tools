@@ -120,7 +120,7 @@ std::string DiscoveryService::scopesLine() const {
             "onvif://www.onvif.org/type/video_encoder",
             "onvif://www.onvif.org/name/MockCam-4K",
             "onvif://www.onvif.org/hardware/JetsonOrinNX-8GB",
-            // "onvif://www.onvif.org/Profile/Streaming",  // Profile S — TẠM COMMENT (chỉ target Profile T). Đồng bộ với DeviceService.h. Xem docs/08-scope-profile-note.md
+            "onvif://www.onvif.org/Profile/Streaming",   // Profile S — declared cùng Profile T
             "onvif://www.onvif.org/Profile/T"
         };
     }

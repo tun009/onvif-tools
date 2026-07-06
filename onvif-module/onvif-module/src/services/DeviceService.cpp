@@ -367,12 +367,16 @@ int DeviceService::GetServices(
         svc("http://www.onvif.org/ver10/device/wsdl", "/onvif/device_service",
             21, 12, devCaps);
 
-        // Media1 (ver10 legacy) — TẠM COMMENT (chỉ target Profile T).
-        // Uncomment nếu cần declare Media1 (Profile S backward compat) — xem
-        // docs/09-media1-legacy-note.md. Trước đây giữ Media1 vì Imaging test
-        // cần GetVideoSources, giờ DeviceIO đã provide → không cần nữa.
-        // std::string mediaCaps = ...
-        // svc("http://www.onvif.org/ver10/media/wsdl", "/onvif/media", ...);
+        // Media1 (ver10 legacy) — declared cho Profile S support.
+        std::string mediaCaps =
+            "<trt:Capabilities SnapshotUri=\"true\" Rotation=\"false\" "
+             "VideoSourceMode=\"false\" OSD=\"true\">"
+              "<trt:ProfileCapabilities MaximumNumberOfProfiles=\"3\"/>"
+              "<trt:StreamingCapabilities RTPMulticast=\"false\" "
+               "RTP_TCP=\"true\" RTP_RTSP_TCP=\"true\" NonAggregateControl=\"false\"/>"
+            "</trt:Capabilities>";
+        svc("http://www.onvif.org/ver10/media/wsdl", "/onvif/media",
+            21, 12, mediaCaps);
 
         // Media2 (ver20 - Profile T mandatory)
         std::string media2Caps =
@@ -435,10 +439,7 @@ int DeviceService::GetServices(
     };
 
     add("http://www.onvif.org/ver10/device/wsdl",  "/onvif/device_service", 21, 12); // Device
-    // Media1 (ver10 legacy) — TẠM COMMENT (chỉ target Profile T, dùng Media2).
-    // Trước đây giữ để Imaging test discovery VideoSource; giờ DeviceIO đã
-    // provide GetVideoSources. Uncomment nếu cần Profile S — xem docs/09-media1-legacy-note.md
-    // add("http://www.onvif.org/ver10/media/wsdl",   "/onvif/media",          21, 12);
+    add("http://www.onvif.org/ver10/media/wsdl",   "/onvif/media",          21, 12); // Media1 (Profile S)
     add("http://www.onvif.org/ver20/media/wsdl",   "/onvif/media",          21, 12); // Media2 (Profile T)
     add("http://www.onvif.org/ver10/events/wsdl",  "/onvif/event",          21, 12); // Events (Profile T)
     add("http://www.onvif.org/ver20/imaging/wsdl", "/onvif/imaging",        21, 12); // Imaging (Profile T)

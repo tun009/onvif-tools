@@ -213,6 +213,9 @@ void OnvifServer::listenLoop() {
 
     std::cout << "[OnvifServer] Listening on port " << cfg_.httpPort << std::endl;
 
+    // Wire Media1 legacy handler với deviceIp/port (dùng trong GetStreamUri/SnapshotUri)
+    MediaLegacyHandler::setEndpoint(cfg_.deviceIp, cfg_.httpPort);
+
     while (running_) {
         SOAP_SOCKET clientSocket = soap_accept(soap);
         if (clientSocket == SOAP_INVALID_SOCKET) {
