@@ -869,7 +869,7 @@ std::string MediaLegacyHandler::handleGetStreamUri(const std::string& req) {
          << "<tt:InvalidAfterConnect>false</tt:InvalidAfterConnect>"
          << "<tt:InvalidAfterReboot>false</tt:InvalidAfterReboot>"
          << "<tt:Timeout>PT60S</tt:Timeout>"
-       << "</tt:MediaUri>"
+       << "</trt:MediaUri>"
        << "</trt:GetStreamUriResponse>";
     return os.str();
 }
