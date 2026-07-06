@@ -98,6 +98,24 @@ struct TunnelSession {
 static std::map<std::string, std::shared_ptr<TunnelSession>> g_tunnelSessions;
 static std::mutex g_tunnelMtx;
 
+// Base64 encoder (thử variant spec khi tool expect responses cũng base64)
+static std::string b64encode(const unsigned char* data, size_t len) {
+    static const char alpha[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    out.reserve(((len + 2) / 3) * 4);
+    for (size_t i = 0; i < len; i += 3) {
+        unsigned int b = (data[i] << 16);
+        if (i + 1 < len) b |= (data[i+1] << 8);
+        if (i + 2 < len) b |= data[i+2];
+        out.push_back(alpha[(b >> 18) & 0x3F]);
+        out.push_back(alpha[(b >> 12) & 0x3F]);
+        out.push_back(i + 1 < len ? alpha[(b >> 6) & 0x3F] : '=');
+        out.push_back(i + 2 < len ? alpha[b & 0x3F] : '=');
+    }
+    return out;
+}
+
 // Base64 decoder — RTSP tunnel client gửi base64 encoded RTSP commands.
 static std::string b64decode(const std::string& in) {
     static int T[256];
@@ -191,12 +209,16 @@ static bool handleTunnelGet(struct soap* soap, const std::string& path) {
     // Disable Nagle: RTSP response cần deliver ngay lập tức, không buffer
     int one = 1;
     setsockopt(clientSock, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+    // Content-Length fake lớn: .NET HttpClient default sẽ đọc streaming until
+    // đủ bytes hoặc connection close. Tool đọc RTSP responses như raw bytes.
     const char* resp =
         "HTTP/1.1 200 OK\r\n"
         "Server: gSOAP/2.8\r\n"
         "Content-Type: application/x-rtsp-tunnelled\r\n"
+        "Content-Length: 2000000000\r\n"
         "Cache-Control: no-store\r\n"
         "Pragma: no-cache\r\n"
+        "Connection: keep-alive\r\n"
         "\r\n";
     ::send(clientSock, resp, std::strlen(resp), 0);
 
