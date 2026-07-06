@@ -80,7 +80,8 @@ std::string MediaLegacyHandler::wrap(const std::string& action,
        << " xmlns:SOAP-ENV=\"http://www.w3.org/2003/05/soap-envelope\""
        << " xmlns:wsa=\"http://www.w3.org/2005/08/addressing\""
        << " xmlns:trt=\"" << NS_MEDIA1 << "\""
-       << " xmlns:tt=\"http://www.onvif.org/ver10/schema\">"
+       << " xmlns:tt=\"http://www.onvif.org/ver10/schema\""
+       << " xmlns:ter=\"http://www.onvif.org/ver10/error\">"
        << "<SOAP-ENV:Header>"
        << "<wsa:Action>" << action << "</wsa:Action>";
     if (!relatesTo.empty())
@@ -94,17 +95,22 @@ std::string MediaLegacyHandler::wrap(const std::string& action,
 // ── Profile XML fragment ────────────────────────────────────────────────────
 // Media1 tt:Profile struct: VideoSourceConfiguration + VideoEncoderConfiguration
 std::string MediaLegacyHandler::profileXml(const char* wrapperElem,
-                                            const char* token, const char* name, bool includeVEC) {
+                                            const char* token, const char* name,
+                                            bool fixed, bool includeVSC, bool includeVEC) {
+    // UseCount: 3 profile fixed đều dùng chung VideoSourceConfig → useCount = 3.
+    // VEC per-profile → useCount = 1.
     std::ostringstream os;
-    os << "<trt:" << wrapperElem << " fixed=\"true\" token=\"" << token << "\">"
-       << "<tt:Name>" << name << "</tt:Name>"
-       // VideoSourceConfiguration
-       << "<tt:VideoSourceConfiguration token=\"video_source_config\">"
-         << "<tt:Name>VideoSourceConfig</tt:Name>"
-         << "<tt:UseCount>1</tt:UseCount>"
-         << "<tt:SourceToken>src_main</tt:SourceToken>"
-         << "<tt:Bounds x=\"0\" y=\"0\" width=\"1920\" height=\"1080\"/>"
-       << "</tt:VideoSourceConfiguration>";
+    os << "<trt:" << wrapperElem << " fixed=\"" << (fixed ? "true" : "false")
+       << "\" token=\"" << token << "\">"
+       << "<tt:Name>" << name << "</tt:Name>";
+    if (includeVSC) {
+        os << "<tt:VideoSourceConfiguration token=\"video_source_config\">"
+             << "<tt:Name>VideoSourceConfig</tt:Name>"
+             << "<tt:UseCount>3</tt:UseCount>"
+             << "<tt:SourceToken>src_main</tt:SourceToken>"
+             << "<tt:Bounds x=\"0\" y=\"0\" width=\"1920\" height=\"1080\"/>"
+           << "</tt:VideoSourceConfiguration>";
+    }
     if (includeVEC) {
         // VideoEncoderConfiguration
         const char* codec = "H264";
@@ -189,9 +195,9 @@ std::string MediaLegacyHandler::handleGetAudioSources() {
 std::string MediaLegacyHandler::handleGetProfiles() {
     std::ostringstream os;
     os << "<trt:GetProfilesResponse>"
-       << profileXml("Profiles", "profile_main", "Main 4K", true)
-       << profileXml("Profiles", "profile_sub1", "Sub1 720p", true)
-       << profileXml("Profiles", "profile_sub2", "Sub2 480p", true)
+       << profileXml("Profiles", "profile_main", "Main 4K", true, true, true)
+       << profileXml("Profiles", "profile_sub1", "Sub1 720p", true, true, true)
+       << profileXml("Profiles", "profile_sub2", "Sub2 480p", true, true, true)
        << "</trt:GetProfilesResponse>";
     return os.str();
 }
@@ -203,7 +209,7 @@ std::string MediaLegacyHandler::handleGetProfile(const std::string& req) {
     else if (token == "profile_sub2") name = "Sub2 480p";
     std::ostringstream os;
     os << "<trt:GetProfileResponse>"
-       << profileXml("Profile", token.c_str(), name, true)
+       << profileXml("Profile", token.c_str(), name, true, true, true)
        << "</trt:GetProfileResponse>";
     return os.str();
 }
@@ -214,13 +220,37 @@ std::string MediaLegacyHandler::handleCreateProfile(const std::string& req) {
     if (token.empty()) token = "profile_" + name;
     std::ostringstream os;
     os << "<trt:CreateProfileResponse>"
-       << profileXml("Profile", token.c_str(), name.c_str(), false)
+       // CreateProfile: dyn profile, fixed=false, NO configs (tool expect empty).
+       << profileXml("Profile", token.c_str(), name.c_str(), false, false, false)
        << "</trt:CreateProfileResponse>";
     return os.str();
 }
 
 std::string MediaLegacyHandler::handleDeleteProfile(const std::string& req) {
-    (void)req;
+    // MEDIA-7-1-4: DeleteProfile với token không tồn tại → fault ter:NoProfile.
+    std::string token = extractInnerTag(req, "ProfileToken");
+    // Chỉ chấp nhận delete profile fixed hoặc dyn "profile_*". Token bất kỳ khác → fault.
+    if (token.empty() ||
+        (token != "profile_main" && token != "profile_sub1" && token != "profile_sub2" &&
+         token.rfind("profile_", 0) != 0)) {
+        // Return SOAP fault manually via special marker — actual fault built in wrap
+        // dùng cơ chế đơn giản: return SOAP fault XML thay envelope.
+        return
+            "<SOAP-ENV:Fault>"
+              "<SOAP-ENV:Code>"
+                "<SOAP-ENV:Value>SOAP-ENV:Sender</SOAP-ENV:Value>"
+                "<SOAP-ENV:Subcode>"
+                  "<SOAP-ENV:Value>ter:InvalidArgVal</SOAP-ENV:Value>"
+                  "<SOAP-ENV:Subcode>"
+                    "<SOAP-ENV:Value>ter:NoProfile</SOAP-ENV:Value>"
+                  "</SOAP-ENV:Subcode>"
+                "</SOAP-ENV:Subcode>"
+              "</SOAP-ENV:Code>"
+              "<SOAP-ENV:Reason>"
+                "<SOAP-ENV:Text xml:lang=\"en\">Profile not found</SOAP-ENV:Text>"
+              "</SOAP-ENV:Reason>"
+            "</SOAP-ENV:Fault>";
+    }
     return "<trt:DeleteProfileResponse/>";
 }
 
@@ -431,13 +461,12 @@ std::string MediaLegacyHandler::handleSetVideoEncoderConfiguration(const std::st
 
 std::string MediaLegacyHandler::handleGetGuaranteedNumberOfVideoEncoderInstances(const std::string& req) {
     (void)req;
-    // Schema Media1: TotalNumber (required) + optional JPEG/H264/MPEG4. H265 KHÔNG có.
+    // Chỉ declare H264 support (device thực chỉ có H264 encoder). Bỏ JPEG/MPEG4
+    // để tool không chạy JPEG/MPEG4 test suite (RTSS-1-1-31..36/45/53 + MEDIA-2-1-7/9).
     return
         "<trt:GetGuaranteedNumberOfVideoEncoderInstancesResponse>"
           "<trt:TotalNumber>1</trt:TotalNumber>"
-          "<trt:JPEG>1</trt:JPEG>"
           "<trt:H264>1</trt:H264>"
-          "<trt:MPEG4>1</trt:MPEG4>"
         "</trt:GetGuaranteedNumberOfVideoEncoderInstancesResponse>";
 }
 

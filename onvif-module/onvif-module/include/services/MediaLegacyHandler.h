@@ -56,6 +56,9 @@ private:
                             const std::string& relatesTo,
                             const std::string& bodyXml);
     // wrapperElem = "Profiles" (list, plural) hoặc "Profile" (single).
+    // fixed=true cho profile default backend, false cho dyn CreateProfile.
+    // includeVSC/includeVEC: kèm configuration blocks hay không.
     static std::string profileXml(const char* wrapperElem,
-                                  const char* token, const char* name, bool includeVEC);
+                                  const char* token, const char* name,
+                                  bool fixed, bool includeVSC, bool includeVEC);
 };
