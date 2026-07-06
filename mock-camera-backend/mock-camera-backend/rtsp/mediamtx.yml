@@ -24,10 +24,13 @@ paths:
     runOnInitRestart: yes
 
   jpeg:
-    # profile_jpeg = MJPEG 1920x1080@30. RTSS-1-1-31..36/53 cần JPEG stream thực.
+    # profile_jpeg = MJPEG 1920x1080@30. RTSS-1-1-31..36/53 cần JPEG stream với
+    # STANDARD Huffman tables (RFC 2435 yêu cầu). ffmpeg mjpeg mặc định dùng
+    # optimized Huffman → tool ONVIF reject. Fix bằng -huffman default +
+    # -pix_fmt yuvj420p (RTP JPEG chỉ nhận YCbCr 4:2:0 hoặc 4:2:2).
     runOnInit: >-
       ffmpeg -re -f lavfi -i testsrc2=size=1920x1080:rate=30
-      -c:v mjpeg -q:v 5
+      -c:v mjpeg -huffman default -pix_fmt yuvj420p -q:v 5
       -f rtsp -rtsp_transport tcp
       rtsp://127.0.0.1:8554/jpeg
     runOnInitRestart: yes

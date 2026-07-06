@@ -749,10 +749,23 @@ std::string MediaLegacyHandler::handleGetStreamUri(const std::string& req) {
     if (token == "profile_sub1") stream = "sub1";
     else if (token == "profile_sub2") stream = "sub2";
     else if (token == "profile_jpeg") stream = "jpeg";
+    // RTSS-1-1-42: nếu StreamSetup.Transport.Protocol=HTTP, tool expect scheme
+    // "http://" (RTSP-over-HTTP tunneling). Default là rtsp:// cho UDP/TCP.
+    std::string scheme = "rtsp";
+    {
+        auto pp = req.find("<tt:Protocol>");
+        if (pp == std::string::npos) pp = req.find("<Protocol>");
+        if (pp != std::string::npos) {
+            auto pe = req.find("Protocol>", pp);
+            auto content = req.substr(pp, req.find('<', pe+9) - pp);
+            if (content.find("HTTP") != std::string::npos ||
+                content.find("http") != std::string::npos) scheme = "http";
+        }
+    }
     std::ostringstream os;
     os << "<trt:GetStreamUriResponse>"
        << "<trt:MediaUri>"
-         << "<tt:Uri>rtsp://" << g_deviceIp << ":8554/" << stream << "</tt:Uri>"
+         << "<tt:Uri>" << scheme << "://" << g_deviceIp << ":8554/" << stream << "</tt:Uri>"
          << "<tt:InvalidAfterConnect>false</tt:InvalidAfterConnect>"
          << "<tt:InvalidAfterReboot>false</tt:InvalidAfterReboot>"
          << "<tt:Timeout>PT60S</tt:Timeout>"
