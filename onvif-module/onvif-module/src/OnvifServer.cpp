@@ -180,15 +180,16 @@ static bool handleTunnelGet(struct soap* soap, const std::string& path) {
         std::cerr << "[Tunnel] mediamtx connect failed" << std::endl;
         return false;
     }
-    // Send tunnel response headers immediately
+    // Send tunnel response headers. QUAN TRỌNG: KHÔNG có Connection: close hay
+    // Content-Length — GET connection phải mở vô hạn để stream RTSP responses
+    // từ mediamtx về client (per Apple RTSP-over-HTTP spec 2002).
     int clientSock = soap->socket;
     const char* resp =
         "HTTP/1.1 200 OK\r\n"
         "Server: gSOAP/2.8\r\n"
         "Content-Type: application/x-rtsp-tunnelled\r\n"
-        "Cache-Control: no-cache\r\n"
+        "Cache-Control: no-store\r\n"
         "Pragma: no-cache\r\n"
-        "Connection: close\r\n"
         "\r\n";
     ::send(clientSock, resp, std::strlen(resp), 0);
 
@@ -202,8 +203,13 @@ static bool handleTunnelGet(struct soap* soap, const std::string& path) {
         char buf[8192];
         while (sess->alive) {
             ssize_t n = ::recv(sess->rtspSock, buf, sizeof(buf), 0);
-            if (n <= 0) break;
-            if (::send(sess->getSock, buf, n, MSG_NOSIGNAL) <= 0) break;
+            if (n <= 0) {
+                std::cerr << "[Tunnel] relay: rtsp recv=" << n << " exit" << std::endl;
+                break;
+            }
+            ssize_t sn = ::send(sess->getSock, buf, n, MSG_NOSIGNAL);
+            std::cerr << "[Tunnel] relay: rtsp->client " << n << "B sent=" << sn << std::endl;
+            if (sn <= 0) break;
         }
         sess->alive = false;
     });
