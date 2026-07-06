@@ -64,21 +64,17 @@ static const unsigned char JPEG_STUB_BYTES[] = {
 static int onHttpGet(struct soap* soap) {
     const char* path = soap->path ? soap->path : "";
     if (std::strstr(path, "/snapshot") != nullptr) {
-        // MEDIA-6-1-1: write HTTP response manually. soap_response(SOAP_FILE)
-        // wrap kèm SOAP/framing khiến tool nhận thừa byte → "not JPEG".
-        char header[256];
-        int n = std::snprintf(header, sizeof(header),
-            "HTTP/1.1 200 OK\r\n"
-            "Server: gSOAP/2.8\r\n"
-            "Content-Type: image/jpeg\r\n"
-            "Content-Length: %zu\r\n"
-            "Connection: close\r\n"
-            "\r\n",
-            sizeof(JPEG_STUB_BYTES));
-        if (soap_send_raw(soap, header, n) != SOAP_OK) return soap->error;
+        // MEDIA-6-1-1: dùng gSOAP HTTP framing chuẩn — set count TRƯỚC
+        // soap_response để Content-Length khớp, http_content=image/jpeg để
+        // header đúng, sau đó soap_send_raw body + soap_end_send.
+        soap->http_content = "image/jpeg";
+        soap->count = sizeof(JPEG_STUB_BYTES);
+        soap->length = sizeof(JPEG_STUB_BYTES);
+        if (soap_response(soap, SOAP_FILE) != SOAP_OK) return soap->error;
         if (soap_send_raw(soap,
                           reinterpret_cast<const char*>(JPEG_STUB_BYTES),
                           sizeof(JPEG_STUB_BYTES)) != SOAP_OK) return soap->error;
+        soap_end_send(soap);
         return SOAP_OK;
     }
     return 404;  // Not Found cho các GET khác

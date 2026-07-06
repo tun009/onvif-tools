@@ -745,27 +745,33 @@ std::string MediaLegacyHandler::handleGetStreamUri(const std::string& req) {
                 "</SOAP-ENV:Fault>";
         }
     }
+    // Map stream theo VEC encoding hiện tại của profile — nếu tool đã Add JPEG
+    // VEC vào profile_main, phải return path "jpeg" (không phải "main").
+    // Otherwise fixed mapping theo profile token.
     std::string stream = "main";
-    if (token == "profile_sub1") stream = "sub1";
-    else if (token == "profile_sub2") stream = "sub2";
-    else if (token == "profile_jpeg") stream = "jpeg";
-    // RTSS-1-1-42: nếu StreamSetup.Transport.Protocol=HTTP, tool expect scheme
-    // "http://" (RTSP-over-HTTP tunneling). Default là rtsp:// cho UDP/TCP.
-    std::string scheme = "rtsp";
     {
-        auto pp = req.find("<tt:Protocol>");
-        if (pp == std::string::npos) pp = req.find("<Protocol>");
-        if (pp != std::string::npos) {
-            auto pe = req.find("Protocol>", pp);
-            auto content = req.substr(pp, req.find('<', pe+9) - pp);
-            if (content.find("HTTP") != std::string::npos ||
-                content.find("http") != std::string::npos) scheme = "http";
+        std::lock_guard<std::mutex> lk(g_stateMtx);
+        ensureFixedVecState();
+        std::string vecToken;
+        if (token == "profile_main")      vecToken = "video_encoder_config";
+        else if (token == "profile_sub1") vecToken = "video_encoder_config_profile_sub1";
+        else if (token == "profile_sub2") vecToken = "video_encoder_config_profile_sub2";
+        else if (token == "profile_jpeg") vecToken = "video_encoder_config_jpeg";
+        else {
+            auto it = g_dynProfiles.find(token);
+            if (it != g_dynProfiles.end()) vecToken = it->second.veToken;
         }
+        auto vit = g_vecState.find(vecToken);
+        if (vit != g_vecState.end() && vit->second.encoding == "JPEG") {
+            stream = "jpeg";
+        } else if (token == "profile_sub1") stream = "sub1";
+        else if (token == "profile_sub2") stream = "sub2";
+        else if (token == "profile_jpeg") stream = "jpeg";
     }
     std::ostringstream os;
     os << "<trt:GetStreamUriResponse>"
        << "<trt:MediaUri>"
-         << "<tt:Uri>" << scheme << "://" << g_deviceIp << ":8554/" << stream << "</tt:Uri>"
+         << "<tt:Uri>rtsp://" << g_deviceIp << ":8554/" << stream << "</tt:Uri>"
          << "<tt:InvalidAfterConnect>false</tt:InvalidAfterConnect>"
          << "<tt:InvalidAfterReboot>false</tt:InvalidAfterReboot>"
          << "<tt:Timeout>PT60S</tt:Timeout>"
