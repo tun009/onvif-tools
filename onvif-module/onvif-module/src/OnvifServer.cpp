@@ -24,6 +24,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <netinet/tcp.h>
 #include <fcntl.h>
 #endif
 
@@ -161,6 +162,9 @@ static int connectMediamtx() {
         ::close(sock);
         return -1;
     }
+    // Disable Nagle để RTSP responses không bị buffer
+    int one = 1;
+    setsockopt(sock, IPPROTO_TCP, 1 /*TCP_NODELAY*/, &one, sizeof(one));
     return sock;
 #endif
 }
@@ -184,6 +188,9 @@ static bool handleTunnelGet(struct soap* soap, const std::string& path) {
     // Content-Length — GET connection phải mở vô hạn để stream RTSP responses
     // từ mediamtx về client (per Apple RTSP-over-HTTP spec 2002).
     int clientSock = soap->socket;
+    // Disable Nagle: RTSP response cần deliver ngay lập tức, không buffer
+    int one = 1;
+    setsockopt(clientSock, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
     const char* resp =
         "HTTP/1.1 200 OK\r\n"
         "Server: gSOAP/2.8\r\n"
@@ -245,13 +252,17 @@ static bool handleTunnelPost(struct soap* soap, const std::string& path,
     if (!decoded.empty() && sess->rtspSock >= 0) {
         ::send(sess->rtspSock, decoded.data(), decoded.size(), MSG_NOSIGNAL);
     }
+    // Steal POST socket từ gSOAP để tránh soap_destroy/soap_end gửi thêm data
+    int postSock = soap->socket;
+    soap->socket = SOAP_INVALID_SOCKET;
     // Respond 200 OK, close POST connection
     const char* resp =
         "HTTP/1.1 200 OK\r\n"
         "Content-Length: 0\r\n"
         "Connection: close\r\n"
         "\r\n";
-    ::send(soap->socket, resp, std::strlen(resp), 0);
+    ::send(postSock, resp, std::strlen(resp), MSG_NOSIGNAL);
+    ::close(postSock);
     return true;
 }
 #endif  // !_WIN32
