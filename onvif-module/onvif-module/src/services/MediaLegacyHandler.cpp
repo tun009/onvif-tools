@@ -762,25 +762,57 @@ std::string MediaLegacyHandler::handleSetVideoEncoderConfiguration(const std::st
     }
     if (cfgTok.empty()) return "<trt:SetVideoEncoderConfigurationResponse/>";
 
+    // MEDIA-2-1-9/11 negative: validate BEFORE persist. Nếu out-of-range so với
+    // Options → fault ter:InvalidArgVal/ConfigModify. Case đã bắt được:
+    //  - JPEG Height=1081 (max 1080)   (MEDIA-2-1-9)
+    //  - GovLength=61 (max 60)         (MEDIA-2-1-11)
+    std::string enc = extractInnerTag(req, "Encoding");
+    std::string ws = extractInnerTag(req, "Width");
+    std::string hs = extractInnerTag(req, "Height");
+    std::string fr = extractInnerTag(req, "FrameRateLimit");
+    std::string gv = extractInnerTag(req, "GovLength");
+    std::string ql = extractInnerTag(req, "Quality");
+    auto toi = [](const std::string& s, int def) {
+        try { return s.empty() ? def : std::stoi(s); } catch (...) { return def; }
+    };
+    int nw = toi(ws, 0), nh = toi(hs, 0);
+    int nfr = toi(fr, 0), ngv = toi(gv, 0), nql = toi(ql, -1);
+    bool invalid = false;
+    if (enc == "JPEG") {
+        // JPEG allowed: 1920x1080, 1280x720, 640x480
+        if (nw > 1920 || nh > 1080) invalid = true;
+    } else if (enc == "H264") {
+        // H264 allowed: max 3840x2160
+        if (nw > 3840 || nh > 2160) invalid = true;
+        if (ngv > 60 || ngv < 0) invalid = true;
+    }
+    if (nfr > 30 || nfr < 0) invalid = true;
+    if (nql > 10 || nql < -1) invalid = true;
+    if (invalid) {
+        return
+            "<SOAP-ENV:Fault>"
+              "<SOAP-ENV:Code><SOAP-ENV:Value>SOAP-ENV:Sender</SOAP-ENV:Value>"
+                "<SOAP-ENV:Subcode><SOAP-ENV:Value>ter:InvalidArgVal</SOAP-ENV:Value>"
+                  "<SOAP-ENV:Subcode><SOAP-ENV:Value>ter:ConfigModify</SOAP-ENV:Value></SOAP-ENV:Subcode>"
+                "</SOAP-ENV:Subcode>"
+              "</SOAP-ENV:Code>"
+              "<SOAP-ENV:Reason><SOAP-ENV:Text xml:lang=\"en\">VideoEncoder value out of range</SOAP-ENV:Text></SOAP-ENV:Reason>"
+            "</SOAP-ENV:Fault>";
+    }
+
     std::lock_guard<std::mutex> lk(g_stateMtx);
     ensureFixedVecState();
     auto& v = g_vecState[cfgTok];
-    std::string enc = extractInnerTag(req, "Encoding");
     if (!enc.empty()) v.encoding = enc;
-    std::string ws = extractInnerTag(req, "Width");
-    std::string hs = extractInnerTag(req, "Height");
-    try { if (!ws.empty()) v.width = std::stoi(ws); } catch (...) {}
-    try { if (!hs.empty()) v.height = std::stoi(hs); } catch (...) {}
-    std::string fr = extractInnerTag(req, "FrameRateLimit");
-    try { if (!fr.empty()) v.frameRate = std::stoi(fr); } catch (...) {}
+    if (!ws.empty()) v.width = nw;
+    if (!hs.empty()) v.height = nh;
+    if (!fr.empty()) v.frameRate = nfr;
     std::string br = extractInnerTag(req, "BitrateLimit");
     try { if (!br.empty()) v.bitrate = std::stoi(br); } catch (...) {}
-    std::string gv = extractInnerTag(req, "GovLength");
-    try { if (!gv.empty()) v.govLength = std::stoi(gv); } catch (...) {}
+    if (!gv.empty()) v.govLength = ngv;
     std::string h264p = extractInnerTag(req, "H264Profile");
     if (!h264p.empty()) v.h264Profile = h264p;
-    std::string ql = extractInnerTag(req, "Quality");
-    try { if (!ql.empty()) v.quality = std::stoi(ql); } catch (...) {}
+    if (!ql.empty()) v.quality = nql;
     // A: PATCH mediamtx path để ffmpeg restart với resolution/encoding mới
     // (unlock RTSS-1-1-46/48). Snapshot state để tránh lock trong network call.
     std::string mtxPath = vecTokenToPath(cfgTok);
