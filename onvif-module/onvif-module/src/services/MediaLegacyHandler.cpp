@@ -9,6 +9,14 @@
 #include <map>
 #include <set>
 #include <vector>
+#include <cstring>
+#include <cstdio>
+#ifdef __linux__
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#endif
 
 namespace {
 const char* NS_MEDIA1 = "http://www.onvif.org/ver10/media/wsdl";
@@ -20,6 +28,69 @@ int         g_rtspPort = 8554;
 
 std::string actUrl(const char* op) {
     return std::string(ACT) + op + "Response";
+}
+
+// ── mediamtx REST API (dynamic ffmpeg restart on Set) ──────────────────────
+// RTSS-1-1-46/48: tool set VEC resolution mới rồi verify frames. Cần restart
+// ffmpeg với resolution mới. mediamtx API :19997 PATCH path config → auto
+// kill old ffmpeg + spawn new (~3-5s). Cần OperationDelay >= 5000ms trong tool.
+static void patchMediamtxPath(const std::string& pathName,
+                               const std::string& encoding,
+                               int width, int height, int fps) {
+#ifdef __linux__
+    if (pathName.empty() || width <= 0 || height <= 0 || fps <= 0) return;
+    std::ostringstream cmd;
+    cmd << "ffmpeg -re -f lavfi -i testsrc2=size=" << width << "x" << height
+        << ":rate=" << fps << " ";
+    if (encoding == "JPEG") {
+        cmd << "-c:v mjpeg -huffman default -pix_fmt yuvj420p -q:v 5 ";
+    } else {
+        cmd << "-c:v libx264 -preset ultrafast -tune zerolatency ";
+    }
+    cmd << "-f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/" << pathName;
+    // Escape JSON string
+    std::string cmdStr = cmd.str();
+    std::string esc;
+    for (char c : cmdStr) {
+        if (c == '"' || c == '\\') esc += '\\';
+        esc += c;
+    }
+    std::string body = "{\"runOnInit\":\"" + esc + "\",\"runOnInitRestart\":true}";
+    std::ostringstream req;
+    req << "PATCH /v3/config/paths/patch/" << pathName << " HTTP/1.1\r\n"
+        << "Host: 127.0.0.1:19997\r\n"
+        << "Content-Type: application/json\r\n"
+        << "Content-Length: " << body.size() << "\r\n"
+        << "Connection: close\r\n\r\n" << body;
+    std::string reqStr = req.str();
+
+    int sock = ::socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0) return;
+    struct sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(19997);
+    inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+    struct timeval tv{2, 0};
+    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    if (::connect(sock, (struct sockaddr*)&addr, sizeof(addr)) == 0) {
+        ::send(sock, reqStr.data(), reqStr.size(), 0);
+        char buf[256];
+        ::recv(sock, buf, sizeof(buf), 0);  // drain response
+    }
+    ::close(sock);
+#else
+    (void)pathName; (void)encoding; (void)width; (void)height; (void)fps;
+#endif
+}
+
+// Map VEC token → mediamtx path name
+static const char* vecTokenToPath(const std::string& vecToken) {
+    if (vecToken == "video_encoder_config") return "main";
+    if (vecToken == "video_encoder_config_profile_sub1") return "sub1";
+    if (vecToken == "video_encoder_config_profile_sub2") return "sub2";
+    if (vecToken == "video_encoder_config_jpeg") return "jpeg";
+    return "main";
 }
 
 // ── Media1 state tracking ───────────────────────────────────────────────────
@@ -710,6 +781,12 @@ std::string MediaLegacyHandler::handleSetVideoEncoderConfiguration(const std::st
     if (!h264p.empty()) v.h264Profile = h264p;
     std::string ql = extractInnerTag(req, "Quality");
     try { if (!ql.empty()) v.quality = std::stoi(ql); } catch (...) {}
+    // A: PATCH mediamtx path để ffmpeg restart với resolution/encoding mới
+    // (unlock RTSS-1-1-46/48). Snapshot state để tránh lock trong network call.
+    std::string mtxPath = vecTokenToPath(cfgTok);
+    std::string mtxEnc = v.encoding;
+    int mtxW = v.width, mtxH = v.height, mtxFps = v.frameRate;
+    patchMediamtxPath(mtxPath, mtxEnc, mtxW, mtxH, mtxFps);
     return "<trt:SetVideoEncoderConfigurationResponse/>";
 }
 
@@ -768,14 +845,31 @@ std::string MediaLegacyHandler::handleGetStreamUri(const std::string& req) {
         else if (token == "profile_sub2") stream = "sub2";
         else if (token == "profile_jpeg") stream = "jpeg";
     }
+    // B (half-fix): scheme phải khớp Transport.Protocol. HTTP tunneling → http://
+    // (RTSS-1-1-28/35/42/45). RTP-Multicast/UDP/TCP → rtsp://.
+    std::string scheme = "rtsp";
+    int port = 8554;
+    {
+        auto pp = req.find("<tt:Protocol>");
+        if (pp == std::string::npos) pp = req.find("<Protocol>");
+        if (pp != std::string::npos) {
+            auto pe = req.find("Protocol>", pp) + 9;
+            auto ec = req.find('<', pe);
+            std::string proto = req.substr(pe, ec - pe);
+            if (proto.find("HTTP") != std::string::npos) {
+                scheme = "http";
+                port = g_httpPort;  // 8080 — HTTP tunnel qua cổng ONVIF
+            }
+        }
+    }
     std::ostringstream os;
     os << "<trt:GetStreamUriResponse>"
        << "<trt:MediaUri>"
-         << "<tt:Uri>rtsp://" << g_deviceIp << ":8554/" << stream << "</tt:Uri>"
+         << "<tt:Uri>" << scheme << "://" << g_deviceIp << ":" << port << "/" << stream << "</tt:Uri>"
          << "<tt:InvalidAfterConnect>false</tt:InvalidAfterConnect>"
          << "<tt:InvalidAfterReboot>false</tt:InvalidAfterReboot>"
          << "<tt:Timeout>PT60S</tt:Timeout>"
-       << "</trt:MediaUri>"
+       << "</tt:MediaUri>"
        << "</trt:GetStreamUriResponse>";
     return os.str();
 }
