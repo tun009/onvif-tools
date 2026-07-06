@@ -64,7 +64,12 @@ static const unsigned char JPEG_STUB_BYTES[] = {
 static int onHttpGet(struct soap* soap) {
     const char* path = soap->path ? soap->path : "";
     if (std::strstr(path, "/snapshot") != nullptr) {
+        // MEDIA-6-1-1: set Content-Length trước khi soap_response để tool
+        // đọc đúng số byte JPEG (nếu không có Content-Length, connection close
+        // sớm khiến tool báo "not JPEG image").
         soap->http_content = "image/jpeg";
+        soap->count = sizeof(JPEG_STUB_BYTES);
+        soap->length = sizeof(JPEG_STUB_BYTES);
         if (soap_response(soap, SOAP_FILE) != SOAP_OK) return soap->error;
         if (soap_send_raw(soap,
                           reinterpret_cast<const char*>(JPEG_STUB_BYTES),

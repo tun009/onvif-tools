@@ -410,28 +410,40 @@ std::string MediaLegacyHandler::handleDeleteProfile(const std::string& req) {
 }
 
 std::string MediaLegacyHandler::handleGetVideoSourceConfigurations() {
-    return
-        "<trt:GetVideoSourceConfigurationsResponse>"
-          "<trt:Configurations token=\"video_source_config\">"
-            "<tt:Name>VideoSourceConfig</tt:Name>"
-            "<tt:UseCount>3</tt:UseCount>"
-            "<tt:SourceToken>src_main</tt:SourceToken>"
-            "<tt:Bounds x=\"0\" y=\"0\" width=\"1920\" height=\"1080\"/>"
-          "</trt:Configurations>"
-        "</trt:GetVideoSourceConfigurationsResponse>";
+    std::lock_guard<std::mutex> lk(g_stateMtx);
+    ensureFixedVecState();
+    const auto& vsc = g_vscState["video_source_config"];
+    int useCount = countVSCUsage("video_source_config");
+    std::ostringstream os;
+    os << "<trt:GetVideoSourceConfigurationsResponse>"
+       << "<trt:Configurations token=\"video_source_config\">"
+         << "<tt:Name>VideoSourceConfig</tt:Name>"
+         << "<tt:UseCount>" << useCount << "</tt:UseCount>"
+         << "<tt:SourceToken>src_main</tt:SourceToken>"
+         << "<tt:Bounds x=\"" << vsc.x << "\" y=\"" << vsc.y
+                       << "\" width=\"" << vsc.width << "\" height=\"" << vsc.height << "\"/>"
+       << "</trt:Configurations>"
+       << "</trt:GetVideoSourceConfigurationsResponse>";
+    return os.str();
 }
 
 std::string MediaLegacyHandler::handleGetVideoSourceConfiguration(const std::string& req) {
     (void)req;
-    return
-        "<trt:GetVideoSourceConfigurationResponse>"
-          "<trt:Configuration token=\"video_source_config\">"
-            "<tt:Name>VideoSourceConfig</tt:Name>"
-            "<tt:UseCount>3</tt:UseCount>"
-            "<tt:SourceToken>src_main</tt:SourceToken>"
-            "<tt:Bounds x=\"0\" y=\"0\" width=\"1920\" height=\"1080\"/>"
-          "</trt:Configuration>"
-        "</trt:GetVideoSourceConfigurationResponse>";
+    std::lock_guard<std::mutex> lk(g_stateMtx);
+    ensureFixedVecState();
+    const auto& vsc = g_vscState["video_source_config"];
+    int useCount = countVSCUsage("video_source_config");
+    std::ostringstream os;
+    os << "<trt:GetVideoSourceConfigurationResponse>"
+       << "<trt:Configuration token=\"video_source_config\">"
+         << "<tt:Name>VideoSourceConfig</tt:Name>"
+         << "<tt:UseCount>" << useCount << "</tt:UseCount>"
+         << "<tt:SourceToken>src_main</tt:SourceToken>"
+         << "<tt:Bounds x=\"" << vsc.x << "\" y=\"" << vsc.y
+                       << "\" width=\"" << vsc.width << "\" height=\"" << vsc.height << "\"/>"
+       << "</trt:Configuration>"
+       << "</trt:GetVideoSourceConfigurationResponse>";
+    return os.str();
 }
 
 std::string MediaLegacyHandler::handleGetVideoSourceConfigurationOptions() {
@@ -479,13 +491,28 @@ std::string MediaLegacyHandler::handleRemoveVideoSourceConfiguration(const std::
 }
 
 std::string MediaLegacyHandler::handleSetVideoSourceConfiguration(const std::string& req) {
-    // MEDIA-2-1-8/11: validate Bounds (max 1920x1080). Ngoài range → fault.
-    std::string ws = extractInnerTag(req, "width");
-    std::string hs = extractInnerTag(req, "height");
-    int w = 0, h = 0;
-    try { if (!ws.empty()) w = std::stoi(ws); } catch (...) {}
-    try { if (!hs.empty()) h = std::stoi(hs); } catch (...) {}
-    if (w < 0 || w > 1920 || h < 0 || h > 1080) {
+    // MEDIA-2-1-8: validate Bounds. Width/Height là ATTRIBUTES của <Bounds .../>,
+    // không phải element — parse thủ công.
+    int w = 0, h = 0, xv = 0, yv = 0;
+    auto attrVal = [&](const std::string& xml, const std::string& attr) -> int {
+        auto p = xml.find(attr + "=\"");
+        if (p == std::string::npos) return -1;
+        p += attr.size() + 2;
+        auto e = xml.find('"', p);
+        if (e == std::string::npos) return -1;
+        try { return std::stoi(xml.substr(p, e - p)); } catch (...) { return -1; }
+    };
+    auto bp = req.find("<tt:Bounds");
+    if (bp == std::string::npos) bp = req.find("<Bounds");
+    if (bp != std::string::npos) {
+        auto be = req.find('>', bp);
+        std::string bTag = req.substr(bp, be - bp + 1);
+        int tw = attrVal(bTag, "width");  if (tw >= 0) w = tw;
+        int th = attrVal(bTag, "height"); if (th >= 0) h = th;
+        int tx = attrVal(bTag, "x");      if (tx >= 0) xv = tx;
+        int ty = attrVal(bTag, "y");      if (ty >= 0) yv = ty;
+    }
+    if (w <= 0 || w > 1920 || h <= 0 || h > 1080 || xv < 0 || yv < 0) {
         return
             "<SOAP-ENV:Fault>"
               "<SOAP-ENV:Code>"
@@ -544,38 +571,48 @@ std::string MediaLegacyHandler::handleGetVideoEncoderConfigurations() {
 
 std::string MediaLegacyHandler::handleGetVideoEncoderConfiguration(const std::string& req) {
     std::string token = extractInnerTag(req, "ConfigurationToken");
-    const char* codec = "H264";
-    int w = 3840, h = 2160, fr = 30, br = 20000;
-    std::string name = "VideoEncoderConfig";
-    if (token == "video_encoder_config_profile_sub1") {
-        w = 1280; h = 720; fr = 15; br = 2000; name = "VideoEncoderConfig_sub1";
-    } else if (token == "video_encoder_config_profile_sub2") {
-        // H264 (Media1 không hỗ trợ H265)
-        w = 640; h = 480; fr = 10; br = 512; name = "VideoEncoderConfig_sub2";
+    std::lock_guard<std::mutex> lk(g_stateMtx);
+    ensureFixedVecState();
+    auto it = g_vecState.find(token);
+    if (it == g_vecState.end()) {
+        return
+            "<SOAP-ENV:Fault>"
+              "<SOAP-ENV:Code><SOAP-ENV:Value>SOAP-ENV:Sender</SOAP-ENV:Value>"
+                "<SOAP-ENV:Subcode><SOAP-ENV:Value>ter:InvalidArgVal</SOAP-ENV:Value>"
+                  "<SOAP-ENV:Subcode><SOAP-ENV:Value>ter:NoConfig</SOAP-ENV:Value></SOAP-ENV:Subcode>"
+                "</SOAP-ENV:Subcode>"
+              "</SOAP-ENV:Code>"
+              "<SOAP-ENV:Reason><SOAP-ENV:Text xml:lang=\"en\">Unknown VideoEncoderConfig</SOAP-ENV:Text></SOAP-ENV:Reason>"
+            "</SOAP-ENV:Fault>";
     }
+    const auto& v = it->second;
+    int useCount = countVECUsage(token);
     std::ostringstream os;
     os << "<trt:GetVideoEncoderConfigurationResponse>"
        << "<trt:Configuration token=\"" << token << "\">"
-         << "<tt:Name>" << name << "</tt:Name><tt:UseCount>1</tt:UseCount>"
-         << "<tt:Encoding>" << codec << "</tt:Encoding>"
+         << "<tt:Name>" << v.name << "</tt:Name>"
+         << "<tt:UseCount>" << useCount << "</tt:UseCount>"
+         << "<tt:Encoding>" << v.encoding << "</tt:Encoding>"
          << "<tt:Resolution>"
-           << "<tt:Width>" << w << "</tt:Width>"
-           << "<tt:Height>" << h << "</tt:Height>"
+           << "<tt:Width>" << v.width << "</tt:Width>"
+           << "<tt:Height>" << v.height << "</tt:Height>"
          << "</tt:Resolution>"
-         << "<tt:Quality>5</tt:Quality>"
+         << "<tt:Quality>" << v.quality << "</tt:Quality>"
          << "<tt:RateControl>"
-           << "<tt:FrameRateLimit>" << fr << "</tt:FrameRateLimit>"
-           << "<tt:EncodingInterval>1</tt:EncodingInterval>"
-           << "<tt:BitrateLimit>" << br << "</tt:BitrateLimit>"
+           << "<tt:FrameRateLimit>" << v.frameRate << "</tt:FrameRateLimit>"
+           << "<tt:EncodingInterval>" << v.encodingInterval << "</tt:EncodingInterval>"
+           << "<tt:BitrateLimit>" << v.bitrate << "</tt:BitrateLimit>"
          << "</tt:RateControl>";
-    if (std::string(codec) == "H264") {
-        os << "<tt:H264><tt:GovLength>30</tt:GovLength><tt:H264Profile>Main</tt:H264Profile></tt:H264>";
+    if (v.encoding == "H264") {
+        os << "<tt:H264><tt:GovLength>" << v.govLength
+           << "</tt:GovLength><tt:H264Profile>" << v.h264Profile << "</tt:H264Profile></tt:H264>";
     }
     os << "<tt:Multicast><tt:Address><tt:Type>IPv4</tt:Type>"
-         << "<tt:IPv4Address>239.0.0.1</tt:IPv4Address></tt:Address>"
-         << "<tt:Port>32000</tt:Port><tt:TTL>1</tt:TTL>"
-         << "<tt:AutoStart>false</tt:AutoStart></tt:Multicast>"
-       << "<tt:SessionTimeout>PT60S</tt:SessionTimeout>"
+         << "<tt:IPv4Address>" << v.multicastAddr << "</tt:IPv4Address></tt:Address>"
+         << "<tt:Port>" << v.multicastPort << "</tt:Port>"
+         << "<tt:TTL>" << v.multicastTTL << "</tt:TTL>"
+         << "<tt:AutoStart>" << (v.multicastAutoStart?"true":"false") << "</tt:AutoStart></tt:Multicast>"
+       << "<tt:SessionTimeout>" << v.sessionTimeout << "</tt:SessionTimeout>"
        << "</trt:Configuration>"
        << "</trt:GetVideoEncoderConfigurationResponse>";
     return os.str();
@@ -689,9 +726,29 @@ std::string MediaLegacyHandler::handleGetGuaranteedNumberOfVideoEncoderInstances
 
 std::string MediaLegacyHandler::handleGetStreamUri(const std::string& req) {
     std::string token = extractInnerTag(req, "ProfileToken");
+    // MEDIA-7-1-4: validate token, fault ter:NoProfile nếu invalid.
+    {
+        std::lock_guard<std::mutex> lk(g_stateMtx);
+        bool isFixed = (token == "profile_main" || token == "profile_sub1" ||
+                        token == "profile_sub2" || token == "profile_jpeg");
+        bool isDyn = g_dynProfiles.count(token) > 0;
+        bool deleted = g_deletedFixed.count(token) > 0;
+        if (token.empty() || (!isFixed && !isDyn) || deleted) {
+            return
+                "<SOAP-ENV:Fault>"
+                  "<SOAP-ENV:Code><SOAP-ENV:Value>SOAP-ENV:Sender</SOAP-ENV:Value>"
+                    "<SOAP-ENV:Subcode><SOAP-ENV:Value>ter:InvalidArgVal</SOAP-ENV:Value>"
+                      "<SOAP-ENV:Subcode><SOAP-ENV:Value>ter:NoProfile</SOAP-ENV:Value></SOAP-ENV:Subcode>"
+                    "</SOAP-ENV:Subcode>"
+                  "</SOAP-ENV:Code>"
+                  "<SOAP-ENV:Reason><SOAP-ENV:Text xml:lang=\"en\">No profile with the given token</SOAP-ENV:Text></SOAP-ENV:Reason>"
+                "</SOAP-ENV:Fault>";
+        }
+    }
     std::string stream = "main";
     if (token == "profile_sub1") stream = "sub1";
     else if (token == "profile_sub2") stream = "sub2";
+    else if (token == "profile_jpeg") stream = "jpeg";
     std::ostringstream os;
     os << "<trt:GetStreamUriResponse>"
        << "<trt:MediaUri>"
