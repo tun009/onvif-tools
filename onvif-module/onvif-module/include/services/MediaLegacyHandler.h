@@ -49,6 +49,9 @@ private:
     static std::string handleGetSnapshotUri(const std::string& req);
     static std::string handleSetSynchronizationPoint(const std::string& req);
 
+    // Metadata (Media1 optional but tool RTSS-4-1-3 / MEDIA-5-1-3 gọi)
+    static std::string handleGetMetadataConfigurations();
+
     // Helpers
     static std::string extractMessageId(const std::string& xml);
     static std::string extractInnerTag(const std::string& xml, const std::string& localName);
