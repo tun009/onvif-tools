@@ -494,6 +494,52 @@ void OnvifServer::listenLoop() {
             soap_end_send(soap);
         };
 
+#ifndef _WIN32
+        // Full B: intercept tunnel POST regardless of beginResult (gSOAP fail
+        // parse SOAP envelope trên Content-Type=x-rtsp-tunnelled).
+        // Extract path từ headers thay vì soap->path (có thể chưa set nếu fail).
+        {
+            std::string tunPath;
+            auto pStart = g_current_headers.find("POST ");
+            if (pStart != std::string::npos) {
+                auto pEnd = g_current_headers.find(' ', pStart + 5);
+                if (pEnd != std::string::npos) {
+                    tunPath = g_current_headers.substr(pStart + 5, pEnd - pStart - 5);
+                }
+            }
+            if ((tunPath == "/main" || tunPath == "/jpeg" ||
+                 tunPath == "/sub1" || tunPath == "/sub2") &&
+                g_current_headers.find("x-rtsp-tunnelled") != std::string::npos) {
+                std::string body;
+                auto hb = g_current_headers.find("\r\n\r\n");
+                if (hb != std::string::npos) body = g_current_headers.substr(hb + 4);
+                size_t clen = 0;
+                auto cp = g_current_headers.find("Content-Length:");
+                if (cp == std::string::npos) cp = g_current_headers.find("content-length:");
+                if (cp != std::string::npos) {
+                    cp = g_current_headers.find(':', cp) + 1;
+                    while (cp < g_current_headers.size() &&
+                           (g_current_headers[cp] == ' ' || g_current_headers[cp] == '\t')) cp++;
+                    try { clen = std::stoul(g_current_headers.substr(cp, 12)); } catch (...) {}
+                }
+                while (body.size() < clen && body.size() < 65536) {
+                    char rbuf[4096];
+                    ssize_t rn = ::recv(soap->socket, rbuf,
+                                        std::min<size_t>(sizeof(rbuf), clen - body.size()), 0);
+                    if (rn <= 0) break;
+                    body.append(rbuf, rn);
+                }
+                std::cerr << "[Tunnel] POST early-intercept path=" << tunPath
+                          << " content_len=" << clen << " body_len=" << body.size() << std::endl;
+                if (handleTunnelPost(soap, tunPath, body)) {
+                    soap_destroy(soap);
+                    soap_end(soap);
+                    continue;
+                }
+            }
+        }
+#endif
+
         if (beginResult == SOAP_OK) {
             // Lấy path từ HTTP request (soap->path được gSOAP set sau soap_begin_serve)
             const char* rawPath = soap->path;
