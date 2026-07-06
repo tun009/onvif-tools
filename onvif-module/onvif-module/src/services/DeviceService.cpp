@@ -188,9 +188,8 @@ int DeviceService::GetCapabilities(
                 case tt__CapabilityCategory::Device:    wantDevice = true; break;
                 case tt__CapabilityCategory::Events:    wantEvents = true; break;
                 case tt__CapabilityCategory::Imaging:   wantImaging = true; break;
-                // Media1 (legacy) đã bỏ declare — Profile T dùng Media2.
-                // DEVICE-1-1-4: Category=Media phải trả fault NoSuchService.
-                case tt__CapabilityCategory::Media:     reqUnsupported = true; break;
+                // Media1 declared cho Profile S — Category=Media trả caps.
+                case tt__CapabilityCategory::Media:     wantMedia = true; break;
                 case tt__CapabilityCategory::PTZ:       reqUnsupported = true; break;
                 case tt__CapabilityCategory::Analytics: reqUnsupported = true; break;
             }

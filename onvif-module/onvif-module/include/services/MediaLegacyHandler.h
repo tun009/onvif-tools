@@ -55,5 +55,7 @@ private:
     static std::string wrap(const std::string& action,
                             const std::string& relatesTo,
                             const std::string& bodyXml);
-    static std::string profileXml(const char* token, const char* name, bool includeVEC);
+    // wrapperElem = "Profiles" (list, plural) hoặc "Profile" (single).
+    static std::string profileXml(const char* wrapperElem,
+                                  const char* token, const char* name, bool includeVEC);
 };

@@ -93,9 +93,10 @@ std::string MediaLegacyHandler::wrap(const std::string& action,
 
 // ── Profile XML fragment ────────────────────────────────────────────────────
 // Media1 tt:Profile struct: VideoSourceConfiguration + VideoEncoderConfiguration
-std::string MediaLegacyHandler::profileXml(const char* token, const char* name, bool includeVEC) {
+std::string MediaLegacyHandler::profileXml(const char* wrapperElem,
+                                            const char* token, const char* name, bool includeVEC) {
     std::ostringstream os;
-    os << "<trt:Profiles fixed=\"true\" token=\"" << token << "\">"
+    os << "<trt:" << wrapperElem << " fixed=\"true\" token=\"" << token << "\">"
        << "<tt:Name>" << name << "</tt:Name>"
        // VideoSourceConfiguration
        << "<tt:VideoSourceConfiguration token=\"video_source_config\">"
@@ -115,7 +116,9 @@ std::string MediaLegacyHandler::profileXml(const char* token, const char* name, 
             vecToken = "video_encoder_config_profile_sub1";
             vecName = "VideoEncoderConfig_sub1";
         } else if (std::string(token) == "profile_sub2") {
-            codec = "H265";
+            // Media1 schema KHÔNG hỗ trợ H265 (chỉ JPEG/MPEG4/H264).
+            // Dùng H264 480p cho sub2 (khác Media2 dùng H265).
+            codec = "H264";
             w = 640; h = 480; fr = 10; br = 512;
             vecToken = "video_encoder_config_profile_sub2";
             vecName = "VideoEncoderConfig_sub2";
@@ -151,7 +154,7 @@ std::string MediaLegacyHandler::profileXml(const char* token, const char* name, 
            << "<tt:SessionTimeout>PT60S</tt:SessionTimeout>"
            << "</tt:VideoEncoderConfiguration>";
     }
-    os << "</trt:Profiles>";
+    os << "</trt:" << wrapperElem << ">";
     return os.str();
 }
 
@@ -186,9 +189,9 @@ std::string MediaLegacyHandler::handleGetAudioSources() {
 std::string MediaLegacyHandler::handleGetProfiles() {
     std::ostringstream os;
     os << "<trt:GetProfilesResponse>"
-       << profileXml("profile_main", "Main 4K", true)
-       << profileXml("profile_sub1", "Sub1 720p", true)
-       << profileXml("profile_sub2", "Sub2 480p", true)
+       << profileXml("Profiles", "profile_main", "Main 4K", true)
+       << profileXml("Profiles", "profile_sub1", "Sub1 720p", true)
+       << profileXml("Profiles", "profile_sub2", "Sub2 480p", true)
        << "</trt:GetProfilesResponse>";
     return os.str();
 }
@@ -200,7 +203,7 @@ std::string MediaLegacyHandler::handleGetProfile(const std::string& req) {
     else if (token == "profile_sub2") name = "Sub2 480p";
     std::ostringstream os;
     os << "<trt:GetProfileResponse>"
-       << profileXml(token.c_str(), name, true)
+       << profileXml("Profile", token.c_str(), name, true)
        << "</trt:GetProfileResponse>";
     return os.str();
 }
@@ -211,7 +214,7 @@ std::string MediaLegacyHandler::handleCreateProfile(const std::string& req) {
     if (token.empty()) token = "profile_" + name;
     std::ostringstream os;
     os << "<trt:CreateProfileResponse>"
-       << profileXml(token.c_str(), name.c_str(), false)
+       << profileXml("Profile", token.c_str(), name.c_str(), false)
        << "</trt:CreateProfileResponse>";
     return os.str();
 }
@@ -323,12 +326,13 @@ std::string MediaLegacyHandler::handleGetVideoEncoderConfigurations() {
           "</trt:Configurations>"
           "<trt:Configurations token=\"video_encoder_config_profile_sub2\">"
             "<tt:Name>VideoEncoderConfig_sub2</tt:Name><tt:UseCount>1</tt:UseCount>"
-            "<tt:Encoding>H265</tt:Encoding>"
+            "<tt:Encoding>H264</tt:Encoding>"
             "<tt:Resolution><tt:Width>640</tt:Width><tt:Height>480</tt:Height></tt:Resolution>"
             "<tt:Quality>5</tt:Quality>"
             "<tt:RateControl><tt:FrameRateLimit>10</tt:FrameRateLimit>"
               "<tt:EncodingInterval>1</tt:EncodingInterval>"
               "<tt:BitrateLimit>512</tt:BitrateLimit></tt:RateControl>"
+            "<tt:H264><tt:GovLength>30</tt:GovLength><tt:H264Profile>Main</tt:H264Profile></tt:H264>"
             "<tt:Multicast><tt:Address><tt:Type>IPv4</tt:Type>"
               "<tt:IPv4Address>239.0.0.1</tt:IPv4Address></tt:Address>"
               "<tt:Port>32000</tt:Port><tt:TTL>1</tt:TTL>"
@@ -346,7 +350,8 @@ std::string MediaLegacyHandler::handleGetVideoEncoderConfiguration(const std::st
     if (token == "video_encoder_config_profile_sub1") {
         w = 1280; h = 720; fr = 15; br = 2000; name = "VideoEncoderConfig_sub1";
     } else if (token == "video_encoder_config_profile_sub2") {
-        codec = "H265"; w = 640; h = 480; fr = 10; br = 512; name = "VideoEncoderConfig_sub2";
+        // H264 (Media1 không hỗ trợ H265)
+        w = 640; h = 480; fr = 10; br = 512; name = "VideoEncoderConfig_sub2";
     }
     std::ostringstream os;
     os << "<trt:GetVideoEncoderConfigurationResponse>"
@@ -426,11 +431,13 @@ std::string MediaLegacyHandler::handleSetVideoEncoderConfiguration(const std::st
 
 std::string MediaLegacyHandler::handleGetGuaranteedNumberOfVideoEncoderInstances(const std::string& req) {
     (void)req;
+    // Schema Media1: TotalNumber (required) + optional JPEG/H264/MPEG4. H265 KHÔNG có.
     return
         "<trt:GetGuaranteedNumberOfVideoEncoderInstancesResponse>"
           "<trt:TotalNumber>1</trt:TotalNumber>"
+          "<trt:JPEG>1</trt:JPEG>"
           "<trt:H264>1</trt:H264>"
-          "<trt:H265>1</trt:H265>"
+          "<trt:MPEG4>1</trt:MPEG4>"
         "</trt:GetGuaranteedNumberOfVideoEncoderInstancesResponse>";
 }
 
