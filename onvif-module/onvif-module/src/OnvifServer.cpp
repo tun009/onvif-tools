@@ -233,6 +233,9 @@ static bool handleTunnelPost(struct soap* soap, const std::string& path,
     }
     if (!sess || !sess->alive) return false;
     std::string decoded = b64decode(body);
+    std::cerr << "[Tunnel] POST " << path << " cookie=" << cookie
+              << " body=" << body.size() << "B decoded=" << decoded.size() << "B"
+              << " preview: " << decoded.substr(0, 80) << std::endl;
     if (!decoded.empty() && sess->rtspSock >= 0) {
         ::send(sess->rtspSock, decoded.data(), decoded.size(), MSG_NOSIGNAL);
     }
@@ -510,16 +513,37 @@ void OnvifServer::listenLoop() {
             }
 
 #ifndef _WIN32
-            // Full B: RTSP-over-HTTP tunnel POST. Detect content-type + cookie.
+            // Full B: RTSP-over-HTTP tunnel POST.
+            std::cerr << "[Tunnel] check POST path=" << path
+                      << " has_x_rtsp=" << (g_current_headers.find("x-rtsp-tunnelled") != std::string::npos)
+                      << " hdr_bytes=" << g_current_headers.size() << std::endl;
             if ((path == "/main" || path == "/jpeg" ||
                  path == "/sub1" || path == "/sub2") &&
                 g_current_headers.find("x-rtsp-tunnelled") != std::string::npos) {
-                // Extract POST body từ full HTTP request buffer
                 std::string body;
                 auto hb = g_current_headers.find("\r\n\r\n");
                 if (hb != std::string::npos) {
                     body = g_current_headers.substr(hb + 4);
                 }
+                // Extract Content-Length và đọc thêm body nếu chưa đủ
+                size_t clen = 0;
+                auto cp = g_current_headers.find("Content-Length:");
+                if (cp == std::string::npos) cp = g_current_headers.find("content-length:");
+                if (cp != std::string::npos) {
+                    cp = g_current_headers.find(':', cp) + 1;
+                    while (cp < g_current_headers.size() &&
+                           (g_current_headers[cp] == ' ' || g_current_headers[cp] == '\t')) cp++;
+                    try { clen = std::stoul(g_current_headers.substr(cp, 12)); } catch (...) {}
+                }
+                while (body.size() < clen && body.size() < 65536) {
+                    char rbuf[4096];
+                    ssize_t rn = ::recv(soap->socket, rbuf,
+                                        std::min<size_t>(sizeof(rbuf), clen - body.size()), 0);
+                    if (rn <= 0) break;
+                    body.append(rbuf, rn);
+                }
+                std::cerr << "[Tunnel] POST intercepted content_len=" << clen
+                          << " body_len=" << body.size() << std::endl;
                 if (handleTunnelPost(soap, path, body)) {
                     soap_destroy(soap);
                     soap_end(soap);
