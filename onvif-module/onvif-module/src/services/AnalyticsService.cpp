@@ -64,6 +64,22 @@ std::string AnalyticsService::extractInnerTag(const std::string& xml,
     return "";
 }
 
+std::string AnalyticsService::extractAttr(const std::string& xml,
+                                          const std::string& tagName,
+                                          const std::string& attr) {
+    auto tp = xml.find(tagName);
+    if (tp == std::string::npos) return "";
+    auto end = xml.find('>', tp);
+    if (end == std::string::npos) return "";
+    std::string tag = xml.substr(tp, end - tp);
+    auto ap = tag.find(attr + "=\"");
+    if (ap == std::string::npos) return "";
+    ap += attr.size() + 2;
+    auto e = tag.find('"', ap);
+    if (e == std::string::npos) return "";
+    return tag.substr(ap, e - ap);
+}
+
 std::string AnalyticsService::wrap(const std::string& action,
                                    const std::string& relatesTo,
                                    const std::string& bodyXml) {
@@ -138,7 +154,7 @@ std::string AnalyticsService::handleGetSupportedMetadata(const std::string& req)
     return
         "<tan:GetSupportedMetadataResponse>"
           "<tan:AnalyticsModule Type=\"tt:ObjectDetection\">"
-            "<tt:Frame>"
+            "<tt:Frame UtcTime=\"2020-01-01T00:00:00Z\">"
               "<tt:Object ObjectId=\"0\">"
                 "<tt:Appearance>"
                   "<tt:Shape>"
@@ -200,12 +216,17 @@ std::string AnalyticsService::handleGetAnalyticsModules(const std::string& req) 
 
 // ── CreateAnalyticsModules ───────────────────────────────────────────────────
 std::string AnalyticsService::handleCreateAnalyticsModules(const std::string& req) {
-    std::string name = extractInnerTag(req, "Name");
-    std::string type = extractInnerTag(req, "Type");
+    // Name/Type là ATTRIBUTE của <AnalyticsModule Name=".." Type="q1:CellMotionEngine">.
+    std::string name = extractAttr(req, "AnalyticsModule", "Name");
+    std::string type = extractAttr(req, "AnalyticsModule", "Type");
+    // Strip prefix (q1:CellMotionEngine → CellMotionEngine), chuẩn hóa về tt:.
+    auto c = type.find(':');
+    if (c != std::string::npos) type = type.substr(c + 1);
+    if (type.empty()) type = "ObjectDetection";
     if (!name.empty()) {
         std::lock_guard<std::mutex> lk(g_amMtx);
         ensureDefaultModules();
-        g_modules[name] = {name, type.empty() ? "tt:ObjectDetection" : type};
+        g_modules[name] = {name, "tt:" + type};
     }
     return "<tan:CreateAnalyticsModulesResponse/>";
 }
@@ -232,7 +253,7 @@ std::string AnalyticsService::handleGetAnalyticsModuleOptions(const std::string&
     (void)req;
     return
         "<tan:GetAnalyticsModuleOptionsResponse>"
-          "<tan:Options RuleType=\"tt:ObjectDetection\">"
+          "<tan:Options Name=\"Sensitivity\" Type=\"xs:int\">"
             "<tt:IntRange>"
               "<tt:Min>0</tt:Min><tt:Max>100</tt:Max>"
             "</tt:IntRange>"

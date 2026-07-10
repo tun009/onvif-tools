@@ -37,6 +37,10 @@ private:
     // Helpers
     static std::string extractRelatesTo(const std::string& xml);
     static std::string extractInnerTag(const std::string& xml, const std::string& localName);
+    // Lấy attribute từ opening tag: extractAttr(xml,"AnalyticsModule","Name")
+    static std::string extractAttr(const std::string& xml,
+                                   const std::string& tagName,
+                                   const std::string& attr);
     static std::string wrap(const std::string& action,
                             const std::string& relatesTo,
                             const std::string& bodyXml);
