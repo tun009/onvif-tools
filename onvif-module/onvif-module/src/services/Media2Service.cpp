@@ -75,11 +75,13 @@ int Media2Service::GetProfiles(
     // Xác định Type filter mà tool yêu cầu
     bool wantVideoSource = false;
     bool wantVideoEncoder = false;
+    bool wantMetadata = false;
     if (req) {
         for (const auto& t : req->Type) {
-            if (t == "All") { wantVideoSource = true; wantVideoEncoder = true; }
+            if (t == "All") { wantVideoSource = true; wantVideoEncoder = true; wantMetadata = true; }
             else if (t == "VideoSource") wantVideoSource = true;
             else if (t == "VideoEncoder") wantVideoEncoder = true;
+            else if (t == "Metadata") wantMetadata = true;
         }
     }
 
@@ -132,8 +134,11 @@ int Media2Service::GetProfiles(
         const auto& rem = removed[e.token];
         bool showVS = wantVideoSource && !rem.count("VideoSource") && !rem.count("All");
         bool showVE = wantVideoEncoder && !rem.count("VideoEncoder") && !rem.count("All");
+        // Metadata config: chỉ fixed profile (Profile M §7.7 ready-to-use metadata
+        // profile — MEDIA2-1-1-8). Dyn profile không auto có metadata.
+        bool showMD = wantMetadata && e.isFixed && !rem.count("Metadata") && !rem.count("All");
 
-        if (showVS || showVE) {
+        if (showVS || showVE || showMD) {
             profile->Configurations = soap_new_ns1__ConfigurationSet(soap);
         } else {
             profile->Configurations = nullptr;
@@ -189,6 +194,29 @@ int Media2Service::GetProfiles(
                     }
                     profile->Configurations->VideoEncoder = vec;
                 }
+                }
+            }
+
+            if (showMD) {
+                auto md = soap_new_tt__MetadataConfiguration(soap);
+                if (md) {
+                    md->token = "metadata_config";
+                    md->Name  = "MetadataConfig";
+                    md->UseCount = 1;
+                    md->Analytics = (bool*)soap_malloc(soap, sizeof(bool));
+                    if (md->Analytics) *md->Analytics = true;
+                    // Multicast (required trong tt:MetadataConfiguration)
+                    md->Multicast = soap_new_tt__MulticastConfiguration(soap);
+                    if (md->Multicast) {
+                        md->Multicast->Address = soap_new_tt__IPAddress(soap);
+                        if (md->Multicast->Address)
+                            md->Multicast->Address->Type = tt__IPType::IPv4;  // IPv4Address optional
+                        md->Multicast->Port = 32001;
+                        md->Multicast->TTL = 1;
+                        md->Multicast->AutoStart = false;
+                    }
+                    md->SessionTimeout = "PT60S";
+                    profile->Configurations->Metadata = md;
                 }
             }
         }
