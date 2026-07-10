@@ -3,7 +3,9 @@
 
 #include "services/Media2MetadataService.h"
 #include "services/AnalyticsModuleStore.h"
+#include "utils/FaultBuilder.h"
 #include <sstream>
+#include <mutex>
 
 namespace {
 const char* NS_MEDIA2 = "http://www.onvif.org/ver20/media/wsdl";
@@ -12,6 +14,27 @@ const char* ACT = "http://www.onvif.org/ver20/media/wsdl/Media2/";
 // Token cố định (mock).
 const char* VAC_TOKEN  = "vac_main";        // VideoAnalyticsConfiguration
 const char* META_TOKEN = "metadata_config"; // MetadataConfiguration
+
+// State metadata config (persist Set→Get). MEDIA2-8-1-1.
+std::mutex g_metaMtx;
+std::string g_metaName = "MetadataConfig";
+
+// Lấy nội dung element đầu tiên khớp localName.
+std::string innerTag(const std::string& xml, const std::string& local) {
+    auto pos = xml.find(local);
+    while (pos != std::string::npos) {
+        char prev = pos > 0 ? xml[pos-1] : '<';
+        if (prev == '<' || prev == ':') {
+            auto gt = xml.find('>', pos);
+            if (gt != std::string::npos && xml[gt-1] != '/') {
+                auto lt = xml.find('<', gt);
+                if (lt != std::string::npos) return xml.substr(gt+1, lt-gt-1);
+            }
+        }
+        pos = xml.find(local, pos + local.size());
+    }
+    return "";
+}
 } // namespace
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -62,15 +85,25 @@ std::string Media2MetadataService::handle(const std::string& req) {
     std::string rel = extractRelatesTo(req);
     auto has = [&](const char* op) { return req.find(op) != std::string::npos; };
 
-    if (has("GetAnalyticsConfigurations"))
+    // Negative test (MEDIA2-8-1-4/9-1-3): ConfigurationToken invalid → NoConfig fault.
+    std::string cfgTok = innerTag(req, "ConfigurationToken");
+    if (has("GetAnalyticsConfigurations")) {
+        if (!cfgTok.empty() && cfgTok != VAC_TOKEN)
+            return FaultBuilder::sender("ter:InvalidArgVal", "ter:NoConfig",
+                                        "No analytics configuration with the given token");
         return wrap(std::string(ACT) + "GetAnalyticsConfigurationsResponse", rel,
                     handleGetAnalyticsConfigurations(req));
+    }
     if (has("GetMetadataConfigurationOptions"))
         return wrap(std::string(ACT) + "GetMetadataConfigurationOptionsResponse", rel,
                     handleGetMetadataConfigurationOptions(req));
-    if (has("GetMetadataConfigurations"))
+    if (has("GetMetadataConfigurations")) {
+        if (!cfgTok.empty() && cfgTok != META_TOKEN)
+            return FaultBuilder::sender("ter:InvalidArgVal", "ter:NoConfig",
+                                        "No metadata configuration with the given token");
         return wrap(std::string(ACT) + "GetMetadataConfigurationsResponse", rel,
                     handleGetMetadataConfigurations(req));
+    }
     if (has("SetMetadataConfiguration"))
         return wrap(std::string(ACT) + "SetMetadataConfigurationResponse", rel,
                     handleSetMetadataConfiguration(req));
@@ -116,9 +149,11 @@ std::string Media2MetadataService::handleGetAnalyticsConfigurations(const std::s
 std::string Media2MetadataService::handleGetMetadataConfigurations(const std::string& req) {
     (void)req;
     std::ostringstream os;
+    std::string name;
+    { std::lock_guard<std::mutex> lk(g_metaMtx); name = g_metaName; }
     os << "<tr2:GetMetadataConfigurationsResponse>"
        << "<tr2:Configurations token=\"" << META_TOKEN << "\">"
-         << "<tt:Name>MetadataConfig</tt:Name>"
+         << "<tt:Name>" << name << "</tt:Name>"
          << "<tt:UseCount>1</tt:UseCount>"
          << "<tt:Analytics>true</tt:Analytics>"
          << "<tt:Multicast>"
@@ -149,7 +184,12 @@ std::string Media2MetadataService::handleGetMetadataConfigurationOptions(const s
 
 // ── §7.8 SetMetadataConfiguration ────────────────────────────────────────────
 std::string Media2MetadataService::handleSetMetadataConfiguration(const std::string& req) {
-    (void)req;
+    // Persist Name để Get sau trả cùng giá trị (MEDIA2-8-1-1).
+    std::string name = innerTag(req, "Name");
+    if (!name.empty()) {
+        std::lock_guard<std::mutex> lk(g_metaMtx);
+        g_metaName = name;
+    }
     return "<tr2:SetMetadataConfigurationResponse/>";
 }
 
