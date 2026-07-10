@@ -16,6 +16,10 @@ Thư mục này chứa toàn bộ tài liệu kỹ thuật của dự án **ONVI
 | 4 | [04-onvif-services.md](./04-onvif-services.md) | Chi tiết DeviceService (Các service khác tạm hoãn) | Khi implement services |
 | 5 | [05-test-guide.md](./05-test-guide.md) | Hướng dẫn test với ONVIF Device Test Tool hãng | Khi test |
 | 6 | [06-profile-t-conformance-plan.md](./06-profile-t-conformance-plan.md) | Tổng hợp 119 lỗi conformance + roadmap + kế hoạch WS-Discovery | Khi làm Profile T |
+| 7 | [07-profile-t-status-report.md](./07-profile-t-status-report.md) | Báo cáo trạng thái Profile T | Theo dõi tiến độ |
+| 8 | [08-scope-profile-note.md](./08-scope-profile-note.md) | Ghi chú scope các profile | Tham khảo |
+| 9 | [09-media1-legacy-note.md](./09-media1-legacy-note.md) | Ghi chú Media1 legacy (Profile S) | Khi làm Profile S |
+| 10 | [10-refactor-plan-multi-profile.md](./10-refactor-plan-multi-profile.md) | Kế hoạch refactor Service Registry để scale Profile M/G/A | **Trước khi làm Profile M** |
 
 ---
 
