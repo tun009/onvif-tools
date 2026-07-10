@@ -15,9 +15,11 @@ const char* ACT = "http://www.onvif.org/ver20/media/wsdl/Media2/";
 const char* VAC_TOKEN  = "vac_main";        // VideoAnalyticsConfiguration
 const char* META_TOKEN = "metadata_config"; // MetadataConfiguration
 
-// State metadata config (persist Set→Get). MEDIA2-8-1-1.
+// State metadata config (persist Set→Get). MEDIA2-8-1-1 "MODIFY ALL SUPPORTED":
+// capture-replay toàn bộ inner <Configuration> từ Set → echo trong Get để
+// round-trip khớp mọi field (Name/Events/Multicast/Analytics/...).
 std::mutex g_metaMtx;
-std::string g_metaName = "MetadataConfig";
+std::string g_metaConfigInner;   // inner content <Configuration>...; rỗng = dùng default
 
 // Lấy nội dung element đầu tiên khớp localName.
 std::string innerTag(const std::string& xml, const std::string& local) {
@@ -149,11 +151,20 @@ std::string Media2MetadataService::handleGetAnalyticsConfigurations(const std::s
 std::string Media2MetadataService::handleGetMetadataConfigurations(const std::string& req) {
     (void)req;
     std::ostringstream os;
-    std::string name;
-    { std::lock_guard<std::mutex> lk(g_metaMtx); name = g_metaName; }
+    // Nếu đã Set → replay inner đã lưu (round-trip khớp). Chưa Set → default.
+    {
+        std::lock_guard<std::mutex> lk(g_metaMtx);
+        if (!g_metaConfigInner.empty()) {
+            return "<tr2:GetMetadataConfigurationsResponse>"
+                   "<tr2:Configurations token=\"" + std::string(META_TOKEN) + "\">"
+                   + g_metaConfigInner +
+                   "</tr2:Configurations>"
+                   "</tr2:GetMetadataConfigurationsResponse>";
+        }
+    }
     os << "<tr2:GetMetadataConfigurationsResponse>"
        << "<tr2:Configurations token=\"" << META_TOKEN << "\">"
-         << "<tt:Name>" << name << "</tt:Name>"
+         << "<tt:Name>MetadataConfig</tt:Name>"
          << "<tt:UseCount>1</tt:UseCount>"
          << "<tt:Analytics>true</tt:Analytics>"
          << "<tt:Multicast>"
@@ -184,11 +195,16 @@ std::string Media2MetadataService::handleGetMetadataConfigurationOptions(const s
 
 // ── §7.8 SetMetadataConfiguration ────────────────────────────────────────────
 std::string Media2MetadataService::handleSetMetadataConfiguration(const std::string& req) {
-    // Persist Name để Get sau trả cùng giá trị (MEDIA2-8-1-1).
-    std::string name = innerTag(req, "Name");
-    if (!name.empty()) {
-        std::lock_guard<std::mutex> lk(g_metaMtx);
-        g_metaName = name;
+    // Capture-replay: lưu inner <Configuration>...</Configuration> để Get echo lại.
+    auto cs = req.find("<Configuration");
+    if (cs != std::string::npos) {
+        auto openEnd = req.find('>', cs);
+        auto ce = req.find("</Configuration>", openEnd);
+        if (openEnd != std::string::npos && ce != std::string::npos) {
+            std::string inner = req.substr(openEnd + 1, ce - openEnd - 1);
+            std::lock_guard<std::mutex> lk(g_metaMtx);
+            g_metaConfigInner = inner;
+        }
     }
     return "<tr2:SetMetadataConfigurationResponse/>";
 }
