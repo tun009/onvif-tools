@@ -2,6 +2,7 @@
 // String-based interceptor chạy trước Media2Service gSOAP dispatch.
 
 #include "services/Media2MetadataService.h"
+#include "services/AnalyticsModuleStore.h"
 #include <sstream>
 
 namespace {
@@ -93,13 +94,17 @@ std::string Media2MetadataService::handleGetAnalyticsConfigurations(const std::s
        << "<tr2:Configurations token=\"" << VAC_TOKEN << "\">"
          << "<tt:Name>VideoAnalyticsConfig</tt:Name>"
          << "<tt:UseCount>1</tt:UseCount>"
-         << "<tt:AnalyticsEngineConfiguration>"
-           << "<tt:AnalyticsModule Name=\"MyCellMotion\" Type=\"tt:CellMotionEngine\">"
-             << "<tt:Parameters>"
-               << "<tt:SimpleItem Name=\"Sensitivity\" Value=\"50\"/>"
-             << "</tt:Parameters>"
-           << "</tt:AnalyticsModule>"
-         << "</tt:AnalyticsEngineConfiguration>"
+         << "<tt:AnalyticsEngineConfiguration>";
+    // Module lấy từ shared store (đồng bộ với AnalyticsService Create/Delete).
+    for (const auto& m : AnalyticsModuleStore::instance().list()) {
+        os << "<tt:AnalyticsModule Name=\"" << m.name
+           << "\" Type=\"" << m.type << "\">"
+           << "<tt:Parameters>"
+             << "<tt:SimpleItem Name=\"Sensitivity\" Value=\"50\"/>"
+           << "</tt:Parameters>"
+           << "</tt:AnalyticsModule>";
+    }
+    os << "</tt:AnalyticsEngineConfiguration>"
          << "<tt:RuleEngineConfiguration/>"
        << "</tr2:Configurations>"
        << "</tr2:GetAnalyticsConfigurationsResponse>";

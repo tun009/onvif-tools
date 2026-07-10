@@ -4,29 +4,12 @@
 // Mock: state module trong RAM. Metadata stream thật (§7.5) làm ở M3.
 
 #include "services/AnalyticsService.h"
+#include "services/AnalyticsModuleStore.h"
 #include <sstream>
-#include <mutex>
-#include <map>
-#include <vector>
 
 namespace {
 const char* NS_ANALYTICS = "http://www.onvif.org/ver20/analytics/wsdl";
 const char* ACT = "http://www.onvif.org/ver20/analytics/wsdl/AnalyticsEngine/";
-
-// ConfigurationToken cố định của VideoAnalyticsConfiguration mock.
-const char* VAC_TOKEN = "vac_main";
-
-// State: module đã cấu hình (name → type QName).
-struct AModule { std::string name; std::string type; };
-std::mutex g_amMtx;
-std::map<std::string, AModule> g_modules;   // name → module
-
-void ensureDefaultModules() {
-    if (!g_modules.empty()) return;
-    // 2 module mặc định (mock). Type là QName chuẩn ONVIF.
-    g_modules["MyCellMotion"]   = {"MyCellMotion",   "tt:CellMotionEngine"};
-    g_modules["MyObjectDetect"] = {"MyObjectDetect", "tt:ObjectDetection"};
-}
 } // namespace
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -168,6 +151,7 @@ std::string AnalyticsService::handleGetSupportedMetadata(const std::string& req)
                 "<tt:Appearance>"
                   "<tt:Shape>"
                     "<tt:BoundingBox left=\"0.0\" top=\"0.0\" right=\"0.0\" bottom=\"0.0\"/>"
+                    "<tt:CenterOfGravity x=\"0.0\" y=\"0.0\"/>"
                   "</tt:Shape>"
                   "<tt:Class>"
                     "<tt:Type Likelihood=\"0.0\">Human</tt:Type>"
@@ -207,13 +191,11 @@ std::string AnalyticsService::handleGetSupportedAnalyticsModules(const std::stri
 // ── GetAnalyticsModules — module đã gán cho VAC ──────────────────────────────
 std::string AnalyticsService::handleGetAnalyticsModules(const std::string& req) {
     (void)req;
-    std::lock_guard<std::mutex> lk(g_amMtx);
-    ensureDefaultModules();
     std::ostringstream os;
     os << "<tan:GetAnalyticsModulesResponse>";
-    for (const auto& kv : g_modules) {
-        os << "<tan:AnalyticsModule Name=\"" << kv.second.name
-           << "\" Type=\"" << kv.second.type << "\">"
+    for (const auto& m : AnalyticsModuleStore::instance().list()) {
+        os << "<tan:AnalyticsModule Name=\"" << m.name
+           << "\" Type=\"" << m.type << "\">"
            << "<tt:Parameters>"
              << "<tt:SimpleItem Name=\"Sensitivity\" Value=\"50\"/>"
            << "</tt:Parameters>"
@@ -232,28 +214,29 @@ std::string AnalyticsService::handleCreateAnalyticsModules(const std::string& re
     auto c = type.find(':');
     if (c != std::string::npos) type = type.substr(c + 1);
     if (type.empty()) type = "ObjectDetection";
-    if (!name.empty()) {
-        std::lock_guard<std::mutex> lk(g_amMtx);
-        ensureDefaultModules();
-        g_modules[name] = {name, "tt:" + type};
-    }
+    if (!name.empty())
+        AnalyticsModuleStore::instance().add(name, "tt:" + type);
     return "<tan:CreateAnalyticsModulesResponse/>";
 }
 
 // ── DeleteAnalyticsModules ───────────────────────────────────────────────────
 std::string AnalyticsService::handleDeleteAnalyticsModules(const std::string& req) {
-    std::string name = extractInnerTag(req, "Name");
-    if (!name.empty()) {
-        std::lock_guard<std::mutex> lk(g_amMtx);
-        ensureDefaultModules();
-        g_modules.erase(name);
-    }
+    // Delete gửi tên trong element <AnalyticsModuleName>NAME</AnalyticsModuleName>.
+    std::string name = extractInnerTag(req, "AnalyticsModuleName");
+    if (!name.empty())
+        AnalyticsModuleStore::instance().remove(name);
     return "<tan:DeleteAnalyticsModulesResponse/>";
 }
 
 // ── ModifyAnalyticsModules ───────────────────────────────────────────────────
 std::string AnalyticsService::handleModifyAnalyticsModules(const std::string& req) {
-    (void)req;
+    // Modify: upsert module (tool sau đó verify qua GetAnalyticsModules).
+    std::string name = extractAttr(req, "AnalyticsModule", "Name");
+    std::string type = extractAttr(req, "AnalyticsModule", "Type");
+    auto c = type.find(':');
+    if (c != std::string::npos) type = type.substr(c + 1);
+    if (!name.empty())
+        AnalyticsModuleStore::instance().add(name, type.empty() ? "tt:ObjectDetection" : "tt:" + type);
     return "<tan:ModifyAnalyticsModulesResponse/>";
 }
 
