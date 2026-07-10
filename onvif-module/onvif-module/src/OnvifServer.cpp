@@ -4,6 +4,8 @@
 #include "services/MediaLegacyHandler.h"
 #include "services/DeviceIOHandler.h"
 #include "services/DeviceIOService.h"
+#include "services/MediaLegacyService.h"
+#include "services/EventSubscriptionService.h"
 #include "core/ServiceRegistry.h"
 #include "soapH.h"
 #include "auth/DigestAuthHandler.h"
@@ -117,9 +119,12 @@ static int custom_fsend(struct soap *soap, const char *buf, size_t len) {
 
 OnvifServer::OnvifServer(const ServiceConfig& cfg, std::shared_ptr<ICameraBackend> backend)
     : cfg_(cfg), backend_(std::move(backend)) {
-    // ── Đăng ký service string-based vào registry (Phase 2+ refactor) ──
+    // ── Đăng ký service string-based vào registry (Phase 2+3 refactor) ──
     // Thêm service mới: chỉ registerService() ở đây, KHÔNG sửa listenLoop.
     registry_.registerService(std::make_unique<DeviceIOService>());
+    registry_.registerService(std::make_unique<MediaLegacyService>());
+    registry_.registerService(std::make_unique<EventSubscriptionService>(
+        cfg_.deviceIp, cfg_.httpPort));
 }
 
 OnvifServer::~OnvifServer() {
@@ -378,35 +383,12 @@ void OnvifServer::listenLoop() {
                 g_http_digest_authenticated = true;
             }
 
-            if (path.find("/onvif/event") != std::string::npos) {
-                std::string headers = g_current_headers;
-
-                std::string subId = "";
-                size_t subPos = path.find("/onvif/event/");
-                if (subPos != std::string::npos) {
-                    subId = path.substr(subPos + 13);
-                }
-
-                auto& manager = MockSubscriptionManager::getInstance();
-                std::string responseXml =
-                    manager.dispatch(cfg_.deviceIp, cfg_.httpPort, subId, headers);
-
-                if (!responseXml.empty()) {
-                    soap->error = SOAP_OK;
-                    soap_response(soap, SOAP_OK);
-                    soap_send_raw(soap, responseXml.c_str(), responseXml.size());
-                    soap_end_send(soap);
-                    
-                    soap_destroy(soap);
-                    soap_end(soap);
-                    continue;
-                }
-            }
-
-            // ── Service Registry routing (Phase 2 refactor) ──────────────
-            // Service string-based đã đăng ký trong registry_ (hiện: DeviceIO)
-            // được route ở đây. Service chưa migrate (Media2/Imaging/Device/
-            // Event/MediaLegacy) vẫn theo if-else bên dưới.
+            // ── Service Registry routing (Phase 2+3 refactor) ───────────
+            // Service string-based đã đăng ký trong registry_:
+            //   /onvif/deviceIO → DeviceIOService
+            //   /onvif/media    → MediaLegacyService (Media1; "" nếu op Media2 → fallthrough)
+            //   /onvif/event    → EventSubscriptionService
+            // Response rỗng → fallthrough xuống if-else (gSOAP: Media2/Imaging/Device).
             if (IOnvifService* svc = registry_.route(path)) {
                 std::string resp = svc->handle(g_current_headers);
                 if (!resp.empty()) {
@@ -421,19 +403,8 @@ void OnvifServer::listenLoop() {
             }
 
             if (path.find("/onvif/media") != std::string::npos) {
-                // Intercept các op Media ver10 (legacy) — trả XML thủ công.
-                // Media2 (ver20) chuyển tiếp về gSOAP dispatcher như bình thường.
-                std::string legacyResp = MediaLegacyHandler::dispatch(g_current_headers);
-                if (!legacyResp.empty()) {
-                    soap->error = SOAP_OK;
-                    soap_response(soap, SOAP_OK);
-                    soap_send_raw(soap, legacyResp.c_str(), legacyResp.size());
-                    soap_end_send(soap);
-                    soap_destroy(soap);
-                    soap_end(soap);
-                    continue;
-                }
-                // Yêu cầu đến Media2Service
+                // Media1 (legacy) đã xử lý bởi registry (MediaLegacyService) ở trên.
+                // Tới đây chắc chắn là Media2 (ver20) → gSOAP dispatcher.
                 serveResult = media2Svc.dispatch();
                 soap->error = media2Svc.soap->error;
                 soap->fault = media2Svc.soap->fault;
