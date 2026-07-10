@@ -3,6 +3,8 @@
 #include "services/ImagingService.h"
 #include "services/MediaLegacyHandler.h"
 #include "services/DeviceIOHandler.h"
+#include "services/DeviceIOService.h"
+#include "core/ServiceRegistry.h"
 #include "soapH.h"
 #include "auth/DigestAuthHandler.h"
 #include "auth/WsSecurityHandler.h"
@@ -114,7 +116,11 @@ static int custom_fsend(struct soap *soap, const char *buf, size_t len) {
 }
 
 OnvifServer::OnvifServer(const ServiceConfig& cfg, std::shared_ptr<ICameraBackend> backend)
-    : cfg_(cfg), backend_(std::move(backend)) {}
+    : cfg_(cfg), backend_(std::move(backend)) {
+    // ── Đăng ký service string-based vào registry (Phase 2+ refactor) ──
+    // Thêm service mới: chỉ registerService() ở đây, KHÔNG sửa listenLoop.
+    registry_.registerService(std::make_unique<DeviceIOService>());
+}
 
 OnvifServer::~OnvifServer() {
     stop();
@@ -397,14 +403,16 @@ void OnvifServer::listenLoop() {
                 }
             }
 
-            // DeviceIO service (Profile T §7.10.3 mandate GetVideoSources).
-            // Xử lý manual XML — chỉ 4-5 op cơ bản.
-            if (path.find("/onvif/deviceIO") != std::string::npos) {
-                std::string ioResp = DeviceIOHandler::dispatch(g_current_headers);
-                if (!ioResp.empty()) {
+            // ── Service Registry routing (Phase 2 refactor) ──────────────
+            // Service string-based đã đăng ký trong registry_ (hiện: DeviceIO)
+            // được route ở đây. Service chưa migrate (Media2/Imaging/Device/
+            // Event/MediaLegacy) vẫn theo if-else bên dưới.
+            if (IOnvifService* svc = registry_.route(path)) {
+                std::string resp = svc->handle(g_current_headers);
+                if (!resp.empty()) {
                     soap->error = SOAP_OK;
                     soap_response(soap, SOAP_OK);
-                    soap_send_raw(soap, ioResp.c_str(), ioResp.size());
+                    soap_send_raw(soap, resp.c_str(), resp.size());
                     soap_end_send(soap);
                     soap_destroy(soap);
                     soap_end(soap);

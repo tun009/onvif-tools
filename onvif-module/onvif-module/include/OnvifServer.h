@@ -1,6 +1,7 @@
 #pragma once
 #include "services/DeviceService.h"
 #include "services/DiscoveryService.h"
+#include "core/ServiceRegistry.h"
 #include <memory>
 #include <thread>
 #include <atomic>
@@ -23,4 +24,8 @@ private:
     int masterSocket_ = -1;
 
     std::unique_ptr<DiscoveryService> discovery_;
+
+    // Service Registry — route service string-based (Phase 2+ refactor).
+    // Service chưa migrate vẫn theo if-else trong listenLoop.
+    ServiceRegistry registry_;
 };
