@@ -98,11 +98,12 @@ std::string Media2MetadataService::handleGetAnalyticsConfigurations(const std::s
     // Module lấy từ shared store (đồng bộ với AnalyticsService Create/Delete).
     for (const auto& m : AnalyticsModuleStore::instance().list()) {
         os << "<tt:AnalyticsModule Name=\"" << m.name
-           << "\" Type=\"" << m.type << "\">"
-           << "<tt:Parameters>"
-             << "<tt:SimpleItem Name=\"Sensitivity\" Value=\"50\"/>"
-           << "</tt:Parameters>"
-           << "</tt:AnalyticsModule>";
+           << "\" Type=\"" << m.type << "\"><tt:Parameters>";
+        if (m.params.empty())
+            os << "<tt:SimpleItem Name=\"Sensitivity\" Value=\"50\"/>";
+        else for (const auto& p : m.params)
+            os << "<tt:SimpleItem Name=\"" << p.first << "\" Value=\"" << p.second << "\"/>";
+        os << "</tt:Parameters></tt:AnalyticsModule>";
     }
     os << "</tt:AnalyticsEngineConfiguration>"
          << "<tt:RuleEngineConfiguration/>"

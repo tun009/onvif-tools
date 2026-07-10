@@ -11,10 +11,13 @@
 #include <map>
 #include <mutex>
 #include <vector>
+#include <utility>
 
 struct AnalyticsModuleEntry {
     std::string name;
     std::string type;   // QName chuẩn hóa "tt:CellMotionEngine"
+    // SimpleItem params (Name→Value) — lưu để echo lại đúng giá trị đã Set/Modify.
+    std::vector<std::pair<std::string, std::string>> params;
 };
 
 class AnalyticsModuleStore {
@@ -24,9 +27,10 @@ public:
         return s;
     }
 
-    void add(const std::string& name, const std::string& type) {
+    void add(const std::string& name, const std::string& type,
+             std::vector<std::pair<std::string, std::string>> params = {}) {
         std::lock_guard<std::mutex> lk(m_);
-        modules_[name] = {name, type};
+        modules_[name] = {name, type, std::move(params)};
     }
     void remove(const std::string& name) {
         std::lock_guard<std::mutex> lk(m_);

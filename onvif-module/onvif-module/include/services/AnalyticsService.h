@@ -16,6 +16,8 @@
 
 #include "core/IOnvifService.h"
 #include <string>
+#include <vector>
+#include <utility>
 
 class AnalyticsService : public IOnvifService {
 public:
@@ -41,6 +43,9 @@ private:
     static std::string extractAttr(const std::string& xml,
                                    const std::string& tagName,
                                    const std::string& attr);
+    // Parse tất cả <SimpleItem Name=".." Value=".."/> trong request.
+    static std::vector<std::pair<std::string, std::string>>
+        parseSimpleItems(const std::string& xml);
     static std::string wrap(const std::string& action,
                             const std::string& relatesTo,
                             const std::string& bodyXml);

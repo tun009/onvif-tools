@@ -71,6 +71,28 @@ std::string AnalyticsService::extractAttr(const std::string& xml,
     return tag.substr(ap, e - ap);
 }
 
+std::vector<std::pair<std::string, std::string>>
+AnalyticsService::parseSimpleItems(const std::string& xml) {
+    std::vector<std::pair<std::string, std::string>> out;
+    size_t pos = 0;
+    while ((pos = xml.find("SimpleItem", pos)) != std::string::npos) {
+        auto end = xml.find('>', pos);
+        if (end == std::string::npos) break;
+        std::string tag = xml.substr(pos, end - pos);
+        auto get = [&](const std::string& a) -> std::string {
+            auto p = tag.find(a + "=\"");
+            if (p == std::string::npos) return "";
+            p += a.size() + 2;
+            auto e = tag.find('"', p);
+            return e == std::string::npos ? "" : tag.substr(p, e - p);
+        };
+        std::string n = get("Name"), v = get("Value");
+        if (!n.empty()) out.emplace_back(n, v);
+        pos = end;
+    }
+    return out;
+}
+
 std::string AnalyticsService::wrap(const std::string& action,
                                    const std::string& relatesTo,
                                    const std::string& bodyXml) {
@@ -141,26 +163,38 @@ std::string AnalyticsService::handleGetServiceCapabilities() {
 // ── §7.6 GetSupportedMetadata ────────────────────────────────────────────────
 // Trả MetadataInfo mô tả metadata device có thể sinh (sample frame).
 std::string AnalyticsService::handleGetSupportedMetadata(const std::string& req) {
-    (void)req;
-    return
-        // MetadataInfo (Type=QName ref module) + child SampleFrame (tt:Frame).
-        "<tan:GetSupportedMetadataResponse>"
-          "<tan:AnalyticsModule Type=\"tt:ObjectDetection\">"
-            "<tan:SampleFrame UtcTime=\"2020-01-01T00:00:00Z\">"
-              "<tt:Object ObjectId=\"0\">"
-                "<tt:Appearance>"
-                  "<tt:Shape>"
-                    "<tt:BoundingBox left=\"0.0\" top=\"0.0\" right=\"0.0\" bottom=\"0.0\"/>"
-                    "<tt:CenterOfGravity x=\"0.0\" y=\"0.0\"/>"
-                  "</tt:Shape>"
-                  "<tt:Class>"
-                    "<tt:Type Likelihood=\"0.0\">Human</tt:Type>"
-                  "</tt:Class>"
-                "</tt:Appearance>"
-              "</tt:Object>"
-            "</tan:SampleFrame>"
-          "</tan:AnalyticsModule>"
-        "</tan:GetSupportedMetadataResponse>";
+    // Honor filter <Type>q1:CellMotionEngine</Type>: nếu có → chỉ trả type đó.
+    // Không filter → trả tất cả module type supported (CellMotionEngine + ObjectDetection).
+    std::string filter = extractInnerTag(req, "Type");
+    auto c = filter.find(':');
+    if (c != std::string::npos) filter = filter.substr(c + 1);  // strip prefix
+
+    // MetadataInfo template cho 1 type.
+    auto metadataInfo = [](const std::string& type) {
+        return
+            "<tan:AnalyticsModule Type=\"tt:" + type + "\">"
+              "<tan:SampleFrame UtcTime=\"2020-01-01T00:00:00Z\">"
+                "<tt:Object ObjectId=\"0\">"
+                  "<tt:Appearance>"
+                    "<tt:Shape>"
+                      "<tt:BoundingBox left=\"0.0\" top=\"0.0\" right=\"0.0\" bottom=\"0.0\"/>"
+                      "<tt:CenterOfGravity x=\"0.0\" y=\"0.0\"/>"
+                    "</tt:Shape>"
+                  "</tt:Appearance>"
+                "</tt:Object>"
+              "</tan:SampleFrame>"
+            "</tan:AnalyticsModule>";
+    };
+
+    std::string body = "<tan:GetSupportedMetadataResponse>";
+    if (!filter.empty()) {
+        body += metadataInfo(filter);
+    } else {
+        body += metadataInfo("CellMotionEngine");
+        body += metadataInfo("ObjectDetection");
+    }
+    body += "</tan:GetSupportedMetadataResponse>";
+    return body;
 }
 
 // ── §7.10 GetSupportedAnalyticsModules ───────────────────────────────────────
@@ -195,11 +229,12 @@ std::string AnalyticsService::handleGetAnalyticsModules(const std::string& req) 
     os << "<tan:GetAnalyticsModulesResponse>";
     for (const auto& m : AnalyticsModuleStore::instance().list()) {
         os << "<tan:AnalyticsModule Name=\"" << m.name
-           << "\" Type=\"" << m.type << "\">"
-           << "<tt:Parameters>"
-             << "<tt:SimpleItem Name=\"Sensitivity\" Value=\"50\"/>"
-           << "</tt:Parameters>"
-           << "</tan:AnalyticsModule>";
+           << "\" Type=\"" << m.type << "\"><tt:Parameters>";
+        if (m.params.empty())
+            os << "<tt:SimpleItem Name=\"Sensitivity\" Value=\"50\"/>";
+        else for (const auto& p : m.params)
+            os << "<tt:SimpleItem Name=\"" << p.first << "\" Value=\"" << p.second << "\"/>";
+        os << "</tt:Parameters></tan:AnalyticsModule>";
     }
     os << "</tan:GetAnalyticsModulesResponse>";
     return os.str();
@@ -215,7 +250,7 @@ std::string AnalyticsService::handleCreateAnalyticsModules(const std::string& re
     if (c != std::string::npos) type = type.substr(c + 1);
     if (type.empty()) type = "ObjectDetection";
     if (!name.empty())
-        AnalyticsModuleStore::instance().add(name, "tt:" + type);
+        AnalyticsModuleStore::instance().add(name, "tt:" + type, parseSimpleItems(req));
     return "<tan:CreateAnalyticsModulesResponse/>";
 }
 
@@ -236,7 +271,8 @@ std::string AnalyticsService::handleModifyAnalyticsModules(const std::string& re
     auto c = type.find(':');
     if (c != std::string::npos) type = type.substr(c + 1);
     if (!name.empty())
-        AnalyticsModuleStore::instance().add(name, type.empty() ? "tt:ObjectDetection" : "tt:" + type);
+        AnalyticsModuleStore::instance().add(name,
+            type.empty() ? "tt:ObjectDetection" : "tt:" + type, parseSimpleItems(req));
     return "<tan:ModifyAnalyticsModulesResponse/>";
 }
 
