@@ -20,6 +20,7 @@ Thư mục này chứa toàn bộ tài liệu kỹ thuật của dự án **ONVI
 | 8 | [08-scope-profile-note.md](./08-scope-profile-note.md) | Ghi chú scope các profile | Tham khảo |
 | 9 | [09-media1-legacy-note.md](./09-media1-legacy-note.md) | Ghi chú Media1 legacy (Profile S) | Khi làm Profile S |
 | 10 | [10-refactor-plan-multi-profile.md](./10-refactor-plan-multi-profile.md) | Kế hoạch refactor Service Registry để scale Profile M/G/A | **Trước khi làm Profile M** |
+| 11 | [11-profile-m-plan.md](./11-profile-m-plan.md) | Nghiên cứu Profile M: đánh giá feasibility từng feature + kế hoạch M0-M6 | Khi làm Profile M |
 
 ---
 

@@ -120,7 +120,8 @@ private:
             "onvif://www.onvif.org/name/MockCam-4K",
             "onvif://www.onvif.org/hardware/JetsonOrinNX-8GB",
             "onvif://www.onvif.org/Profile/Streaming",   // Profile S (Media1 legacy) — declared cùng Profile T
-            "onvif://www.onvif.org/Profile/T"
+            "onvif://www.onvif.org/Profile/T",
+            "onvif://www.onvif.org/Profile/M"            // Profile M (Metadata & Analytics)
         };
     };
     static std::mutex sysMtx_;

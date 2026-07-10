@@ -336,6 +336,7 @@ int DeviceService::GetServices(
            << " xmlns:tev=\"http://www.onvif.org/ver10/events/wsdl\""
            << " xmlns:timg=\"http://www.onvif.org/ver20/imaging/wsdl\""
            << " xmlns:tmd=\"http://www.onvif.org/ver10/deviceIO/wsdl\""
+           << " xmlns:tan=\"http://www.onvif.org/ver20/analytics/wsdl\""
            << ">"
            << "<SOAP-ENV:Body><tds:GetServicesResponse>";
 
@@ -416,6 +417,15 @@ int DeviceService::GetServices(
         svc("http://www.onvif.org/ver10/deviceIO/wsdl", "/onvif/deviceIO",
             21, 12, ioCaps);
 
+        // Analytics (Profile M mandatory §7.6/7.10 — GetSupportedMetadata,
+        // GetSupportedAnalyticsModules...). RuleSupport/AnalyticsModuleSupport.
+        std::string anCaps =
+            "<tan:Capabilities RuleSupport=\"true\" AnalyticsModuleSupport=\"true\" "
+             "CellBasedSceneDescriptionSupported=\"false\" RuleOptionsSupported=\"true\" "
+             "AnalyticsModuleOptionsSupported=\"true\" SupportedMetadata=\"true\"/>";
+        svc("http://www.onvif.org/ver20/analytics/wsdl", "/onvif/analytics",
+            21, 12, anCaps);
+
         os << "</tds:GetServicesResponse></SOAP-ENV:Body></SOAP-ENV:Envelope>";
         std::string xml = os.str();
         soap->http_content = "application/soap+xml; charset=utf-8";
@@ -443,6 +453,7 @@ int DeviceService::GetServices(
     add("http://www.onvif.org/ver10/events/wsdl",  "/onvif/event",          21, 12); // Events (Profile T)
     add("http://www.onvif.org/ver20/imaging/wsdl", "/onvif/imaging",        21, 12); // Imaging (Profile T)
     add("http://www.onvif.org/ver10/deviceIO/wsdl", "/onvif/deviceIO",       21, 12); // DeviceIO (Profile T §7.10.3)
+    add("http://www.onvif.org/ver20/analytics/wsdl", "/onvif/analytics",     21, 12); // Analytics (Profile M)
 
     return SOAP_OK;
 }

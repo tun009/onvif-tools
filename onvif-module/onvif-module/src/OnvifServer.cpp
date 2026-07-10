@@ -6,6 +6,7 @@
 #include "services/DeviceIOService.h"
 #include "services/MediaLegacyService.h"
 #include "services/EventSubscriptionService.h"
+#include "services/AnalyticsService.h"
 #include "core/ServiceRegistry.h"
 #include "utils/FaultBuilder.h"
 #include "soapH.h"
@@ -126,6 +127,8 @@ OnvifServer::OnvifServer(const ServiceConfig& cfg, std::shared_ptr<ICameraBacken
     registry_.registerService(std::make_unique<MediaLegacyService>());
     registry_.registerService(std::make_unique<EventSubscriptionService>(
         cfg_.deviceIp, cfg_.httpPort));
+    // Profile M (M1): Analytics service — GetSupportedMetadata, analytics modules.
+    registry_.registerService(std::make_unique<AnalyticsService>());
 }
 
 OnvifServer::~OnvifServer() {
