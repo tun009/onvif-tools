@@ -67,7 +67,15 @@ std::string AnalyticsService::extractInnerTag(const std::string& xml,
 std::string AnalyticsService::extractAttr(const std::string& xml,
                                           const std::string& tagName,
                                           const std::string& attr) {
-    auto tp = xml.find(tagName);
+    // Tìm tag MỞ: tagName theo sau bởi whitespace — tránh khớp nhầm
+    // "AnalyticsModule" bên trong "CreateAnalyticsModules"/"GetAnalyticsModules".
+    size_t tp = 0;
+    while ((tp = xml.find(tagName, tp)) != std::string::npos) {
+        size_t after = tp + tagName.size();
+        char c = after < xml.size() ? xml[after] : '\0';
+        if (c == ' ' || c == '\t' || c == '\r' || c == '\n') break;
+        tp = after;
+    }
     if (tp == std::string::npos) return "";
     auto end = xml.find('>', tp);
     if (end == std::string::npos) return "";
@@ -152,9 +160,10 @@ std::string AnalyticsService::handleGetServiceCapabilities() {
 std::string AnalyticsService::handleGetSupportedMetadata(const std::string& req) {
     (void)req;
     return
+        // MetadataInfo (Type=QName ref module) + child SampleFrame (tt:Frame).
         "<tan:GetSupportedMetadataResponse>"
           "<tan:AnalyticsModule Type=\"tt:ObjectDetection\">"
-            "<tt:Frame UtcTime=\"2020-01-01T00:00:00Z\">"
+            "<tan:SampleFrame UtcTime=\"2020-01-01T00:00:00Z\">"
               "<tt:Object ObjectId=\"0\">"
                 "<tt:Appearance>"
                   "<tt:Shape>"
@@ -165,7 +174,7 @@ std::string AnalyticsService::handleGetSupportedMetadata(const std::string& req)
                   "</tt:Class>"
                 "</tt:Appearance>"
               "</tt:Object>"
-            "</tt:Frame>"
+            "</tan:SampleFrame>"
           "</tan:AnalyticsModule>"
         "</tan:GetSupportedMetadataResponse>";
 }
