@@ -74,6 +74,8 @@ std::string AnalyticsService::wrap(const std::string& action,
        << " xmlns:wsa=\"http://www.w3.org/2005/08/addressing\""
        << " xmlns:tan=\"" << NS_ANALYTICS << "\""
        << " xmlns:tt=\"http://www.onvif.org/ver10/schema\""
+       << " xmlns:xs=\"http://www.w3.org/2001/XMLSchema\""
+       << " xmlns:tns1=\"http://www.onvif.org/ver10/topics\""
        << " xmlns:ter=\"http://www.onvif.org/ver10/error\">"
        << "<SOAP-ENV:Header>"
        << "<wsa:Action>" << action << "</wsa:Action>";
@@ -164,7 +166,7 @@ std::string AnalyticsService::handleGetSupportedAnalyticsModules(const std::stri
                 "<tt:SimpleItemDescription Name=\"Sensitivity\" Type=\"xs:int\"/>"
               "</tt:Parameters>"
               "<tt:Messages>"
-                "<tt:ParentTopic>tns1:VideoAnalytics/tnsaxis:MotionDetection</tt:ParentTopic>"
+                "<tt:ParentTopic>tns1:VideoSource/MotionAlarm</tt:ParentTopic>"
               "</tt:Messages>"
             "</tt:AnalyticsModuleDescription>"
             "<tt:AnalyticsModuleDescription Name=\"tt:ObjectDetection\" "
