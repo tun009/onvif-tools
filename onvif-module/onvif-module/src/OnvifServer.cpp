@@ -7,6 +7,7 @@
 #include "services/MediaLegacyService.h"
 #include "services/EventSubscriptionService.h"
 #include "core/ServiceRegistry.h"
+#include "utils/FaultBuilder.h"
 #include "soapH.h"
 #include "auth/DigestAuthHandler.h"
 #include "auth/WsSecurityHandler.h"
@@ -334,26 +335,11 @@ void OnvifServer::listenLoop() {
             if (hasWsSecurity) {
                 WsSecurityHandler wss(cfg_.username, cfg_.password);
                 if (!wss.validate(soap)) {
-                    const char* fault =
-                        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-                        "<SOAP-ENV:Envelope"
-                        " xmlns:SOAP-ENV=\"http://www.w3.org/2003/05/soap-envelope\""
-                        " xmlns:ter=\"http://www.onvif.org/ver10/error\">"
-                        "<SOAP-ENV:Body><SOAP-ENV:Fault>"
-                        "<SOAP-ENV:Code>"
-                        "<SOAP-ENV:Value>SOAP-ENV:Sender</SOAP-ENV:Value>"
-                        "<SOAP-ENV:Subcode>"
-                        "<SOAP-ENV:Value>ter:NotAuthorized</SOAP-ENV:Value>"
-                        "</SOAP-ENV:Subcode>"
-                        "</SOAP-ENV:Code>"
-                        "<SOAP-ENV:Reason>"
-                        "<SOAP-ENV:Text xml:lang=\"en\">Sender not authorized</SOAP-ENV:Text>"
-                        "</SOAP-ENV:Reason>"
-                        "</SOAP-ENV:Fault></SOAP-ENV:Body></SOAP-ENV:Envelope>";
+                    std::string fault = FaultBuilder::notAuthorized();
                     soap->error = 400;
                     soap->http_content = "application/soap+xml; charset=utf-8";
                     soap_response(soap, SOAP_FILE);
-                    soap_send_raw(soap, fault, std::strlen(fault));
+                    soap_send_raw(soap, fault.c_str(), fault.size());
                     soap_end_send(soap);
                     soap_destroy(soap);
                     soap_end(soap);
@@ -447,43 +433,9 @@ void OnvifServer::listenLoop() {
                 }
             }
             if (kind != FK_NONE) {
-                const char* subcode1 = "ter:InvalidArgVal";
-                const char* subcode2 = "ter:MalformedData";
-                const char* reasonText = "Invalid argument value";
-                if (kind == FK_NOT_SUPPORTED) {
-                    subcode1 = "ter:ActionNotSupported";
-                    subcode2 = nullptr;
-                    reasonText = "Action not supported";
-                }
-                std::string fault =
-                    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-                    "<SOAP-ENV:Envelope"
-                    " xmlns:SOAP-ENV=\"http://www.w3.org/2003/05/soap-envelope\""
-                    " xmlns:ter=\"http://www.onvif.org/ver10/error\">"
-                    "<SOAP-ENV:Body>"
-                    "<SOAP-ENV:Fault>"
-                    "<SOAP-ENV:Code>"
-                    "<SOAP-ENV:Value>SOAP-ENV:Sender</SOAP-ENV:Value>"
-                    "<SOAP-ENV:Subcode>"
-                    "<SOAP-ENV:Value>";
-                fault += subcode1;
-                fault += "</SOAP-ENV:Value>";
-                if (subcode2) {
-                    fault += "<SOAP-ENV:Subcode>"
-                             "<SOAP-ENV:Value>";
-                    fault += subcode2;
-                    fault += "</SOAP-ENV:Value></SOAP-ENV:Subcode>";
-                }
-                fault += "</SOAP-ENV:Subcode>"
-                         "</SOAP-ENV:Code>"
-                         "<SOAP-ENV:Reason>"
-                         "<SOAP-ENV:Text xml:lang=\"en\">";
-                fault += reasonText;
-                fault += "</SOAP-ENV:Text>"
-                         "</SOAP-ENV:Reason>"
-                         "</SOAP-ENV:Fault>"
-                         "</SOAP-ENV:Body>"
-                         "</SOAP-ENV:Envelope>";
+                std::string fault = (kind == FK_NOT_SUPPORTED)
+                    ? FaultBuilder::actionNotSupported()
+                    : FaultBuilder::invalidArgVal("Invalid argument value");
                 soap->error = 400;
                 soap->http_content = "application/soap+xml; charset=utf-8";
                 soap_response(soap, SOAP_FILE);
