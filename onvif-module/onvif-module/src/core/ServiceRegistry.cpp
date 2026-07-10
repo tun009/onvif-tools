@@ -20,6 +20,15 @@ IOnvifService* ServiceRegistry::route(const std::string& path) const {
     return best;
 }
 
+std::vector<IOnvifService*> ServiceRegistry::matching(const std::string& path) const {
+    std::vector<IOnvifService*> out;
+    for (const auto& svc : services_) {
+        if (path.find(svc->pathPrefix()) != std::string::npos)
+            out.push_back(svc.get());
+    }
+    return out;
+}
+
 std::vector<IOnvifService*> ServiceRegistry::all() const {
     std::vector<IOnvifService*> out;
     out.reserve(services_.size());

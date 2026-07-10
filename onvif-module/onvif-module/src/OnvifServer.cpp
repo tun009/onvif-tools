@@ -5,6 +5,7 @@
 #include "services/DeviceIOHandler.h"
 #include "services/DeviceIOService.h"
 #include "services/MediaLegacyService.h"
+#include "services/Media2MetadataService.h"
 #include "services/EventSubscriptionService.h"
 #include "services/AnalyticsService.h"
 #include "core/ServiceRegistry.h"
@@ -125,6 +126,8 @@ OnvifServer::OnvifServer(const ServiceConfig& cfg, std::shared_ptr<ICameraBacken
     // Thêm service mới: chỉ registerService() ở đây, KHÔNG sửa listenLoop.
     registry_.registerService(std::make_unique<DeviceIOService>());
     registry_.registerService(std::make_unique<MediaLegacyService>());
+    // M2: Media2 metadata/analytics config (chain sau MediaLegacy, cùng /onvif/media).
+    registry_.registerService(std::make_unique<Media2MetadataService>());
     registry_.registerService(std::make_unique<EventSubscriptionService>(
         cfg_.deviceIp, cfg_.httpPort));
     // Profile M (M1): Analytics service — GetSupportedMetadata, analytics modules.
@@ -372,13 +375,13 @@ void OnvifServer::listenLoop() {
                 g_http_digest_authenticated = true;
             }
 
-            // ── Service Registry routing (Phase 2+3 refactor) ───────────
-            // Service string-based đã đăng ký trong registry_:
-            //   /onvif/deviceIO → DeviceIOService
-            //   /onvif/media    → MediaLegacyService (Media1; "" nếu op Media2 → fallthrough)
-            //   /onvif/event    → EventSubscriptionService
-            // Response rỗng → fallthrough xuống if-else (gSOAP: Media2/Imaging/Device).
-            if (IOnvifService* svc = registry_.route(path)) {
+            // ── Service Registry routing (Phase 2+3 + M2, chain-of-resp) ─
+            // Thử LẦN LƯỢT các service khớp prefix (thứ tự đăng ký), đến khi
+            // 1 service trả non-empty. Cho phép nhiều service cùng /onvif/media:
+            //   MediaLegacyService (Media1) → Media2MetadataService (metadata/analytics)
+            // Tất cả trả "" → fallthrough xuống if-else (gSOAP: Media2/Imaging/Device).
+            bool handledByRegistry = false;
+            for (IOnvifService* svc : registry_.matching(path)) {
                 std::string resp = svc->handle(g_current_headers);
                 if (!resp.empty()) {
                     soap->error = SOAP_OK;
@@ -387,9 +390,11 @@ void OnvifServer::listenLoop() {
                     soap_end_send(soap);
                     soap_destroy(soap);
                     soap_end(soap);
-                    continue;
+                    handledByRegistry = true;
+                    break;
                 }
             }
+            if (handledByRegistry) continue;
 
             if (path.find("/onvif/media") != std::string::npos) {
                 // Media1 (legacy) đã xử lý bởi registry (MediaLegacyService) ở trên.

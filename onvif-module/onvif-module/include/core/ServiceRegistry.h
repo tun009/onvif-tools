@@ -18,6 +18,12 @@ public:
     // Tìm service phụ trách path (longest-prefix match). nullptr nếu không có.
     IOnvifService* route(const std::string& path) const;
 
+    // Chain of responsibility: trả TẤT CẢ service khớp prefix (theo thứ tự
+    // đăng ký). OnvifServer thử lần lượt đến khi 1 service trả non-empty.
+    // Cho phép nhiều service cùng prefix (VD /onvif/media: MediaLegacyService
+    // xử lý Media1, Media2MetadataService xử lý metadata/analytics Media2).
+    std::vector<IOnvifService*> matching(const std::string& path) const;
+
     // Liệt kê tất cả service đã đăng ký (cho GetServices sau này).
     std::vector<IOnvifService*> all() const;
 
