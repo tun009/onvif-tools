@@ -167,13 +167,14 @@ std::string Media2MetadataService::handleGetMetadataConfigurations(const std::st
          << "<tt:Name>MetadataConfig</tt:Name>"
          << "<tt:UseCount>1</tt:UseCount>"
          << "<tt:Analytics>true</tt:Analytics>"
+         // Khớp CHÍNH XÁC metadata config trong GetProfiles (Media2Service) để
+         // pass consistency test MEDIA2-8-1-3: Multicast không IPv4Address,
+         // không AnalyticsEngineConfiguration.
          << "<tt:Multicast>"
-           << "<tt:Address><tt:Type>IPv4</tt:Type>"
-             << "<tt:IPv4Address>239.0.0.1</tt:IPv4Address></tt:Address>"
+           << "<tt:Address><tt:Type>IPv4</tt:Type></tt:Address>"
            << "<tt:Port>32001</tt:Port><tt:TTL>1</tt:TTL><tt:AutoStart>false</tt:AutoStart>"
          << "</tt:Multicast>"
          << "<tt:SessionTimeout>PT60S</tt:SessionTimeout>"
-         << "<tt:AnalyticsEngineConfiguration/>"
        << "</tr2:Configurations>"
        << "</tr2:GetMetadataConfigurationsResponse>";
     return os.str();
