@@ -154,8 +154,8 @@ std::string AnalyticsService::handle(const std::string& req) {
 std::string AnalyticsService::handleGetServiceCapabilities() {
     return
         "<tan:GetServiceCapabilitiesResponse>"
-          "<tan:Capabilities RuleSupport=\"true\" AnalyticsModuleSupport=\"true\" "
-           "CellBasedSceneDescriptionSupported=\"false\" RuleOptionsSupported=\"true\" "
+          "<tan:Capabilities RuleSupport=\"false\" AnalyticsModuleSupport=\"true\" "
+           "CellBasedSceneDescriptionSupported=\"false\" "
            "AnalyticsModuleOptionsSupported=\"true\" SupportedMetadata=\"true\"/>"
         "</tan:GetServiceCapabilitiesResponse>";
 }

@@ -787,7 +787,7 @@ int Media2Service::GetServiceCapabilities(
         caps->ProfileCapabilities->ConfigurationsSupported =
             soap_new_std__string(soap);
         *caps->ProfileCapabilities->ConfigurationsSupported =
-            "VideoSource VideoEncoder";
+            "VideoSource VideoEncoder Metadata Analytics";
     }
 
     // Streaming capabilities

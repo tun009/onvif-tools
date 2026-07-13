@@ -178,7 +178,8 @@ int DeviceService::GetCapabilities(
     // Được hỗ trợ (legacy GetCapabilities): Device, Events, Imaging.
     // KHÔNG hỗ trợ: Media (chỉ có Media2/ver20), PTZ, Analytics → phải trả fault.
     bool wantAll = false, wantDevice = false, wantEvents = false,
-         wantMedia = false, wantImaging = false, reqUnsupported = false;
+         wantMedia = false, wantImaging = false, wantAnalytics = false,
+         reqUnsupported = false;
     if (!tds__GetCapabilities || tds__GetCapabilities->Category.empty()) {
         wantAll = true;
     } else {
@@ -191,7 +192,8 @@ int DeviceService::GetCapabilities(
                 // Media1 declared cho Profile S — Category=Media trả caps.
                 case tt__CapabilityCategory::Media:     wantMedia = true; break;
                 case tt__CapabilityCategory::PTZ:       reqUnsupported = true; break;
-                case tt__CapabilityCategory::Analytics: reqUnsupported = true; break;
+                // Analytics declared cho Profile M (§7.10 Analytics Module).
+                case tt__CapabilityCategory::Analytics: wantAnalytics = true; break;
             }
         }
     }
@@ -302,6 +304,16 @@ int DeviceService::GetCapabilities(
         caps->Imaging->XAddr = base + "/onvif/imaging";
     }
 
+    // ── Analytics (Profile M §7.10 Analytics Module) ─────────────────────
+    if (wantAll || wantAnalytics) {
+        caps->Analytics = soap_new_tt__AnalyticsCapabilities(soap);
+        caps->Analytics->XAddr = base + "/onvif/analytics";
+        // RuleSupport=false: KHÔNG implement Rule engine (§8.6 conditional) →
+        // tool skip Rules/recognition tests. AnalyticsModuleSupport=true (§7.10).
+        caps->Analytics->RuleSupport            = false;
+        caps->Analytics->AnalyticsModuleSupport = true;
+    }
+
     // PTZ KHÔNG quảng bá: đây là Fixed Camera, không hỗ trợ PTZ trong Profile T.
 
     tds__GetCapabilitiesResponse.Capabilities = caps;
@@ -383,7 +395,7 @@ int DeviceService::GetServices(
             "<tr2:Capabilities SnapshotUri=\"true\" Rotation=\"false\" "
              "VideoSourceMode=\"false\" OSD=\"true\">"
               "<tr2:ProfileCapabilities MaximumNumberOfProfiles=\"3\" "
-               "ConfigurationsSupported=\"VideoSource VideoEncoder\"/>"
+               "ConfigurationsSupported=\"VideoSource VideoEncoder Metadata Analytics\"/>"
               "<tr2:StreamingCapabilities RTPMulticast=\"false\" "
                "RTP_TCP=\"true\" RTP_RTSP_TCP=\"true\" NonAggregateControl=\"false\"/>"
             "</tr2:Capabilities>";
@@ -420,8 +432,8 @@ int DeviceService::GetServices(
         // Analytics (Profile M mandatory §7.6/7.10 — GetSupportedMetadata,
         // GetSupportedAnalyticsModules...). RuleSupport/AnalyticsModuleSupport.
         std::string anCaps =
-            "<tan:Capabilities RuleSupport=\"true\" AnalyticsModuleSupport=\"true\" "
-             "CellBasedSceneDescriptionSupported=\"false\" RuleOptionsSupported=\"true\" "
+            "<tan:Capabilities RuleSupport=\"false\" AnalyticsModuleSupport=\"true\" "
+             "CellBasedSceneDescriptionSupported=\"false\" "
              "AnalyticsModuleOptionsSupported=\"true\" SupportedMetadata=\"true\"/>";
         svc("http://www.onvif.org/ver20/analytics/wsdl", "/onvif/analytics",
             21, 12, anCaps);
