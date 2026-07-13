@@ -6,6 +6,7 @@
 #include "utils/FaultBuilder.h"
 #include <sstream>
 #include <mutex>
+#include <algorithm>
 
 namespace {
 const char* NS_MEDIA2 = "http://www.onvif.org/ver20/media/wsdl";
@@ -36,6 +37,54 @@ std::string innerTag(const std::string& xml, const std::string& local) {
         pos = xml.find(local, pos + local.size());
     }
     return "";
+}
+
+bool findElementByLocalName(const std::string& xml,
+                            const std::string& local,
+                            std::size_t& openEnd,
+                            std::size_t& closeStart) {
+    std::size_t p = 0;
+    while ((p = xml.find('<', p)) != std::string::npos) {
+        if (p + 1 >= xml.size() || xml[p + 1] == '/' ||
+            xml[p + 1] == '?' || xml[p + 1] == '!') {
+            ++p;
+            continue;
+        }
+
+        std::size_t nameStart = p + 1;
+        std::size_t nameEnd = nameStart;
+        while (nameEnd < xml.size() &&
+               xml[nameEnd] != '>' &&
+               xml[nameEnd] != '/' &&
+               xml[nameEnd] != ' ' &&
+               xml[nameEnd] != '\t' &&
+               xml[nameEnd] != '\r' &&
+               xml[nameEnd] != '\n') {
+            ++nameEnd;
+        }
+
+        std::string qname = xml.substr(nameStart, nameEnd - nameStart);
+        std::size_t colon = qname.find(':');
+        std::string lname = (colon == std::string::npos) ? qname : qname.substr(colon + 1);
+        if (lname != local) {
+            p = nameEnd;
+            continue;
+        }
+
+        openEnd = xml.find('>', nameEnd);
+        if (openEnd == std::string::npos || (openEnd > 0 && xml[openEnd - 1] == '/'))
+            return false;
+
+        std::string closePlain = "</" + local + ">";
+        std::string closeQualified = "</" + qname + ">";
+        std::size_t c1 = xml.find(closePlain, openEnd + 1);
+        std::size_t c2 = xml.find(closeQualified, openEnd + 1);
+        if (c1 == std::string::npos) closeStart = c2;
+        else if (c2 == std::string::npos) closeStart = c1;
+        else closeStart = std::min(c1, c2);
+        return closeStart != std::string::npos;
+    }
+    return false;
 }
 } // namespace
 
@@ -192,15 +241,14 @@ std::string Media2MetadataService::handleGetMetadataConfigurationOptions(const s
 // ── §7.8 SetMetadataConfiguration ────────────────────────────────────────────
 std::string Media2MetadataService::handleSetMetadataConfiguration(const std::string& req) {
     // Capture-replay: lưu inner <Configuration>...</Configuration> để Get echo lại.
-    auto cs = req.find("<Configuration");
-    if (cs != std::string::npos) {
-        auto openEnd = req.find('>', cs);
-        auto ce = req.find("</Configuration>", openEnd);
-        if (openEnd != std::string::npos && ce != std::string::npos) {
-            std::string inner = req.substr(openEnd + 1, ce - openEnd - 1);
-            std::lock_guard<std::mutex> lk(g_metaMtx);
-            g_metaConfigInner = inner;
-        }
+    // Match by local name so both <Configuration xmlns="..."> and
+    // <tr2:Configuration ...> are captured.
+    std::size_t openEnd = std::string::npos;
+    std::size_t closeStart = std::string::npos;
+    if (findElementByLocalName(req, "Configuration", openEnd, closeStart)) {
+        std::string inner = req.substr(openEnd + 1, closeStart - openEnd - 1);
+        std::lock_guard<std::mutex> lk(g_metaMtx);
+        g_metaConfigInner = inner;
     }
     return "<tr2:SetMetadataConfigurationResponse/>";
 }
