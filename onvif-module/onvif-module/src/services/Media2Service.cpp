@@ -451,7 +451,22 @@ int Media2Service::GetVideoEncoderConfigurations(
     };
 
     if (profileIsDynamic) {
-        addDefaultEncoderConfig("video_encoder_config", "VideoEncoderConfig");
+        // VEC đang gán cho dynamic profile phải nằm trong compatible list (MEDIA2-2-3-1:
+        // "current VEC listed in compatible list"). Tool có thể tạo profile bằng cách copy
+        // config của fixed profile → veToken = "video_encoder_config_profile_subX". Token này
+        // cũng có trong total list (fixed subX xuất ở nhánh else) nên nhất quán.
+        std::string veTok;
+        {
+            std::lock_guard<std::mutex> lk(g_profMtx);
+            auto it = g_dynProfiles.find(filterProfileToken);
+            if (it != g_dynProfiles.end()) veTok = it->second.veToken;
+        }
+        if (!veTok.empty() && veTok != "video_encoder_config" &&
+            (filterConfigToken.empty() || filterConfigToken == veTok)) {
+            addDefaultEncoderConfig(veTok, "VideoEncoderConfig");
+        }
+        if (filterConfigToken.empty() || filterConfigToken == "video_encoder_config")
+            addDefaultEncoderConfig("video_encoder_config", "VideoEncoderConfig");
     } else {
         for (const auto& p : profiles) {
             if (!filterProfileToken.empty() && p.token != filterProfileToken) continue;
