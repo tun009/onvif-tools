@@ -13,6 +13,9 @@
 // - g_removedConfigs: cho profile fixed từ backend — track loại config đã
 //   RemoveConfiguration (MEDIA2-1-1-6).
 namespace {
+const char* PROFILE_METADATA_TOKEN = "profile_metadata";
+const char* METADATA_STREAM_PORT = "8555";
+
 struct DynProfile {
     std::string token;
     std::string name;
@@ -100,14 +103,24 @@ int Media2Service::GetProfiles(
     }
 
     // Duyệt qua backend fixed profiles (bỏ profile đã Delete) + dynamic profiles
-    struct Entry { std::string token, name; bool isFixed; const StreamProfile* fp; const DynProfile* dp; };
+    struct Entry {
+        std::string token;
+        std::string name;
+        bool isFixed;
+        bool metadataOnly;
+        const StreamProfile* fp;
+        const DynProfile* dp;
+    };
     std::vector<Entry> all;
     for (const auto& p : profiles) {
         if (deletedFixed.count(p.token)) continue;
-        all.push_back({p.token, p.name, true, &p, nullptr});
+        all.push_back({p.token, p.name, true, false, &p, nullptr});
+    }
+    if (!deletedFixed.count(PROFILE_METADATA_TOKEN)) {
+        all.push_back({PROFILE_METADATA_TOKEN, "Metadata", true, true, nullptr, nullptr});
     }
     for (const auto& d : dyns) {
-        all.push_back({d.token, d.name, false, nullptr, &d});
+        all.push_back({d.token, d.name, false, false, nullptr, &d});
     }
 
     // MEDIA2-1-1-2: nếu Token cụ thể nhưng không có profile nào khớp → fault
@@ -135,15 +148,15 @@ int Media2Service::GetProfiles(
         // (MEDIA2-1-1-6 sau RemoveConfiguration All + GetProfiles Type=All vẫn
         // check "does not contain configurations" nên phải tôn trọng removed).
         const auto& rem = removed[e.token];
-        bool showVS = wantVideoSource && !rem.count("VideoSource") && !rem.count("All");
-        bool showVE = wantVideoEncoder && !rem.count("VideoEncoder") && !rem.count("All");
+        bool showVS = wantVideoSource && !e.metadataOnly && !rem.count("VideoSource") && !rem.count("All");
+        bool showVE = wantVideoEncoder && !e.metadataOnly && !rem.count("VideoEncoder") && !rem.count("All");
         // Metadata config: chỉ fixed profile (Profile M §7.7 ready-to-use metadata
         // profile — MEDIA2-1-1-8). Dyn profile không auto có metadata.
         // Fixed profile: show khi Type filter yêu cầu. Dyn profile: show khi đã
         // AddConfiguration (mdToken/anToken set).
         bool showMD = wantMetadata && !rem.count("Metadata") && !rem.count("All") &&
                       (e.isFixed || (e.dp && !e.dp->mdToken.empty()));
-        bool showAN = wantAnalytics && !rem.count("Analytics") && !rem.count("All") &&
+        bool showAN = wantAnalytics && !e.metadataOnly && !rem.count("Analytics") && !rem.count("All") &&
                       (e.isFixed || (e.dp && !e.dp->anToken.empty()));
 
         if (showVS || showVE || showMD || showAN) {
@@ -268,6 +281,15 @@ int Media2Service::GetStreamUri(
     if (req) {
         profileToken = req->ProfileToken;
         protocol = req->Protocol;
+    }
+
+    if (profileToken == PROFILE_METADATA_TOKEN) {
+        std::string scheme = (protocol == "RtspOverHttp") ? "http://" :
+                             (protocol == "RtspOverHttps") ? "https://" : "rtsp://";
+        resp.Uri = scheme + cfg_.deviceIp + ":" + METADATA_STREAM_PORT + "/metadata";
+        std::cout << "[Media2Service] GetStreamUri [" << profileToken
+                  << "] (protocol=" << protocol << ") -> " << resp.Uri << std::endl;
+        return SOAP_OK;
     }
 
     StreamUri u;
