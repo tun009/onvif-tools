@@ -63,13 +63,34 @@ cd ~/onvif-tools/mock-camera-backend
 ./bin/mediamtx ./rtsp/mediamtx.yml
 ```
 
-### Tiến trình 2: Backend Mock Camera Server
+### Tiến trình 2: gortsplib RTSP relay (Profile M metadata và HTTP tunnel)
+
+Relay phải chạy sau MediaMTX. Relay đọc video từ MediaMTX `127.0.0.1:8554` và mở các endpoint RTSP-over-HTTP/TCP trên port `8555`:
+
+```bash
+cd ~/onvif-tools/mock-camera-backend/rtsp/gortsplib-relay
+/home/tomotech/tools/go1.26.5/bin/go mod tidy
+/home/tomotech/tools/go1.26.5/bin/go build -o mock-rtsp-metadata-poc .
+nohup ./mock-rtsp-metadata-poc > /tmp/mock-rtsp-metadata-poc.log 2>&1 < /dev/null &
+```
+
+Kiểm tra relay đã chạy:
+
+```bash
+pgrep -af mock-rtsp-metadata-poc
+ss -lntp | grep ':8555'
+tail -n 30 /tmp/mock-rtsp-metadata-poc.log
+```
+
+Các path được cung cấp là `/main`, `/jpeg`, `/sub1`, `/sub2` và `/metadata`. Relay tự reconnect khi upstream MediaMTX trả về `EOF`. Không chạy hai relay cùng lúc vì chúng dùng port `8555`, UDP `8050` và UDP `8051`.
+
+### Tiến trình 3: Backend Mock Camera Server
 ```bash
 cd ~/onvif-tools/mock-camera-backend
 ./mock-camera-server config/mock.conf
 ```
 
-### Tiến trình 3: ONVIF Server
+### Tiến trình 4: ONVIF Server
 ```bash
 cd ~/onvif-tools/onvif-module
 ./onvif-server config/onvif.conf
