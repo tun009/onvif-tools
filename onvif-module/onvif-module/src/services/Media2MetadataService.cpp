@@ -77,6 +77,22 @@ std::string extractElementInnerByLocalName(const std::string& xml,
         if (closeStart == std::string::npos && colon == std::string::npos) {
             closeStart = xml.find("</" + local + ">", openEnd + 1);
         }
+        // gSOAP/DTT may serialize the closing tag with a different prefix
+        // from the opening tag. Match any qualified closing Configuration.
+        if (closeStart == std::string::npos) {
+            closeStart = xml.find("</", openEnd + 1);
+            while (closeStart != std::string::npos) {
+                std::size_t closeEnd = xml.find('>', closeStart + 2);
+                if (closeEnd == std::string::npos) break;
+                std::string closeName = xml.substr(closeStart + 2,
+                                                   closeEnd - closeStart - 2);
+                std::size_t closeColon = closeName.find(':');
+                if (closeColon != std::string::npos)
+                    closeName = closeName.substr(closeColon + 1);
+                if (closeName == local) break;
+                closeStart = xml.find("</", closeEnd + 1);
+            }
+        }
         if (closeStart == std::string::npos) return "";
         return xml.substr(openEnd + 1, closeStart - openEnd - 1);
     }

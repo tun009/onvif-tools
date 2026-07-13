@@ -992,7 +992,19 @@ std::string MediaLegacyHandler::dispatch(const std::string& req) {
     if (req.find("SetSynchronizationPoint") != std::string::npos)
         return wrap(actUrl("SetSynchronizationPoint"), rel, handleSetSynchronizationPoint(req));
 
-    // Metadata (empty list — không hỗ trợ)
+    // Metadata configuration operations used by the Media1 dynamic-profile
+    // conformance cases. Keep the fixed mock configuration compatible with
+    // the Profile-M metadata service.
+    if (req.find("GetCompatibleMetadataConfigurations") != std::string::npos)
+        return wrap(actUrl("GetCompatibleMetadataConfigurations"), rel,
+                    "<trt:GetCompatibleMetadataConfigurationsResponse>"
+                    "<trt:Configurations token=\"metadata_config\">"
+                    "<tt:Name>MetadataConfig</tt:Name><tt:UseCount>1</tt:UseCount>"
+                    "<tt:Analytics>true</tt:Analytics>"
+                    "</trt:Configurations></trt:GetCompatibleMetadataConfigurationsResponse>");
+    if (req.find("AddMetadataConfiguration") != std::string::npos)
+        return wrap(actUrl("AddMetadataConfiguration"), rel,
+                    "<trt:AddMetadataConfigurationResponse/>");
     if (req.find("GetMetadataConfigurations") != std::string::npos)
         return wrap(actUrl("GetMetadataConfigurations"), rel, handleGetMetadataConfigurations());
 
