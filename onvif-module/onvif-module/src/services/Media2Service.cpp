@@ -76,12 +76,14 @@ int Media2Service::GetProfiles(
     bool wantVideoSource = false;
     bool wantVideoEncoder = false;
     bool wantMetadata = false;
+    bool wantAnalytics = false;
     if (req) {
         for (const auto& t : req->Type) {
-            if (t == "All") { wantVideoSource = true; wantVideoEncoder = true; wantMetadata = true; }
+            if (t == "All") { wantVideoSource = true; wantVideoEncoder = true; wantMetadata = true; wantAnalytics = true; }
             else if (t == "VideoSource") wantVideoSource = true;
             else if (t == "VideoEncoder") wantVideoEncoder = true;
             else if (t == "Metadata") wantMetadata = true;
+            else if (t == "Analytics") wantAnalytics = true;
         }
     }
 
@@ -137,8 +139,9 @@ int Media2Service::GetProfiles(
         // Metadata config: chỉ fixed profile (Profile M §7.7 ready-to-use metadata
         // profile — MEDIA2-1-1-8). Dyn profile không auto có metadata.
         bool showMD = wantMetadata && e.isFixed && !rem.count("Metadata") && !rem.count("All");
+        bool showAN = wantAnalytics && e.isFixed && !rem.count("Analytics") && !rem.count("All");
 
-        if (showVS || showVE || showMD) {
+        if (showVS || showVE || showMD || showAN) {
             profile->Configurations = soap_new_ns1__ConfigurationSet(soap);
         } else {
             profile->Configurations = nullptr;
@@ -217,6 +220,22 @@ int Media2Service::GetProfiles(
                     }
                     md->SessionTimeout = "PT60S";
                     profile->Configurations->Metadata = md;
+                }
+            }
+
+            if (showAN) {
+                auto vac = soap_new_tt__VideoAnalyticsConfiguration(soap);
+                if (vac) {
+                    vac->token = "vac_main";
+                    vac->Name  = "VideoAnalyticsConfig";
+                    vac->UseCount = 1;
+                    // AnalyticsEngineConfiguration + RuleEngineConfiguration rỗng
+                    // (module dynamic đọc qua GetAnalyticsConfigurations/store).
+                    vac->AnalyticsEngineConfiguration =
+                        soap_new_tt__AnalyticsEngineConfiguration(soap);
+                    vac->RuleEngineConfiguration =
+                        soap_new_tt__RuleEngineConfiguration(soap);
+                    profile->Configurations->Analytics = vac;
                 }
             }
         }
