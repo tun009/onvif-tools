@@ -421,8 +421,23 @@ std::string MediaLegacyHandler::handleGetProfile(const std::string& req) {
     std::ostringstream os;
     os << "<trt:GetProfileResponse>"
        << profileXml("Profile", dp.token.c_str(), dp.name.c_str(),
-                     false, !dp.vsToken.empty(), !dp.veToken.empty())
-       << "</trt:GetProfileResponse>";
+                     false, !dp.vsToken.empty(), !dp.veToken.empty());
+    if (!dp.mdToken.empty()) {
+        const std::string marker = "</trt:Profile>";
+        const std::string metadata =
+            "<tt:MetadataConfiguration token=\"" + dp.mdToken + "\">"
+            "<tt:Name>MetadataConfig</tt:Name><tt:UseCount>1</tt:UseCount>"
+            "<tt:Analytics>true</tt:Analytics>"
+            "<tt:Multicast><tt:Address><tt:Type>IPv4</tt:Type></tt:Address>"
+            "<tt:Port>32001</tt:Port><tt:TTL>1</tt:TTL><tt:AutoStart>false</tt:AutoStart></tt:Multicast>"
+            "<tt:SessionTimeout>PT60S</tt:SessionTimeout>"
+            "</tt:MetadataConfiguration>";
+        std::string profile = os.str();
+        auto end = profile.rfind(marker);
+        if (end != std::string::npos) profile.insert(end, metadata);
+        return profile + "</trt:GetProfileResponse>";
+    }
+    os << "</trt:GetProfileResponse>";
     return os.str();
 }
 
@@ -1001,10 +1016,19 @@ std::string MediaLegacyHandler::dispatch(const std::string& req) {
                     "<trt:Configurations token=\"metadata_config\">"
                     "<tt:Name>MetadataConfig</tt:Name><tt:UseCount>1</tt:UseCount>"
                     "<tt:Analytics>true</tt:Analytics>"
+                    "<tt:Multicast><tt:Address><tt:Type>IPv4</tt:Type></tt:Address>"
+                    "<tt:Port>32001</tt:Port><tt:TTL>1</tt:TTL><tt:AutoStart>false</tt:AutoStart></tt:Multicast>"
+                    "<tt:SessionTimeout>PT60S</tt:SessionTimeout>"
                     "</trt:Configurations></trt:GetCompatibleMetadataConfigurationsResponse>");
-    if (req.find("AddMetadataConfiguration") != std::string::npos)
+    if (req.find("AddMetadataConfiguration") != std::string::npos) {
+        std::string profileTok = extractInnerTag(req, "ProfileToken");
+        std::string cfgTok = extractInnerTag(req, "ConfigurationToken");
+        std::lock_guard<std::mutex> lk(g_stateMtx);
+        auto it = g_dynProfiles.find(profileTok);
+        if (it != g_dynProfiles.end()) it->second.mdToken = cfgTok;
         return wrap(actUrl("AddMetadataConfiguration"), rel,
                     "<trt:AddMetadataConfigurationResponse/>");
+    }
     if (req.find("GetMetadataConfigurations") != std::string::npos)
         return wrap(actUrl("GetMetadataConfigurations"), rel, handleGetMetadataConfigurations());
 
