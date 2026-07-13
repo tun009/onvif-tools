@@ -25,6 +25,7 @@ const char* ACT = "http://www.onvif.org/ver10/media/wsdl/Media/";
 std::string g_deviceIp = "127.0.0.1";
 int         g_httpPort = 8080;
 int         g_rtspPort = 8554;
+int         g_rtspHttpTunnelPort = 8555;
 
 std::string actUrl(const char* op) {
     return std::string(ACT) + op + "Response";
@@ -878,13 +879,13 @@ std::string MediaLegacyHandler::handleGetStreamUri(const std::string& req) {
         else if (token == "profile_jpeg") stream = "jpeg";
     }
     // Transport/Protocol (ONVIF ver10 enum: UDP/TCP/RTSP/HTTP/HTTPS). HTTP = RTSP
-    // tunneled over HTTP → scheme phải là http:// trên httpPort (khớp scheme web
-    // service). RTSS-1-1-28/30/35/42/45: "stream uri same scheme with web service".
+    // tunneled over HTTP. MediaMTX itself does not expose this tunnel, so a
+    // small gortsplib relay handles HTTP tunnel requests on 8555.
     std::string protocol = extractInnerTag(req, "Protocol");
     std::string scheme = "rtsp://";
     int port = g_rtspPort;
-    if (protocol == "HTTP")       { scheme = "http://";  port = g_httpPort; }
-    else if (protocol == "HTTPS") { scheme = "https://"; port = g_httpPort; }
+    if (protocol == "HTTP")       { scheme = "http://";  port = g_rtspHttpTunnelPort; }
+    else if (protocol == "HTTPS") { scheme = "https://"; port = g_rtspHttpTunnelPort; }
 
     std::ostringstream os;
     os << "<trt:GetStreamUriResponse>"

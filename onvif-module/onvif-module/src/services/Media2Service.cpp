@@ -15,6 +15,7 @@
 namespace {
 const char* PROFILE_METADATA_TOKEN = "profile_metadata";
 const char* METADATA_STREAM_PORT = "8555";
+const char* RTSP_HTTP_TUNNEL_PORT = "8555";
 
 struct DynProfile {
     std::string token;
@@ -326,11 +327,9 @@ int Media2Service::GetStreamUri(
         std::string rtspPortStr = ":" + std::to_string(cfg_.rtspPort);
         size_t portPos = uri.find(rtspPortStr);
         if (portPos != std::string::npos) {
-            std::string httpPortStr = ":" + std::to_string(cfg_.httpPort);
-            uri.replace(portPos, rtspPortStr.length(), httpPortStr);
+            uri.replace(portPos, rtspPortStr.length(),
+                        std::string(":") + RTSP_HTTP_TUNNEL_PORT);
         }
-
-        // Thay đổi scheme từ rtsp:// thành http:// hoặc https:// tương ứng
         if (uri.rfind("rtsp://", 0) == 0) {
             std::string targetScheme = (protocol == "RtspOverHttps") ? "https://" : "http://";
             uri.replace(0, 7, targetScheme);
@@ -852,7 +851,7 @@ int Media2Service::GetServiceCapabilities(
     // Profile T requires RTP multicast/unicast/RTSP
     caps->ProfileCapabilities = soap_new_ns1__ProfileCapabilities(soap);
     if (caps->ProfileCapabilities) {
-        caps->ProfileCapabilities->MaximumNumberOfProfiles = new int(3);
+        caps->ProfileCapabilities->MaximumNumberOfProfiles = new int(4);
         // ConfigurationsSupported: list các config type device hỗ trợ.
         // Tối thiểu Profile T: VideoSource + VideoEncoder.
         caps->ProfileCapabilities->ConfigurationsSupported =
@@ -989,6 +988,12 @@ int Media2Service::DeleteProfile(
     //    deletion không rò rỉ sang test sau.
     std::vector<StreamProfile> profiles;
     try { profiles = backend_->getProfiles(); } catch (...) {}
+    if (req->Token == PROFILE_METADATA_TOKEN) {
+        std::lock_guard<std::mutex> lk(g_profMtx);
+        g_deletedFixedTokens.insert(req->Token);
+        std::cout << "[Media2Service] DeleteProfile [" << req->Token << "] fixed->marked" << std::endl;
+        return SOAP_OK;
+    }
     for (const auto& p : profiles) {
         if (p.token == req->Token) {
             std::lock_guard<std::mutex> lk(g_profMtx);
