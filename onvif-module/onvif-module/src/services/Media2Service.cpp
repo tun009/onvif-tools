@@ -410,6 +410,7 @@ int Media2Service::GetVideoSourceConfigurations(
     if (vsc) {
         vsc->token = VALID_VS_CONFIG;
         vsc->Name = "VideoSourceConfig";
+        vsc->UseCount = 4;
         vsc->SourceToken = "src_main";
 
         vsc->Bounds = soap_new_tt__IntRectangle(soap);

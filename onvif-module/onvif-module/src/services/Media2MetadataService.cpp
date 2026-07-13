@@ -101,19 +101,29 @@ std::string Media2MetadataService::extractRelatesTo(const std::string& xml) {
 std::string Media2MetadataService::wrap(const std::string& action,
                                         const std::string& relatesTo,
                                         const std::string& bodyXml) {
+    const bool legacyMedia = action.find("http://www.onvif.org/ver10/media/wsdl/") == 0;
+    std::string body = bodyXml;
+    if (legacyMedia) {
+        std::size_t pos = 0;
+        while ((pos = body.find("tr2:", pos)) != std::string::npos) {
+            body.replace(pos, 4, "trt:");
+            pos += 4;
+        }
+    }
     std::ostringstream os;
     os << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
        << "<SOAP-ENV:Envelope"
        << " xmlns:SOAP-ENV=\"http://www.w3.org/2003/05/soap-envelope\""
        << " xmlns:wsa=\"http://www.w3.org/2005/08/addressing\""
        << " xmlns:tr2=\"" << NS_MEDIA2 << "\""
+       << " xmlns:trt=\"http://www.onvif.org/ver10/media/wsdl\""
        << " xmlns:tt=\"http://www.onvif.org/ver10/schema\""
        << " xmlns:ter=\"http://www.onvif.org/ver10/error\">"
        << "<SOAP-ENV:Header><wsa:Action>" << action << "</wsa:Action>";
     if (!relatesTo.empty())
         os << "<wsa:RelatesTo>" << relatesTo << "</wsa:RelatesTo>";
     os << "</SOAP-ENV:Header>"
-       << "<SOAP-ENV:Body>" << bodyXml << "</SOAP-ENV:Body>"
+       << "<SOAP-ENV:Body>" << body << "</SOAP-ENV:Body>"
        << "</SOAP-ENV:Envelope>";
     return os.str();
 }
