@@ -109,13 +109,8 @@ std::string Media2MetadataService::handle(const std::string& req) {
     if (has("SetMetadataConfiguration"))
         return wrap(std::string(ACT) + "SetMetadataConfigurationResponse", rel,
                     handleSetMetadataConfiguration(req));
-    // AddConfiguration/RemoveConfiguration: chỉ intercept nếu type Metadata/Analytics
-    if (has("AddConfiguration") && targetsMetadataOrAnalytics(req))
-        return wrap(std::string(ACT) + "AddConfigurationResponse", rel,
-                    handleAddConfiguration(req));
-    if (has("RemoveConfiguration") && targetsMetadataOrAnalytics(req))
-        return wrap(std::string(ACT) + "RemoveConfigurationResponse", rel,
-                    handleRemoveConfiguration(req));
+    // AddConfiguration/RemoveConfiguration: KHÔNG intercept — Media2Service (gSOAP)
+    // xử lý + track token metadata/analytics vào g_dynProfiles (dùng cho GetProfiles).
 
     // Không phải op Profile-M metadata/analytics → "" → fallthrough Media2 gSOAP.
     return "";

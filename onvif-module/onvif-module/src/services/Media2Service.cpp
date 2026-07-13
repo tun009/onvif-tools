@@ -19,6 +19,7 @@ struct DynProfile {
     std::string vsToken;
     std::string veToken;
     std::string mdToken;
+    std::string anToken;   // Analytics config (Profile M)
 };
 static std::mutex g_profMtx;
 static std::map<std::string, DynProfile> g_dynProfiles;
@@ -138,8 +139,12 @@ int Media2Service::GetProfiles(
         bool showVE = wantVideoEncoder && !rem.count("VideoEncoder") && !rem.count("All");
         // Metadata config: chỉ fixed profile (Profile M §7.7 ready-to-use metadata
         // profile — MEDIA2-1-1-8). Dyn profile không auto có metadata.
-        bool showMD = wantMetadata && e.isFixed && !rem.count("Metadata") && !rem.count("All");
-        bool showAN = wantAnalytics && e.isFixed && !rem.count("Analytics") && !rem.count("All");
+        // Fixed profile: show khi Type filter yêu cầu. Dyn profile: show khi đã
+        // AddConfiguration (mdToken/anToken set).
+        bool showMD = wantMetadata && !rem.count("Metadata") && !rem.count("All") &&
+                      (e.isFixed || (e.dp && !e.dp->mdToken.empty()));
+        bool showAN = wantAnalytics && !rem.count("Analytics") && !rem.count("All") &&
+                      (e.isFixed || (e.dp && !e.dp->anToken.empty()));
 
         if (showVS || showVE || showMD || showAN) {
             profile->Configurations = soap_new_ns1__ConfigurationSet(soap);
@@ -203,7 +208,7 @@ int Media2Service::GetProfiles(
             if (showMD) {
                 auto md = soap_new_tt__MetadataConfiguration(soap);
                 if (md) {
-                    md->token = "metadata_config";
+                    md->token = (dp && !dp->mdToken.empty()) ? dp->mdToken : "metadata_config";
                     md->Name  = "MetadataConfig";
                     md->UseCount = 1;
                     md->Analytics = (bool*)soap_malloc(soap, sizeof(bool));
@@ -226,7 +231,7 @@ int Media2Service::GetProfiles(
             if (showAN) {
                 auto vac = soap_new_tt__VideoAnalyticsConfiguration(soap);
                 if (vac) {
-                    vac->token = "vac_main";
+                    vac->token = (dp && !dp->anToken.empty()) ? dp->anToken : "vac_main";
                     vac->Name  = "VideoAnalyticsConfig";
                     vac->UseCount = 1;
                     // AnalyticsEngineConfiguration + RuleEngineConfiguration rỗng
@@ -522,6 +527,7 @@ int Media2Service::AddConfiguration(
             if (c->Type == "VideoSource")       dynIt->second.vsToken = *c->Token;
             else if (c->Type == "VideoEncoder") dynIt->second.veToken = *c->Token;
             else if (c->Type == "Metadata")     dynIt->second.mdToken = *c->Token;
+            else if (c->Type == "Analytics")    dynIt->second.anToken = *c->Token;
         }
     }
     std::cout << "[Media2Service] AddConfiguration [" << req->ProfileToken << "]" << std::endl;
@@ -900,6 +906,7 @@ int Media2Service::CreateProfile(
         if (c->Type == "VideoSource")       p.vsToken = *c->Token;
         else if (c->Type == "VideoEncoder") p.veToken = *c->Token;
         else if (c->Type == "Metadata")     p.mdToken = *c->Token;
+        else if (c->Type == "Analytics")    p.anToken = *c->Token;
     }
     {
         std::lock_guard<std::mutex> lk(g_profMtx);
