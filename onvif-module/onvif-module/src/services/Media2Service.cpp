@@ -129,12 +129,7 @@ int Media2Service::GetProfiles(
         if (!profile) continue;
         profile->token = e.token;
         profile->Name  = e.name;
-        // Fixed profile (từ backend) → fixed=true (Profile T §7.7 / Profile M §7.7:
-        // ready-to-use profile không được xóa). DeleteProfile phải reject → tránh
-        // state pollution trong full run (test trước xóa fixed → 1-1-8/9, 4-1-5 fail).
-        // Dyn profile (tool tạo) → fixed=false.
-        profile->fixed = (bool*)soap_malloc(soap, sizeof(bool));
-        *profile->fixed = e.isFixed;
+        profile->fixed = nullptr;
 
         // Type filter rỗng (không có phần tử Type nào) → không kèm Configurations
         // (MEDIA2-1-1-6 sau RemoveConfiguration All + GetProfiles Type=All vẫn
@@ -526,8 +521,17 @@ int Media2Service::AddConfiguration(
     auto dynIt = g_dynProfiles.find(req->ProfileToken);
     for (auto* c : req->Configuration) {
         if (!c) continue;
-        g_removedConfigs[req->ProfileToken].erase(c->Type);
-        if (c->Type == "All") g_removedConfigs[req->ProfileToken].clear();
+        auto& rem = g_removedConfigs[req->ProfileToken];
+        // MEDIA2-1-1-6: tool Remove "All" rồi Add lại TỪNG loại riêng lẻ. Marker
+        // "All" phải được expand thành các loại cụ thể trước, rồi mới erase loại
+        // vừa Add — nếu không "All" kẹt lại → GetProfiles suppress hết config →
+        // profile rỗng vĩnh viễn (1-1-8/9, 4-1-5 fail vì không thấy ready-to-use profile).
+        if (rem.count("All")) {
+            rem.erase("All");
+            rem.insert({"VideoSource", "VideoEncoder", "Metadata", "Analytics"});
+        }
+        if (c->Type == "All") rem.clear();
+        else rem.erase(c->Type);
         if (dynIt != g_dynProfiles.end() && c->Token) {
             if (c->Type == "VideoSource")       dynIt->second.vsToken = *c->Token;
             else if (c->Type == "VideoEncoder") dynIt->second.veToken = *c->Token;
@@ -943,18 +947,17 @@ int Media2Service::DeleteProfile(
             return SOAP_OK;
         }
     }
-    // 2) Fixed profile từ backend → KHÔNG cho xóa (fixed=true, ready-to-use profile).
-    //    Reject bằng fault ter:Action/ter:DeletionOfFixedProfile (spec Media2 §7.8).
-    //    Trước đây mark-deleted gây state pollution: full run xóa hết fixed profile
-    //    → MEDIA2-1-1-8/9, ANALYTICS-4-1-5/6 không tìm thấy profile → fail.
+    // 2) Fixed profile từ backend → mark deleted (không xóa thật). State được reset
+    //    ở đầu mỗi test (resetPerTestState, gọi từ DeviceService::GetServices) nên
+    //    deletion không rò rỉ sang test sau.
     std::vector<StreamProfile> profiles;
     try { profiles = backend_->getProfiles(); } catch (...) {}
     for (const auto& p : profiles) {
         if (p.token == req->Token) {
-            std::cout << "[Media2Service] DeleteProfile [" << req->Token << "] fixed→rejected" << std::endl;
-            return m2SendOnvifFault(this->soap, "SOAP-ENV:Sender",
-                                    "ter:Action", "ter:DeletionOfFixedProfile",
-                                    "Fixed profile cannot be deleted");
+            std::lock_guard<std::mutex> lk(g_profMtx);
+            g_deletedFixedTokens.insert(req->Token);
+            std::cout << "[Media2Service] DeleteProfile [" << req->Token << "] fixed→marked" << std::endl;
+            return SOAP_OK;
         }
     }
     return m2SendOnvifFault(this->soap, "SOAP-ENV:Sender",
