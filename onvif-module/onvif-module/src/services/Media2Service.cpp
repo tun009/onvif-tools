@@ -851,7 +851,7 @@ int Media2Service::GetServiceCapabilities(
     // Profile T requires RTP multicast/unicast/RTSP
     caps->ProfileCapabilities = soap_new_ns1__ProfileCapabilities(soap);
     if (caps->ProfileCapabilities) {
-        caps->ProfileCapabilities->MaximumNumberOfProfiles = new int(4);
+        caps->ProfileCapabilities->MaximumNumberOfProfiles = new int(3);
         // ConfigurationsSupported: list các config type device hỗ trợ.
         // Tối thiểu Profile T: VideoSource + VideoEncoder.
         caps->ProfileCapabilities->ConfigurationsSupported =

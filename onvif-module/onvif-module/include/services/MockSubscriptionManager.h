@@ -63,6 +63,10 @@ private:
     static std::string newMessageId();
     // Trích nội dung phần tử <...local>VALUE</...local> đầu tiên (bỏ qua prefix).
     static std::string extractTag(const std::string& xml, const std::string& localName);
+    // Kiểm tra phần tử theo local-name, không phụ thuộc prefix namespace.
+    static bool hasElement(const std::string& xml, const std::string& localName);
+    static std::string extractElementBlock(const std::string& xml,
+                                           const std::string& localName);
     // Khung envelope + header (Action, MessageID, RelatesTo) + body.
     std::string wrapEnvelope(const std::string& action,
                              const std::string& relatesTo,

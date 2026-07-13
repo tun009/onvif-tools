@@ -75,6 +75,65 @@ std::string MockSubscriptionManager::extractTag(const std::string& xml,
     return v.substr(a, b - a + 1);
 }
 
+bool MockSubscriptionManager::hasElement(const std::string& xml,
+                                         const std::string& localName) {
+    size_t search = 0;
+    while (search < xml.size()) {
+        size_t lt = xml.find('<', search);
+        if (lt == std::string::npos) return false;
+        size_t nameStart = lt + 1;
+        if (nameStart >= xml.size()) return false;
+        char first = xml[nameStart];
+        if (first == '/' || first == '!' || first == '?') {
+            search = nameStart + 1;
+            continue;
+        }
+        size_t nameEnd = xml.find_first_of(" \t\r\n/>", nameStart);
+        if (nameEnd == std::string::npos) return false;
+        size_t colon = xml.rfind(':', nameEnd);
+        size_t localStart = (colon != std::string::npos && colon > nameStart)
+                            ? colon + 1 : nameStart;
+        if (xml.compare(localStart, nameEnd - localStart, localName) == 0) {
+            return true;
+        }
+        search = nameEnd + 1;
+    }
+    return false;
+}
+
+std::string MockSubscriptionManager::extractElementBlock(
+    const std::string& xml,
+    const std::string& localName) {
+    size_t search = 0;
+    while (search < xml.size()) {
+        size_t lt = xml.find('<', search);
+        if (lt == std::string::npos) return "";
+        size_t nameStart = lt + 1;
+        if (nameStart >= xml.size()) return "";
+        char first = xml[nameStart];
+        if (first == '/' || first == '!' || first == '?') {
+            search = nameStart + 1;
+            continue;
+        }
+        size_t nameEnd = xml.find_first_of(" \t\r\n/>", nameStart);
+        if (nameEnd == std::string::npos) return "";
+        size_t colon = xml.rfind(':', nameEnd);
+        size_t localStart = (colon != std::string::npos && colon > nameStart)
+                            ? colon + 1 : nameStart;
+        if (xml.compare(localStart, nameEnd - localStart, localName) == 0) {
+            size_t gt = xml.find('>', nameEnd);
+            if (gt == std::string::npos || xml[gt - 1] == '/') return "";
+            std::string openName = xml.substr(nameStart, nameEnd - nameStart);
+            std::string closeTag = "</" + openName + ">";
+            size_t end = xml.find(closeTag, gt + 1);
+            if (end == std::string::npos) return "";
+            return xml.substr(lt, end + closeTag.size() - lt);
+        }
+        search = nameEnd + 1;
+    }
+    return "";
+}
+
 // Parse xsd:duration đơn giản dạng PT#H#M#S → giây. Trả fallback nếu không hợp lệ.
 int MockSubscriptionManager::parseDurationSeconds(const std::string& iso, int fallback) {
     if (iso.empty() || iso[0] != 'P') return fallback;
@@ -155,28 +214,27 @@ std::string MockSubscriptionManager::dispatch(const std::string& deviceIp, int p
                                               const std::string& subId,
                                               const std::string& req) {
     // Nhận diện operation theo tên phần tử trong body (bỏ qua prefix).
-    if (req.find("GetEventProperties") != std::string::npos)
+    if (hasElement(req, "GetEventProperties"))
         return handleGetEventProperties(req);
-    if (req.find("GetServiceCapabilities") != std::string::npos)
+    if (hasElement(req, "GetServiceCapabilities"))
         return handleGetServiceCapabilities(req);
-    if (req.find("CreatePullPointSubscription") != std::string::npos)
+    if (hasElement(req, "CreatePullPointSubscription"))
         return handleCreateSubscription(deviceIp, port, req);
     // Basic Notification Subscribe (WS-BN) — element <Subscribe> namespace
     // http://docs.oasis-open.org/wsn/b-2. Khác CreatePullPointSubscription.
-    if (req.find("<Subscribe") != std::string::npos ||
-        req.find(":Subscribe") != std::string::npos) {
+    if (hasElement(req, "Subscribe")) {
         // Chỉ khớp khi có ConsumerReference (Base Subscribe) — tránh match
         // các word "Subscribe..." khác.
-        if (req.find("ConsumerReference") != std::string::npos)
+        if (hasElement(req, "ConsumerReference"))
             return handleBaseSubscribe(deviceIp, port, req);
     }
-    if (req.find("PullMessages") != std::string::npos)
+    if (hasElement(req, "PullMessages"))
         return handlePullMessages(subId, req);
-    if (req.find("SetSynchronizationPoint") != std::string::npos)
+    if (hasElement(req, "SetSynchronizationPoint"))
         return handleSetSynchronizationPoint(subId, req);
-    if (req.find("Unsubscribe") != std::string::npos)
+    if (hasElement(req, "Unsubscribe"))
         return handleUnsubscribe(subId, req);
-    if (req.find("Renew") != std::string::npos)
+    if (hasElement(req, "Renew"))
         return handleRenew(subId, req);
     return "";  // không nhận diện → để OnvifServer xử lý mặc định
 }
@@ -245,10 +303,9 @@ std::string MockSubscriptionManager::handleCreateSubscription(const std::string&
 
     // ── Parse + validate Filter ───────────────────────────────────────────
     std::string topicExpr, msgContent;
-    if (req.find("TopicExpression") != std::string::npos)
+    if (hasElement(req, "TopicExpression"))
         topicExpr = extractTag(req, "TopicExpression");
-    if (req.find("MessageContent Dialect") != std::string::npos ||
-        req.find("MessageContent ") != std::string::npos)
+    if (hasElement(req, "MessageContent"))
         msgContent = extractTag(req, "MessageContent");
 
     // TopicExpression sai (vd "U" — không có prefix ':') → InvalidTopicExpressionFault
@@ -398,14 +455,8 @@ std::string MockSubscriptionManager::handleBaseSubscribe(const std::string& devi
     // match nhầm. Cắt substring bên trong <ConsumerReference>...</ConsumerReference>.
     std::string consumerUrl;
     {
-        size_t p = req.find("ConsumerReference");
-        if (p != std::string::npos) {
-            size_t end = req.find("/ConsumerReference", p);
-            if (end != std::string::npos) {
-                std::string block = req.substr(p, end - p);
-                consumerUrl = extractTag(block, "Address");
-            }
-        }
+        std::string block = extractElementBlock(req, "ConsumerReference");
+        if (!block.empty()) consumerUrl = extractTag(block, "Address");
     }
     int timeout = parseDurationSeconds(
         extractTag(req, "InitialTerminationTime"), 300);
@@ -413,7 +464,7 @@ std::string MockSubscriptionManager::handleBaseSubscribe(const std::string& devi
     // để notify thread có đủ thời gian push (subscription không expire quá sớm).
     if (timeout < 60) timeout = 60;
     std::string topicExpr;
-    if (req.find("TopicExpression") != std::string::npos)
+    if (hasElement(req, "TopicExpression"))
         topicExpr = extractTag(req, "TopicExpression");
 
     {
