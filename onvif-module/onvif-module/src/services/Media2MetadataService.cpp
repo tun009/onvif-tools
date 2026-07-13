@@ -7,6 +7,7 @@
 #include <sstream>
 #include <mutex>
 #include <algorithm>
+#include <iostream>
 
 namespace {
 const char* NS_MEDIA2 = "http://www.onvif.org/ver20/media/wsdl";
@@ -39,10 +40,8 @@ std::string innerTag(const std::string& xml, const std::string& local) {
     return "";
 }
 
-bool findElementByLocalName(const std::string& xml,
-                            const std::string& local,
-                            std::size_t& openEnd,
-                            std::size_t& closeStart) {
+std::string extractElementInnerByLocalName(const std::string& xml,
+                                           const std::string& local) {
     std::size_t p = 0;
     while ((p = xml.find('<', p)) != std::string::npos) {
         if (p + 1 >= xml.size() || xml[p + 1] == '/' ||
@@ -71,20 +70,17 @@ bool findElementByLocalName(const std::string& xml,
             continue;
         }
 
-        openEnd = xml.find('>', nameEnd);
-        if (openEnd == std::string::npos || (openEnd > 0 && xml[openEnd - 1] == '/'))
-            return false;
-
-        std::string closePlain = "</" + local + ">";
-        std::string closeQualified = "</" + qname + ">";
-        std::size_t c1 = xml.find(closePlain, openEnd + 1);
-        std::size_t c2 = xml.find(closeQualified, openEnd + 1);
-        if (c1 == std::string::npos) closeStart = c2;
-        else if (c2 == std::string::npos) closeStart = c1;
-        else closeStart = std::min(c1, c2);
-        return closeStart != std::string::npos;
+        std::size_t openEnd = xml.find('>', nameEnd);
+        if (openEnd == std::string::npos || xml[openEnd - 1] == '/') return "";
+        std::string closeTag = "</" + qname + ">";
+        std::size_t closeStart = xml.find(closeTag, openEnd + 1);
+        if (closeStart == std::string::npos && colon == std::string::npos) {
+            closeStart = xml.find("</" + local + ">", openEnd + 1);
+        }
+        if (closeStart == std::string::npos) return "";
+        return xml.substr(openEnd + 1, closeStart - openEnd - 1);
     }
-    return false;
+    return "";
 }
 } // namespace
 
@@ -199,6 +195,8 @@ std::string Media2MetadataService::handleGetMetadataConfigurations(const std::st
     {
         std::lock_guard<std::mutex> lk(g_metaMtx);
         if (!g_metaConfigInner.empty()) {
+            std::cout << "[Media2Metadata] replay stored MetadataConfiguration len="
+                      << g_metaConfigInner.size() << std::endl;
             return "<tr2:GetMetadataConfigurationsResponse>"
                    "<tr2:Configurations token=\"" + std::string(META_TOKEN) + "\">"
                    + g_metaConfigInner +
@@ -243,12 +241,15 @@ std::string Media2MetadataService::handleSetMetadataConfiguration(const std::str
     // Capture-replay: lưu inner <Configuration>...</Configuration> để Get echo lại.
     // Match by local name so both <Configuration xmlns="..."> and
     // <tr2:Configuration ...> are captured.
-    std::size_t openEnd = std::string::npos;
-    std::size_t closeStart = std::string::npos;
-    if (findElementByLocalName(req, "Configuration", openEnd, closeStart)) {
-        std::string inner = req.substr(openEnd + 1, closeStart - openEnd - 1);
+    std::string inner = extractElementInnerByLocalName(req, "Configuration");
+    if (!inner.empty()) {
         std::lock_guard<std::mutex> lk(g_metaMtx);
         g_metaConfigInner = inner;
+        std::cout << "[Media2Metadata] stored MetadataConfiguration len="
+                  << g_metaConfigInner.size() << std::endl;
+    } else {
+        std::cout << "[Media2Metadata] WARNING: SetMetadataConfiguration without Configuration body"
+                  << std::endl;
     }
     return "<tr2:SetMetadataConfigurationResponse/>";
 }
