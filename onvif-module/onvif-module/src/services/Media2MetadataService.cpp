@@ -127,8 +127,18 @@ bool Media2MetadataService::targetsMetadataOrAnalytics(const std::string& req) {
 
 // ── Dispatch ────────────────────────────────────────────────────────────────
 std::string Media2MetadataService::handle(const std::string& req) {
-    // Chỉ xử lý request Media2 (ver20). Media1 (ver10) → MediaLegacyService lo.
-    if (req.find(NS_MEDIA2) == std::string::npos) return "";
+    // DTT 24.12 sends the Profile-M metadata operations through the legacy
+    // media namespace (ver10) even when the test is labelled Media2. Accept
+    // only these metadata operations in that namespace; other Media1 calls
+    // continue to fall through to MediaLegacyService.
+    const bool isMedia2 = req.find(NS_MEDIA2) != std::string::npos;
+    const bool isMetadataOp = req.find("GetMetadataConfigurations") != std::string::npos ||
+                              req.find("GetMetadataConfigurationOptions") != std::string::npos ||
+                              req.find("SetMetadataConfiguration") != std::string::npos;
+    if (!isMedia2 && !isMetadataOp) return "";
+    const std::string actionBase = isMedia2
+        ? std::string(ACT)
+        : std::string("http://www.onvif.org/ver10/media/wsdl/Media/");
     std::string rel = extractRelatesTo(req);
     auto has = [&](const char* op) { return req.find(op) != std::string::npos; };
 
@@ -142,17 +152,17 @@ std::string Media2MetadataService::handle(const std::string& req) {
                     handleGetAnalyticsConfigurations(req));
     }
     if (has("GetMetadataConfigurationOptions"))
-        return wrap(std::string(ACT) + "GetMetadataConfigurationOptionsResponse", rel,
+        return wrap(actionBase + "GetMetadataConfigurationOptionsResponse", rel,
                     handleGetMetadataConfigurationOptions(req));
     if (has("GetMetadataConfigurations")) {
         if (!cfgTok.empty() && cfgTok != META_TOKEN)
             return FaultBuilder::sender("ter:InvalidArgVal", "ter:NoConfig",
                                         "No metadata configuration with the given token");
-        return wrap(std::string(ACT) + "GetMetadataConfigurationsResponse", rel,
+        return wrap(actionBase + "GetMetadataConfigurationsResponse", rel,
                     handleGetMetadataConfigurations(req));
     }
     if (has("SetMetadataConfiguration"))
-        return wrap(std::string(ACT) + "SetMetadataConfigurationResponse", rel,
+        return wrap(actionBase + "SetMetadataConfigurationResponse", rel,
                     handleSetMetadataConfiguration(req));
     // AddConfiguration/RemoveConfiguration: KHÔNG intercept — Media2Service (gSOAP)
     // xử lý + track token metadata/analytics vào g_dynProfiles (dùng cho GetProfiles).

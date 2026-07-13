@@ -176,6 +176,10 @@ int Media2Service::GetProfiles(
                 if (vsc) {
                     vsc->token = dp ? dp->vsToken : "video_source_config";
                     vsc->Name = "VideoSourceConfig";
+                    // Keep the profile configuration consistent with
+                    // GetVideoSourceConfigurations. DTT compares this field
+                    // when validating CreateProfile + GetProfiles.
+                    vsc->UseCount = 4;
                     vsc->SourceToken = (fp && !fp->sourceToken.empty()) ? fp->sourceToken : "src_main";
                     vsc->Bounds = soap_new_tt__IntRectangle(soap);
                     if (vsc->Bounds) {
