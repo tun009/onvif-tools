@@ -125,9 +125,9 @@ OnvifServer::OnvifServer(const ServiceConfig& cfg, std::shared_ptr<ICameraBacken
     // ── Đăng ký service string-based vào registry (Phase 2+3 refactor) ──
     // Thêm service mới: chỉ registerService() ở đây, KHÔNG sửa listenLoop.
     registry_.registerService(std::make_unique<DeviceIOService>());
-    registry_.registerService(std::make_unique<MediaLegacyService>());
     // M2: Media2 metadata/analytics config (chain sau MediaLegacy, cùng /onvif/media).
     registry_.registerService(std::make_unique<Media2MetadataService>());
+    registry_.registerService(std::make_unique<MediaLegacyService>());
     registry_.registerService(std::make_unique<EventSubscriptionService>(
         cfg_.deviceIp, cfg_.httpPort));
     // Profile M (M1): Analytics service — GetSupportedMetadata, analytics modules.

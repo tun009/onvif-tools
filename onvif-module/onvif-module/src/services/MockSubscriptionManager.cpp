@@ -88,6 +88,8 @@ bool MockSubscriptionManager::hasElement(const std::string& xml,
             search = nameStart + 1;
             continue;
         }
+        // Include '>' so unprefixed elements such as <Subscribe> are parsed
+        // exactly like prefixed elements such as <wsnt:Subscribe>.
         size_t nameEnd = xml.find_first_of(" \t\r\n/>", nameStart);
         if (nameEnd == std::string::npos) return false;
         size_t colon = xml.rfind(':', nameEnd);
@@ -223,10 +225,10 @@ std::string MockSubscriptionManager::dispatch(const std::string& deviceIp, int p
     // Basic Notification Subscribe (WS-BN) — element <Subscribe> namespace
     // http://docs.oasis-open.org/wsn/b-2. Khác CreatePullPointSubscription.
     if (hasElement(req, "Subscribe")) {
-        // Chỉ khớp khi có ConsumerReference (Base Subscribe) — tránh match
-        // các word "Subscribe..." khác.
-        if (hasElement(req, "ConsumerReference"))
-            return handleBaseSubscribe(deviceIp, port, req);
+        // Match the operation by local name only. The namespace-prefix
+        // conformance case may use a different prefix (or omit one) on
+        // ConsumerReference; it is still the same WS-BN Subscribe request.
+        return handleBaseSubscribe(deviceIp, port, req);
     }
     if (hasElement(req, "PullMessages"))
         return handlePullMessages(subId, req);
