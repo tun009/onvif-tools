@@ -877,10 +877,19 @@ std::string MediaLegacyHandler::handleGetStreamUri(const std::string& req) {
         else if (token == "profile_sub2") stream = "sub2";
         else if (token == "profile_jpeg") stream = "jpeg";
     }
+    // Transport/Protocol (ONVIF ver10 enum: UDP/TCP/RTSP/HTTP/HTTPS). HTTP = RTSP
+    // tunneled over HTTP → scheme phải là http:// trên httpPort (khớp scheme web
+    // service). RTSS-1-1-28/30/35/42/45: "stream uri same scheme with web service".
+    std::string protocol = extractInnerTag(req, "Protocol");
+    std::string scheme = "rtsp://";
+    int port = g_rtspPort;
+    if (protocol == "HTTP")       { scheme = "http://";  port = g_httpPort; }
+    else if (protocol == "HTTPS") { scheme = "https://"; port = g_httpPort; }
+
     std::ostringstream os;
     os << "<trt:GetStreamUriResponse>"
        << "<trt:MediaUri>"
-         << "<tt:Uri>rtsp://" << g_deviceIp << ":8554/" << stream << "</tt:Uri>"
+         << "<tt:Uri>" << scheme << g_deviceIp << ":" << port << "/" << stream << "</tt:Uri>"
          << "<tt:InvalidAfterConnect>false</tt:InvalidAfterConnect>"
          << "<tt:InvalidAfterReboot>false</tt:InvalidAfterReboot>"
          << "<tt:Timeout>PT60S</tt:Timeout>"
