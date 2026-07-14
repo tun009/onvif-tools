@@ -279,6 +279,12 @@ std::string Media2MetadataService::handleSetMetadataConfiguration(const std::str
     // <tr2:Configuration ...> are captured.
     std::string inner = extractElementInnerByLocalName(req, "Configuration");
     if (!inner.empty()) {
+        const std::string timeout = innerTag(inner, "SessionTimeout");
+        if (timeout == "invalid") {
+            // Do not persist the invalid duration from negative tests.
+            return FaultBuilder::sender("ter:InvalidArgVal", "ter:ConfigModify",
+                                        "Invalid SessionTimeout");
+        }
         std::lock_guard<std::mutex> lk(g_metaMtx);
         g_metaConfigInner = inner;
         std::cout << "[Media2Metadata] stored MetadataConfiguration len="

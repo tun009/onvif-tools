@@ -1029,6 +1029,14 @@ std::string MediaLegacyHandler::dispatch(const std::string& req) {
         return wrap(actUrl("AddMetadataConfiguration"), rel,
                     "<trt:AddMetadataConfigurationResponse/>");
     }
+    if (req.find("RemoveMetadataConfiguration") != std::string::npos) {
+        std::string profileTok = extractInnerTag(req, "ProfileToken");
+        std::lock_guard<std::mutex> lk(g_stateMtx);
+        auto it = g_dynProfiles.find(profileTok);
+        if (it != g_dynProfiles.end()) it->second.mdToken.clear();
+        return wrap(actUrl("RemoveMetadataConfiguration"), rel,
+                    "<trt:RemoveMetadataConfigurationResponse/>");
+    }
     if (req.find("GetMetadataConfigurations") != std::string::npos)
         return wrap(actUrl("GetMetadataConfigurations"), rel, handleGetMetadataConfigurations());
 
