@@ -66,7 +66,23 @@ func relayOnce(server *gortsplib.Server, ps *pathStream, path, src string) error
 		return nil
 	}
 	c.OnPacketRTPAny(func(media *description.Media, _ format.Format, pkt *rtp.Packet) {
+		// Upstream reconnects may briefly deliver a payload type that is not
+		// present in the stable ServerStream description. gortsplib expects the
+		// format lookup to succeed and would otherwise dereference nil.
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("relay write %s: recovered from format mismatch: %v", path, r)
+			}
+		}()
 		target := stableMedia(media); if target == nil { log.Printf("relay write %s: unknown media", path); return }
+		matchedPayload := false
+		for _, f := range target.Formats {
+			if f.PayloadType() == pkt.PayloadType { matchedPayload = true; break }
+		}
+		if !matchedPayload {
+			log.Printf("relay write %s: unsupported payload type %d", path, pkt.PayloadType)
+			return
+		}
 		if err := st.WritePacketRTP(target, pkt); err != nil { log.Printf("relay write %s: %v", path, err) }
 	})
 	if _, err = c.Play(nil); err != nil { return err }; return c.Wait()
