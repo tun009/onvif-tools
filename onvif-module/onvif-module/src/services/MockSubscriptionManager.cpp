@@ -302,6 +302,10 @@ std::string MockSubscriptionManager::handleCreateSubscription(const std::string&
     // Default 300s (5 phút) thay vì 60s để tránh expire giữa test suite —
     // EVENT-3-1-24 tool sleep + validation trước PullMessages có thể vượt 60s.
     int timeout = parseDurationSeconds(extractTag(req, "InitialTerminationTime"), 300);
+    // DTT can spend several minutes validating PullPoint subscriptions before
+    // sending PullMessages. Keep this subscription type alive for 10 minutes;
+    // Base Subscribe below intentionally keeps its own timeout policy.
+    if (timeout < 600) timeout = 600;
 
     // ── Parse + validate Filter ───────────────────────────────────────────
     std::string topicExpr, msgContent;
