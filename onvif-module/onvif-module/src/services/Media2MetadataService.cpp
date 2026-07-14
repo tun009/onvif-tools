@@ -158,7 +158,8 @@ std::string Media2MetadataService::handle(const std::string& req) {
     // only these metadata operations in that namespace; other Media1 calls
     // continue to fall through to MediaLegacyService.
     const bool isMedia2 = req.find(NS_MEDIA2) != std::string::npos;
-    const bool isMetadataOp = req.find("GetMetadataConfigurations") != std::string::npos ||
+    const bool isMetadataOp = req.find("GetMetadataConfiguration>") != std::string::npos ||
+                              req.find("GetMetadataConfigurations") != std::string::npos ||
                               req.find("GetMetadataConfigurationOptions") != std::string::npos ||
                               req.find("SetMetadataConfiguration") != std::string::npos;
     if (!isMedia2 && !isMetadataOp) return "";
@@ -180,6 +181,18 @@ std::string Media2MetadataService::handle(const std::string& req) {
     if (has("GetMetadataConfigurationOptions"))
         return wrap(actionBase + "GetMetadataConfigurationOptionsResponse", rel,
                     handleGetMetadataConfigurationOptions(req));
+    // Media1 Profile-M uses the singular GetMetadataConfiguration operation.
+    // Keep it separate from GetMetadataConfigurations (the plural operation).
+    const bool getMetadataConfiguration =
+        req.find("<GetMetadataConfiguration") != std::string::npos &&
+        req.find("<GetMetadataConfigurations") == std::string::npos;
+    if (getMetadataConfiguration) {
+        if (!cfgTok.empty() && cfgTok != META_TOKEN)
+            return FaultBuilder::sender("ter:InvalidArgVal", "ter:NoConfig",
+                                        "No metadata configuration with the given token");
+        return wrap(actionBase + "GetMetadataConfigurationResponse", rel,
+                    handleGetMetadataConfiguration(req));
+    }
     if (has("GetMetadataConfigurations")) {
         if (!cfgTok.empty() && cfgTok != META_TOKEN)
             return FaultBuilder::sender("ter:InvalidArgVal", "ter:NoConfig",
@@ -261,6 +274,26 @@ std::string Media2MetadataService::handleGetMetadataConfigurations(const std::st
        << "</tr2:Configurations>"
        << "</tr2:GetMetadataConfigurationsResponse>";
     return os.str();
+}
+
+std::string Media2MetadataService::handleGetMetadataConfiguration(const std::string& req) {
+    std::string body = handleGetMetadataConfigurations(req);
+    const std::string pluralResponse = "GetMetadataConfigurationsResponse";
+    const std::string singularResponse = "GetMetadataConfigurationResponse";
+    const std::string pluralConfig = "Configurations";
+    const std::string singularConfig = "Configuration";
+    std::size_t pos = 0;
+    while ((pos = body.find(pluralResponse, pos)) != std::string::npos) {
+        body.replace(pos, pluralResponse.size(), singularResponse);
+        pos += singularResponse.size();
+    }
+    pos = body.find(":Configurations");
+    if (pos != std::string::npos)
+        body.replace(pos, pluralConfig.size() + 1, ":" + singularConfig);
+    pos = body.find(":Configurations");
+    if (pos != std::string::npos)
+        body.replace(pos, pluralConfig.size() + 1, ":" + singularConfig);
+    return body;
 }
 
 // ── §7.8 GetMetadataConfigurationOptions ─────────────────────────────────────

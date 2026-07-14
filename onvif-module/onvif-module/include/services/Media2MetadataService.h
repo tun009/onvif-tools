@@ -26,6 +26,7 @@ public:
 private:
     std::string handleGetAnalyticsConfigurations(const std::string& req);
     std::string handleGetMetadataConfigurations(const std::string& req);
+    std::string handleGetMetadataConfiguration(const std::string& req);
     std::string handleGetMetadataConfigurationOptions(const std::string& req);
     std::string handleSetMetadataConfiguration(const std::string& req);
     std::string handleAddConfiguration(const std::string& req);
