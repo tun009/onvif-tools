@@ -876,8 +876,9 @@ int Media2Service::GetServiceCapabilities(
         auto rtpOverRtsp = new bool(true);
         caps->StreamingCapabilities->RTP_USCORERTSP_USCORETCP = rtpOverRtsp;
 
-        // RTP multicast - not supported (requires multicast network setup)
-        auto rtpMulticast = new bool(false);
+        // Profile M/T device requirements include RTP/UDP multicast.
+        // Advertise this consistently with the Media2 profile capabilities.
+        auto rtpMulticast = new bool(true);
         caps->StreamingCapabilities->RTPMulticast = rtpMulticast;
 
         // No non-agg controls

@@ -396,7 +396,7 @@ int DeviceService::GetServices(
              "VideoSourceMode=\"false\" OSD=\"true\">"
               "<tr2:ProfileCapabilities MaximumNumberOfProfiles=\"3\" "
                "ConfigurationsSupported=\"VideoSource VideoEncoder Metadata Analytics\"/>"
-              "<tr2:StreamingCapabilities RTSPStreaming=\"true\" RTPMulticast=\"false\" "
+              "<tr2:StreamingCapabilities RTSPStreaming=\"true\" RTPMulticast=\"true\" "
                "RTP_TCP=\"true\" RTP_RTSP_TCP=\"true\" NonAggregateControl=\"false\"/>"
             "</tr2:Capabilities>";
         svc("http://www.onvif.org/ver20/media/wsdl", "/onvif/media",
