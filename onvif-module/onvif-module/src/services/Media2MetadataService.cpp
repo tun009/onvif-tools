@@ -187,9 +187,14 @@ std::string Media2MetadataService::handle(const std::string& req) {
         return wrap(actionBase + "GetMetadataConfigurationsResponse", rel,
                     handleGetMetadataConfigurations(req));
     }
-    if (has("SetMetadataConfiguration"))
-        return wrap(actionBase + "SetMetadataConfigurationResponse", rel,
-                    handleSetMetadataConfiguration(req));
+    if (has("SetMetadataConfiguration")) {
+        const std::string body = handleSetMetadataConfiguration(req);
+        // FaultBuilder returns a complete SOAP envelope. Do not wrap it again:
+        // nesting it would place a second XML declaration inside SOAP Body.
+        if (body.rfind("<?xml", 0) == 0)
+            return body;
+        return wrap(actionBase + "SetMetadataConfigurationResponse", rel, body);
+    }
     // AddConfiguration/RemoveConfiguration: KHÔNG intercept — Media2Service (gSOAP)
     // xử lý + track token metadata/analytics vào g_dynProfiles (dùng cho GetProfiles).
 
