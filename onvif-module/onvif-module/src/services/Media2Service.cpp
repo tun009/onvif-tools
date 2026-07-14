@@ -868,6 +868,10 @@ int Media2Service::GetServiceCapabilities(
     // Streaming capabilities
     caps->StreamingCapabilities = soap_new_ns1__StreamingCapabilities(soap);
     if (caps->StreamingCapabilities) {
+        // Media2 uses RTSPStreaming to advertise that RTSP streaming is available.
+        auto rtspStreaming = new bool(true);
+        caps->StreamingCapabilities->RTSPStreaming = rtspStreaming;
+
         // RTP over RTSP/TCP - supported
         auto rtpOverRtsp = new bool(true);
         caps->StreamingCapabilities->RTP_USCORERTSP_USCORETCP = rtpOverRtsp;
