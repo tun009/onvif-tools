@@ -13,6 +13,7 @@ import (
 	"github.com/bluenviron/gortsplib/v5/pkg/description"
 	"github.com/bluenviron/gortsplib/v5/pkg/format"
 	"github.com/bluenviron/gortsplib/v5/pkg/headers"
+	"github.com/bluenviron/gortsplib/v5/pkg/liberrors"
 	"github.com/pion/rtp"
 )
 
@@ -26,6 +27,7 @@ const rtspPassword = "admin123"
 
 func ok() *base.Response { return &base.Response{StatusCode: base.StatusOK} }
 func unauthorized() *base.Response { return &base.Response{StatusCode: base.StatusUnauthorized} }
+func ptrProtocolTCP() *gortsplib.Protocol { p := gortsplib.ProtocolTCP; return &p }
 func (h *handler) auth(c *gortsplib.ServerConn, req *base.Request) bool {
  if c.VerifyCredentials(req, rtspUser, rtspPassword) { return true }
  log.Printf("RTSP auth challenge method=%s", req.Method)
@@ -34,21 +36,21 @@ func (h *handler) auth(c *gortsplib.ServerConn, req *base.Request) bool {
 func (h *handler) get(p string) *pathStream { return h.paths[strings.Trim(p, "/")] }
 
 func (h *handler) OnDescribe(c *gortsplib.ServerHandlerOnDescribeCtx) (*base.Response, *gortsplib.ServerStream, error) {
- if !h.auth(c.Conn, c.Request) { return unauthorized(), nil, nil }
+ if !h.auth(c.Conn, c.Request) { return unauthorized(), nil, liberrors.ErrServerAuth{} }
  ps := h.get(c.Path); if ps == nil { return &base.Response{StatusCode: base.StatusNotFound}, nil, nil }
 	ps.mu.RLock(); defer ps.mu.RUnlock()
 	if ps.stream == nil { return &base.Response{StatusCode: base.StatusServiceUnavailable}, nil, nil }
 	log.Printf("DESCRIBE path=%s", strings.Trim(c.Path, "/")); return ok(), ps.stream, nil
 }
 func (h *handler) OnSetup(c *gortsplib.ServerHandlerOnSetupCtx) (*base.Response, *gortsplib.ServerStream, error) {
- if !h.auth(c.Conn, c.Request) { return unauthorized(), nil, nil }
+ if !h.auth(c.Conn, c.Request) { return unauthorized(), nil, liberrors.ErrServerAuth{} }
  ps := h.get(c.Path); if ps == nil { return &base.Response{StatusCode: base.StatusNotFound}, nil, nil }
 	ps.mu.RLock(); defer ps.mu.RUnlock()
 	if ps.stream == nil { return &base.Response{StatusCode: base.StatusServiceUnavailable}, nil, nil }
 	log.Printf("SETUP path=%s transport=%v", strings.Trim(c.Path, "/"), c.Transport); return ok(), ps.stream, nil
 }
 func (h *handler) OnPlay(c *gortsplib.ServerHandlerOnPlayCtx) (*base.Response, error) {
- if !h.auth(c.Conn, c.Request) { return unauthorized(), nil }
+ if !h.auth(c.Conn, c.Request) { return unauthorized(), liberrors.ErrServerAuth{} }
  log.Printf("PLAY path=%s", strings.Trim(c.Path, "/")); return ok(), nil
 }
 func (h *handler) OnGetParameter(*gortsplib.ServerHandlerOnGetParameterCtx) (*base.Response, error) { return ok(), nil }
@@ -76,7 +78,7 @@ func relayPath(server *gortsplib.Server, ps *pathStream, path string) {
 
 func relayOnce(server *gortsplib.Server, ps *pathStream, path, src string) error {
 	u, err := base.ParseURL(src); if err != nil { return err }
-	c := &gortsplib.Client{Scheme: u.Scheme, Host: u.Host, ReadTimeout: 10*time.Second, WriteTimeout: 10*time.Second}
+	c := &gortsplib.Client{Scheme: u.Scheme, Host: u.Host, Protocol: ptrProtocolTCP(), ReadTimeout: 10*time.Second, WriteTimeout: 10*time.Second}
 	if err = c.Start(); err != nil { return err }; defer c.Close()
 	desc, _, err := c.Describe(u); if err != nil { return err }
 	if err = c.SetupAll(desc.BaseURL, desc.Medias); err != nil { return err }
