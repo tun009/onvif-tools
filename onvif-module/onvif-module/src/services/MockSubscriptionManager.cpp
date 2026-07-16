@@ -285,8 +285,12 @@ std::string MockSubscriptionManager::handleGetEventProperties(const std::string&
           // Profile M/T mandatory Media event topics.  The conformance
           // preliminary check reads these from TopicSet before running tests.
             "<tns1:Media>"
-            "<tns1:ProfileChanged wstop:topic=\"true\"/>"
-            "<tns1:ConfigurationChanged wstop:topic=\"true\"/>"
+            "<tns1:ProfileChanged wstop:topic=\"true\">"
+              "<tt:MessageDescription IsProperty=\"false\"/>"
+            "</tns1:ProfileChanged>"
+            "<tns1:ConfigurationChanged wstop:topic=\"true\">"
+              "<tt:MessageDescription IsProperty=\"false\"/>"
+            "</tns1:ConfigurationChanged>"
           "</tns1:Media>"
         "</wstop:TopicSet>"
         "<wsnt:TopicExpressionDialect>http://www.onvif.org/ver10/tev/topicExpression/ConcreteSet</wsnt:TopicExpressionDialect>"
