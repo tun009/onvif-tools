@@ -215,7 +215,7 @@ std::vector<StreamProfile> BackendConnector::getProfiles() {
     profiles.push_back(s1);
     StreamProfile s2; s2.token="profile_sub2"; s2.name="Sub2 480p";
     s2.sourceToken="src_main"; s2.streamType=StreamType::SUB2;
-    s2.videoConfig.codec=Codec::H265; s2.videoConfig.resolution=RES_480P;
+    s2.videoConfig.codec=Codec::H264; s2.videoConfig.resolution=RES_480P;
     s2.videoConfig.framerate=10; s2.videoConfig.bitrate=512;
     profiles.push_back(s2);
     return profiles;

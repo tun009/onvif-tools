@@ -18,7 +18,7 @@ const char* METADATA_STREAM_PORT = "8555";
 // Video RTSP is served by the gortsplib relay, which also enforces RTSP
 // Digest authentication required by Profiles M and T.
 const char* RTSP_RELAY_PORT = "8555";
-const char* RTSP_HTTP_TUNNEL_PORT = "8555";
+const char* RTSP_HTTP_TUNNEL_PORT = "8080";
 
 struct DynProfile {
     std::string token;
@@ -755,12 +755,9 @@ int Media2Service::GetVideoEncoderConfigurationOptions(
         return opt;
     };
 
-    // Luôn trả về cả tùy chọn H264 và H265 để Test Tool có thể chọn lựa linh hoạt
+    // Mock camera only implements H.264; do not advertise an unsupported H.265 encoder.
     auto optH264 = createOption("H264");
     if (optH264) resp.Options.push_back(optH264);
-
-    auto optH265 = createOption("H265");
-    if (optH265) resp.Options.push_back(optH265);
 
     return SOAP_OK;
 }
