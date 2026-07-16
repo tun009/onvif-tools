@@ -898,7 +898,8 @@ std::string MediaLegacyHandler::handleGetStreamUri(const std::string& req) {
     // small gortsplib relay handles HTTP tunnel requests on 8555.
     std::string protocol = extractInnerTag(req, "Protocol");
     std::string scheme = "rtsp://";
-    int port = g_rtspPort;
+    // Route legacy video RTSP through the authenticated gortsplib relay.
+    int port = 8555;
     if (protocol == "HTTP")       { scheme = "http://";  port = g_rtspHttpTunnelPort; }
     else if (protocol == "HTTPS") { scheme = "https://"; port = g_rtspHttpTunnelPort; }
 

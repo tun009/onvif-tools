@@ -15,6 +15,9 @@
 namespace {
 const char* PROFILE_METADATA_TOKEN = "profile_metadata";
 const char* METADATA_STREAM_PORT = "8555";
+// Video RTSP is served by the gortsplib relay, which also enforces RTSP
+// Digest authentication required by Profiles M and T.
+const char* RTSP_RELAY_PORT = "8555";
 const char* RTSP_HTTP_TUNNEL_PORT = "8555";
 
 struct DynProfile {
@@ -325,6 +328,18 @@ int Media2Service::GetStreamUri(
     std::string uri = u.uri;
     size_t pos = uri.find("127.0.0.1");
     if (pos != std::string::npos) uri.replace(pos, 9, cfg_.deviceIp);
+
+    // Route video RTSP through the authenticated gortsplib relay instead of
+    // the unauthenticated MediaMTX listener.
+    if (protocol == "RTSP" || protocol == "RtspUnicast" ||
+        protocol == "RtspMulticast") {
+        std::string mediaMtxPort = ":" + std::to_string(cfg_.rtspPort);
+        size_t mediaMtxPos = uri.find(mediaMtxPort);
+        if (mediaMtxPos != std::string::npos) {
+            uri.replace(mediaMtxPos, mediaMtxPort.length(),
+                        std::string(":") + RTSP_RELAY_PORT);
+        }
+    }
 
     // Hỗ trợ RTSP over HTTP tunneling theo yêu cầu của Test Tool
     if (protocol == "RtspOverHttp" || protocol == "RtspOverHttps") {
