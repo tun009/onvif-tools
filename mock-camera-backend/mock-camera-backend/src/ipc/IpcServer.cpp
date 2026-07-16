@@ -325,7 +325,9 @@ ipc::Message IpcServer::handleSetVideoConfig(const std::string& body) {
     cfg.framerate          = j.value("framerate", 25);
     cfg.bitrate            = j.value("bitrate",  4000);
     cfg.profile            = j.value("profile", "Main");
-    backend_->setVideoEncoderConfig(token, cfg);
+    if (!backend_->setVideoEncoderConfig(token, cfg)) {
+        return makeErr(0, "video publisher reconfiguration failed");
+    }
     return makeOk(0, "{}");
 }
 

@@ -3,6 +3,8 @@
 #include <ctime>
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
+#include <sstream>
 
 MockCameraBackend::MockCameraBackend(const std::string& configPath)
     : configPath_(configPath)
@@ -155,6 +157,26 @@ bool MockCameraBackend::setVideoEncoderConfig(const std::string& token,
                                                const VideoEncoderConfig& cfg) {
     printf("[MockCameraBackend] setVideoEncoderConfig token=%s %dx%d\n",
            token.c_str(), cfg.resolution.width, cfg.resolution.height);
+    if (token != "profile_main" && token != "profile_sub1") {
+        videoConfigs_[token] = cfg;
+        return true;
+    }
+
+    // The RTSP publisher is a separate GStreamer process. Reconfigure it
+    // before publishing the new SOAP-visible state, so DTT can verify the
+    // negotiated RTP resolution after SetVideoEncoderConfiguration returns.
+    const char* rootEnv = std::getenv("MOCK_CAMERA_ROOT");
+    const std::string root = rootEnv ? rootEnv : ".";
+    std::ostringstream cmd;
+    cmd << "bash \"" << root << "/scripts/reconfigure_stream.sh\" "
+        << token << " " << cfg.resolution.width << " "
+        << cfg.resolution.height << " " << cfg.framerate << " "
+        << (cfg.bitrate * 1000);
+    const int rc = std::system(cmd.str().c_str());
+    if (rc != 0) {
+        printf("[MockCameraBackend] publisher reconfigure failed rc=%d\n", rc);
+        return false;
+    }
     videoConfigs_[token] = cfg;
     return true;
 }
