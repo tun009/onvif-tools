@@ -26,32 +26,44 @@ const rtspPassword = "admin123"
 
 func ok() *base.Response { return &base.Response{StatusCode: base.StatusOK} }
 func unauthorized() *base.Response { return &base.Response{StatusCode: base.StatusUnauthorized} }
+func (h *handler) auth(c *gortsplib.ServerConn, req *base.Request) bool {
+ if c.VerifyCredentials(req, rtspUser, rtspPassword) { return true }
+ log.Printf("RTSP auth challenge method=%s", req.Method)
+ return false
+}
 func (h *handler) get(p string) *pathStream { return h.paths[strings.Trim(p, "/")] }
 
 func (h *handler) OnDescribe(c *gortsplib.ServerHandlerOnDescribeCtx) (*base.Response, *gortsplib.ServerStream, error) {
- if !c.Conn.VerifyCredentials(c.Request, rtspUser, rtspPassword) { return unauthorized(), nil, nil }
+ if !h.auth(c.Conn, c.Request) { return unauthorized(), nil, nil }
  ps := h.get(c.Path); if ps == nil { return &base.Response{StatusCode: base.StatusNotFound}, nil, nil }
 	ps.mu.RLock(); defer ps.mu.RUnlock()
 	if ps.stream == nil { return &base.Response{StatusCode: base.StatusServiceUnavailable}, nil, nil }
 	log.Printf("DESCRIBE path=%s", strings.Trim(c.Path, "/")); return ok(), ps.stream, nil
 }
 func (h *handler) OnSetup(c *gortsplib.ServerHandlerOnSetupCtx) (*base.Response, *gortsplib.ServerStream, error) {
- if !c.Conn.VerifyCredentials(c.Request, rtspUser, rtspPassword) { return unauthorized(), nil, nil }
+ if !h.auth(c.Conn, c.Request) { return unauthorized(), nil, nil }
  ps := h.get(c.Path); if ps == nil { return &base.Response{StatusCode: base.StatusNotFound}, nil, nil }
 	ps.mu.RLock(); defer ps.mu.RUnlock()
 	if ps.stream == nil { return &base.Response{StatusCode: base.StatusServiceUnavailable}, nil, nil }
 	log.Printf("SETUP path=%s transport=%v", strings.Trim(c.Path, "/"), c.Transport); return ok(), ps.stream, nil
 }
 func (h *handler) OnPlay(c *gortsplib.ServerHandlerOnPlayCtx) (*base.Response, error) {
- if !c.Conn.VerifyCredentials(c.Request, rtspUser, rtspPassword) { return unauthorized(), nil }
+ if !h.auth(c.Conn, c.Request) { return unauthorized(), nil }
  log.Printf("PLAY path=%s", strings.Trim(c.Path, "/")); return ok(), nil
 }
 func (h *handler) OnGetParameter(*gortsplib.ServerHandlerOnGetParameterCtx) (*base.Response, error) { return ok(), nil }
 func (h *handler) OnSetParameter(*gortsplib.ServerHandlerOnSetParameterCtx) (*base.Response, error) { return ok(), nil }
 
 func setStream(server *gortsplib.Server, ps *pathStream, desc *description.Session) *gortsplib.ServerStream {
-	ps.mu.Lock(); defer ps.mu.Unlock()
-	if ps.stream != nil { return ps.stream }
+ ps.mu.Lock(); defer ps.mu.Unlock()
+ if ps.stream != nil {
+  // Upstream MediaMTX may replace codec parameters after an ONVIF
+  // SetVideoEncoderConfiguration. Keep the public stream object stable for
+  // connected clients, but refresh its description for new RTP packets.
+  ps.stream.Desc = desc
+  ps.stream.ReloadDesc()
+  return ps.stream
+ }
 	st := &gortsplib.ServerStream{Server: server, Desc: desc}
 	if err := st.Initialize(); err != nil { log.Fatalf("stream initialize: %v", err) }
 	ps.stream = st; return st
@@ -70,6 +82,7 @@ func relayOnce(server *gortsplib.Server, ps *pathStream, path, src string) error
 	if err = c.SetupAll(desc.BaseURL, desc.Medias); err != nil { return err }
 	st := setStream(server, ps, desc); log.Printf("relay ready path=%s from=%s", path, src)
 	stableMedia := func(in *description.Media) *description.Media {
+		ps.mu.RLock(); defer ps.mu.RUnlock()
 		for _, candidate := range st.Desc.Medias {
 			if candidate.Type == in.Type && len(candidate.Formats) == len(in.Formats) && len(candidate.Formats) > 0 &&
 				candidate.Formats[0].RTPMap() == in.Formats[0].RTPMap() && candidate.Formats[0].PayloadType() == in.Formats[0].PayloadType() { return candidate }
