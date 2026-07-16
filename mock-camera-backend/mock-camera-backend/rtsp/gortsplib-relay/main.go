@@ -19,22 +19,33 @@ import (
 type pathStream struct { mu sync.RWMutex; stream *gortsplib.ServerStream }
 type handler struct { paths map[string]*pathStream }
 
+// Profile M/T require Digest authentication at the RTSP layer.  Keep the
+// relay credentials aligned with the ONVIF mock's default device account.
+const rtspUser = "admin"
+const rtspPassword = "admin123"
+
 func ok() *base.Response { return &base.Response{StatusCode: base.StatusOK} }
+func unauthorized() *base.Response { return &base.Response{StatusCode: base.StatusUnauthorized} }
 func (h *handler) get(p string) *pathStream { return h.paths[strings.Trim(p, "/")] }
 
 func (h *handler) OnDescribe(c *gortsplib.ServerHandlerOnDescribeCtx) (*base.Response, *gortsplib.ServerStream, error) {
-	ps := h.get(c.Path); if ps == nil { return &base.Response{StatusCode: base.StatusNotFound}, nil, nil }
+ if !c.Conn.VerifyCredentials(c.Request, rtspUser, rtspPassword) { return unauthorized(), nil, nil }
+ ps := h.get(c.Path); if ps == nil { return &base.Response{StatusCode: base.StatusNotFound}, nil, nil }
 	ps.mu.RLock(); defer ps.mu.RUnlock()
 	if ps.stream == nil { return &base.Response{StatusCode: base.StatusServiceUnavailable}, nil, nil }
 	log.Printf("DESCRIBE path=%s", strings.Trim(c.Path, "/")); return ok(), ps.stream, nil
 }
 func (h *handler) OnSetup(c *gortsplib.ServerHandlerOnSetupCtx) (*base.Response, *gortsplib.ServerStream, error) {
-	ps := h.get(c.Path); if ps == nil { return &base.Response{StatusCode: base.StatusNotFound}, nil, nil }
+ if !c.Conn.VerifyCredentials(c.Request, rtspUser, rtspPassword) { return unauthorized(), nil, nil }
+ ps := h.get(c.Path); if ps == nil { return &base.Response{StatusCode: base.StatusNotFound}, nil, nil }
 	ps.mu.RLock(); defer ps.mu.RUnlock()
 	if ps.stream == nil { return &base.Response{StatusCode: base.StatusServiceUnavailable}, nil, nil }
 	log.Printf("SETUP path=%s transport=%v", strings.Trim(c.Path, "/"), c.Transport); return ok(), ps.stream, nil
 }
-func (h *handler) OnPlay(c *gortsplib.ServerHandlerOnPlayCtx) (*base.Response, error) { log.Printf("PLAY path=%s", strings.Trim(c.Path, "/")); return ok(), nil }
+func (h *handler) OnPlay(c *gortsplib.ServerHandlerOnPlayCtx) (*base.Response, error) {
+ if !c.Conn.VerifyCredentials(c.Request, rtspUser, rtspPassword) { return unauthorized(), nil }
+ log.Printf("PLAY path=%s", strings.Trim(c.Path, "/")); return ok(), nil
+}
 func (h *handler) OnGetParameter(*gortsplib.ServerHandlerOnGetParameterCtx) (*base.Response, error) { return ok(), nil }
 func (h *handler) OnSetParameter(*gortsplib.ServerHandlerOnSetParameterCtx) (*base.Response, error) { return ok(), nil }
 
