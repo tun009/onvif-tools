@@ -58,14 +58,13 @@ func (h *handler) OnSetParameter(*gortsplib.ServerHandlerOnSetParameterCtx) (*ba
 
 func setStream(server *gortsplib.Server, ps *pathStream, desc *description.Session) *gortsplib.ServerStream {
  ps.mu.Lock(); defer ps.mu.Unlock()
- if ps.stream != nil {
-  // Upstream MediaMTX may replace codec parameters after an ONVIF
-  // SetVideoEncoderConfiguration. Keep the public stream object stable for
-  // connected clients, but refresh its description for new RTP packets.
-  ps.stream.Desc = desc
-  ps.stream.ReloadDesc()
-  return ps.stream
- }
+	if ps.stream != nil {
+		// Keep the original media pointers. ServerStream indexes its internal
+		// state by those pointers; replacing Desc at runtime causes DESCRIBE to
+		// dereference a missing media state and panic. A reconnect can still
+		// publish packets using the existing stable description.
+		return ps.stream
+	}
 	st := &gortsplib.ServerStream{Server: server, Desc: desc}
 	if err := st.Initialize(); err != nil { log.Fatalf("stream initialize: %v", err) }
 	ps.stream = st; return st
