@@ -718,11 +718,18 @@ int Media2Service::GetVideoEncoderConfigurationOptions(
         }
 
         // Cung cấp các độ phân giải khả dụng
-        std::vector<std::pair<int, int>> resolutions = {
-            {3840, 2160},
-            {1920, 1080},
-            {640, 480}
-        };
+        // The mock RTSP paths are fixed-format streams. Advertise only the
+        // resolution that the selected profile actually emits; otherwise DTT
+        // legitimately applies SetVideoEncoderConfiguration and then rejects
+        // the unchanged RTP stream during its resolution verification step.
+        std::vector<std::pair<int, int>> resolutions;
+        if (profileToken == "profile_sub1") {
+            resolutions.push_back({1280, 720});
+        } else if (profileToken == "profile_sub2") {
+            resolutions.push_back({640, 480});
+        } else {
+            resolutions.push_back({3840, 2160});
+        }
         for (const auto& r : resolutions) {
             auto res = soap_new_tt__VideoResolution2(soap);
             if (res) {
