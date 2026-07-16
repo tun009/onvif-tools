@@ -29,8 +29,15 @@ func ok() *base.Response { return &base.Response{StatusCode: base.StatusOK} }
 func unauthorized() *base.Response { return &base.Response{StatusCode: base.StatusUnauthorized} }
 func ptrProtocolTCP() *gortsplib.Protocol { p := gortsplib.ProtocolTCP; return &p }
 func (h *handler) auth(c *gortsplib.ServerConn, req *base.Request) bool {
- if c.VerifyCredentials(req, rtspUser, rtspPassword) { return true }
- log.Printf("RTSP auth challenge method=%s", req.Method)
+ authorization := ""
+ for name, values := range req.Header {
+  if strings.EqualFold(name, "Authorization") && len(values) > 0 { authorization = values[0]; break }
+ }
+ uri := "<nil>"
+ if req.URL != nil { uri = req.URL.String() }
+ verified := c.VerifyCredentials(req, rtspUser, rtspPassword)
+ log.Printf("RTSP auth method=%s uri=%s verified=%t authorization=%q", req.Method, uri, verified, authorization)
+ if verified { return true }
  return false
 }
 func (h *handler) get(p string) *pathStream { return h.paths[strings.Trim(p, "/")] }
