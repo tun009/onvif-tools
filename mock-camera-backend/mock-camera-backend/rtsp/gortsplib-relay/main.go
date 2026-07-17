@@ -104,6 +104,13 @@ func relayOnce(server *gortsplib.Server, ps *pathStream, path, src string) error
 	desc, _, err := c.Describe(u); if err != nil { return err }
 	if err = c.SetupAll(desc.BaseURL, desc.Medias); err != nil { return err }
 	st := setStream(server, ps, desc); log.Printf("relay ready path=%s from=%s", path, src)
+	var unknownMediaCount uint64
+	formatSummary := func(media *description.Media) string {
+		if media == nil { return "<nil>" }
+		parts := make([]string, 0, len(media.Formats))
+		for _, f := range media.Formats { parts = append(parts, fmt.Sprintf("pt=%d rtp=%q", f.PayloadType(), f.RTPMap())) }
+		return fmt.Sprintf("type=%s formats=[%s]", media.Type, strings.Join(parts, ", "))
+	}
 	stableMedia := func(in *description.Media) *description.Media {
 		ps.mu.RLock(); defer ps.mu.RUnlock()
 		for _, candidate := range st.Desc.Medias {
@@ -128,7 +135,18 @@ func relayOnce(server *gortsplib.Server, ps *pathStream, path, src string) error
 				log.Printf("relay write %s: recovered from format mismatch: %v", path, r)
 			}
 		}()
-		target := stableMedia(media); if target == nil { log.Printf("relay write %s: unknown media", path); return }
+		target := stableMedia(media)
+		if target == nil {
+			n := atomic.AddUint64(&unknownMediaCount, 1)
+			if n <= 5 || n%1000 == 0 {
+				ps.mu.RLock()
+				stable := make([]string, 0, len(st.Desc.Medias))
+				for _, candidate := range st.Desc.Medias { stable = append(stable, formatSummary(candidate)) }
+				ps.mu.RUnlock()
+				log.Printf("relay write %s: unknown media count=%d incoming={%s} stable=[%s] packet_pt=%d", path, n, formatSummary(media), strings.Join(stable, "; "), pkt.PayloadType)
+			}
+			return
+		}
 		matchedPayload := false
 		for _, f := range target.Formats {
 			if f.PayloadType() == pkt.PayloadType { matchedPayload = true; break }
