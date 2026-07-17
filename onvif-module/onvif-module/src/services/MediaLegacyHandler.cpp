@@ -796,6 +796,21 @@ std::string MediaLegacyHandler::handleSetVideoEncoderConfiguration(const std::st
     };
     int nw = toi(ws, 0), nh = toi(hs, 0);
     int nfr = toi(fr, 0), ngv = toi(gv, 0), nql = toi(ql, -1);
+    // Encoder tokens represent stable media tracks.  The main/sub streams are
+    // H.264 and the dedicated JPEG profile owns the JPEG track; allowing a
+    // caller to mutate the codec of a shared token makes GetStreamUri and the
+    // actual RTSP SDP disagree during conformance tests.
+    const bool jpegToken = (cfgTok == "video_encoder_config_jpeg");
+    if ((!jpegToken && enc == "JPEG") || (jpegToken && enc == "H264")) {
+        return
+            "<SOAP-ENV:Fault>"
+              "<SOAP-ENV:Code><SOAP-ENV:Value>SOAP-ENV:Sender</SOAP-ENV:Value>"
+                "<SOAP-ENV:Subcode><SOAP-ENV:Value>ter:InvalidArgVal</SOAP-ENV:Value>"
+                  "<SOAP-ENV:Subcode><SOAP-ENV:Value>ter:ConfigModify</SOAP-ENV:Value></SOAP-ENV:Subcode>"
+                "</SOAP-ENV:Subcode></SOAP-ENV:Code>"
+              "<SOAP-ENV:Reason><SOAP-ENV:Text xml:lang=\"en\">Encoder codec is not supported by this configuration token</SOAP-ENV:Text></SOAP-ENV:Reason>"
+            "</SOAP-ENV:Fault>";
+    }
     bool invalid = false;
     if (enc == "JPEG") {
         // JPEG allowed: 1920x1080, 1280x720, 640x480
