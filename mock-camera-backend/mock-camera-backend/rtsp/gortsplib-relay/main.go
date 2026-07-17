@@ -107,8 +107,15 @@ func relayOnce(server *gortsplib.Server, ps *pathStream, path, src string) error
 	stableMedia := func(in *description.Media) *description.Media {
 		ps.mu.RLock(); defer ps.mu.RUnlock()
 		for _, candidate := range st.Desc.Medias {
-			if candidate.Type == in.Type && len(candidate.Formats) == len(in.Formats) && len(candidate.Formats) > 0 &&
-				candidate.Formats[0].RTPMap() == in.Formats[0].RTPMap() && candidate.Formats[0].PayloadType() == in.Formats[0].PayloadType() { return candidate }
+			if candidate.Type != in.Type { continue }
+			// MediaMTX can rebuild an SDP on reconnect and change format order
+			// or add auxiliary formats. Match any compatible format instead of
+			// requiring the complete format slice to be identical.
+			for _, current := range candidate.Formats {
+				for _, incoming := range in.Formats {
+					if current.PayloadType() == incoming.PayloadType() && current.RTPMap() == incoming.RTPMap() { return candidate }
+				}
+			}
 		}
 		return nil
 	}
