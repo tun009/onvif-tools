@@ -18,7 +18,7 @@ import (
 	"github.com/pion/rtp"
 )
 
-type pathStream struct { mu sync.RWMutex; stream *gortsplib.ServerStream }
+type pathStream struct { mu sync.RWMutex; stream *gortsplib.ServerStream; metadataStarted atomic.Bool }
 type handler struct { paths map[string]*pathStream }
 
 const (
@@ -106,7 +106,13 @@ func relayOnce(server *gortsplib.Server, ps *pathStream, path, src string) error
 	if err = c.Start(); err != nil { return err }; defer c.Close()
 	desc, _, err := c.Describe(u); if err != nil { return err }
 	if err = c.SetupAll(desc.BaseURL, desc.Medias); err != nil { return err }
+	var metadataTrack *description.Media
+	if path == "main" {
+		metadataTrack = metadataMedia()
+		desc.Medias = append(desc.Medias, metadataTrack)
+	}
 	st := setStream(server, ps, desc); log.Printf("relay ready path=%s from=%s", path, src)
+	if metadataTrack != nil { startMetadata(server, ps, metadataTrack, path) }
 	var unknownMediaCount uint64
 	formatSummary := func(media *description.Media) string {
 		if media == nil { return "<nil>" }
@@ -175,12 +181,23 @@ func metadataXML() []byte {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	return []byte(fmt.Sprintf(`<tt:MetadataStream xmlns:tt="http://www.onvif.org/ver10/schema"><tt:VideoAnalytics><tt:Frame UtcTime="%s"><tt:Object ObjectId="1"><tt:Appearance><tt:Shape><tt:BoundingBox left="0.10" top="0.10" right="0.40" bottom="0.60"/></tt:Shape><tt:Class><tt:Type Likelihood="0.90">Human</tt:Type></tt:Class></tt:Appearance></tt:Object></tt:Frame></tt:VideoAnalytics></tt:MetadataStream>`, now))
 }
-func startMetadata(server *gortsplib.Server, ps *pathStream) {
-	f := &format.Generic{PayloadTyp: 107, RTPMa: "vnd.onvif.metadata/90000", FMT: map[string]string{}}; if err := f.Init(); err != nil { log.Fatalf("metadata format: %v", err) }
-	m := &description.Media{Type: description.MediaTypeApplication, Profile: headers.TransportProfileAVP, Control: "trackID=metadata", Formats: []format.Format{f}}
-	st := setStream(server, ps, &description.Session{Title: "ONVIF metadata", Medias: []*description.Media{m}})
-	go func() { ticker := time.NewTicker(500*time.Millisecond); defer ticker.Stop(); var seq uint32; start := time.Now(); for range ticker.C { pkt := &rtp.Packet{Header: rtp.Header{Version: 2, Marker: true, PayloadType: 107, SequenceNumber: uint16(atomic.AddUint32(&seq, 1)), Timestamp: uint32(time.Since(start).Seconds()*90000), SSRC: 0x4d455441}, Payload: metadataXML()}; if err := st.WritePacketRTP(m, pkt); err != nil { log.Printf("metadata write: %v", err) } } }()
-	log.Printf("metadata ready path=metadata")
+func metadataMedia() *description.Media {
+	f := &format.Generic{PayloadTyp: 107, RTPMa: "vnd.onvif.metadata/90000", FMT: map[string]string{}}
+	if err := f.Init(); err != nil { log.Fatalf("metadata format: %v", err) }
+	return &description.Media{Type: description.MediaTypeApplication, Profile: headers.TransportProfileAVP, Control: "trackID=metadata", Formats: []format.Format{f}}
+}
+
+func startMetadata(server *gortsplib.Server, ps *pathStream, media *description.Media, label string) {
+	if !ps.metadataStarted.CompareAndSwap(false, true) { return }
+	st := setStream(server, ps, &description.Session{Title: "ONVIF metadata", Medias: []*description.Media{media}})
+	go func() {
+		ticker := time.NewTicker(500*time.Millisecond); defer ticker.Stop(); var seq uint32; start := time.Now()
+		for range ticker.C {
+			pkt := &rtp.Packet{Header: rtp.Header{Version: 2, Marker: true, PayloadType: 107, SequenceNumber: uint16(atomic.AddUint32(&seq, 1)), Timestamp: uint32(time.Since(start).Seconds()*90000), SSRC: 0x4d455441}, Payload: metadataXML()}
+			if err := st.WritePacketRTP(media, pkt); err != nil { log.Printf("metadata write path=%s: %v", label, err) }
+		}
+	}()
+	log.Printf("metadata ready path=%s", label)
 }
 
 func main() {
@@ -189,5 +206,5 @@ func main() {
 	// (256 packets) is too small for a short client-side scheduling stall and
 	// causes the server to close the session with "write queue is full".
 	h := &handler{paths: paths}; srv := &gortsplib.Server{RTSPAddress: ":8555", UDPRTPAddress: ":8050", UDPRTCPAddress: ":8051", Handler: h, WriteQueueSize: relayWriteQueueSize, ReadTimeout: 10*time.Second, WriteTimeout: 10*time.Second, IdleTimeout: 60*time.Second}; if err := srv.Start(); err != nil { log.Fatalf("server start: %v", err) }
-	startMetadata(srv, paths["metadata"]); for _, p := range []string{"main", "jpeg", "sub1", "sub2"} { go relayPath(srv, paths[p], p) }; log.Printf("RTSP tunnel relay listening on :8555"); if err := srv.Wait(); err != nil { log.Fatal(err) }
+	startMetadata(srv, paths["metadata"], metadataMedia(), "metadata"); for _, p := range []string{"main", "jpeg", "sub1", "sub2"} { go relayPath(srv, paths[p], p) }; log.Printf("RTSP tunnel relay listening on :8555"); if err := srv.Wait(); err != nil { log.Fatal(err) }
 }
