@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -19,6 +20,11 @@ import (
 
 type pathStream struct { mu sync.RWMutex; stream *gortsplib.ServerStream }
 type handler struct { paths map[string]*pathStream }
+
+const (
+	relayWriteQueueSize = 65536
+	maxReconnectDelay   = 8 * time.Second
+)
 
 // Profile M/T require Digest authentication at the RTSP layer.  Keep the
 // relay credentials aligned with the ONVIF mock's default device account.
@@ -79,7 +85,16 @@ func setStream(server *gortsplib.Server, ps *pathStream, desc *description.Sessi
 
 func relayPath(server *gortsplib.Server, ps *pathStream, path string) {
 	src := "rtsp://127.0.0.1:8554/" + path
-	for { if err := relayOnce(server, ps, path, src); err != nil { log.Printf("relay %s: %v", path, err) }; time.Sleep(2*time.Second) }
+	delay := time.Second
+	for {
+		if err := relayOnce(server, ps, path, src); err != nil {
+			log.Printf("relay %s: %v; reconnecting in %s", path, err, delay)
+			time.Sleep(delay)
+			if delay < maxReconnectDelay { delay *= 2; if delay > maxReconnectDelay { delay = maxReconnectDelay } }
+			continue
+		}
+		delay = time.Second
+	}
 }
 
 func relayOnce(server *gortsplib.Server, ps *pathStream, path, src string) error {
@@ -115,7 +130,15 @@ func relayOnce(server *gortsplib.Server, ps *pathStream, path, src string) error
 			log.Printf("relay write %s: unsupported payload type %d", path, pkt.PayloadType)
 			return
 		}
-		if err := st.WritePacketRTP(target, pkt); err != nil { log.Printf("relay write %s: %v", path, err) }
+		// A slow DTT client can temporarily fill gortsplib's per-session queue.
+		// Drop that packet and keep the upstream relay alive; returning from the
+		// callback quickly is important when several DTT sessions are active.
+		if err := st.WritePacketRTP(target, pkt); err != nil {
+			var queueFull liberrors.ErrServerWriteQueueFull
+			if !errors.As(err, &queueFull) {
+				log.Printf("relay write %s: %v", path, err)
+			}
+		}
 	})
 	if _, err = c.Play(nil); err != nil { return err }; return c.Wait()
 }
@@ -137,6 +160,6 @@ func main() {
 	// DTT consumes the 4K stream over RTSP/TCP. The gortsplib default queue
 	// (256 packets) is too small for a short client-side scheduling stall and
 	// causes the server to close the session with "write queue is full".
-	h := &handler{paths: paths}; srv := &gortsplib.Server{RTSPAddress: ":8555", UDPRTPAddress: ":8050", UDPRTCPAddress: ":8051", Handler: h, WriteQueueSize: 4096, ReadTimeout: 10*time.Second, WriteTimeout: 10*time.Second, IdleTimeout: 60*time.Second}; if err := srv.Start(); err != nil { log.Fatalf("server start: %v", err) }
+	h := &handler{paths: paths}; srv := &gortsplib.Server{RTSPAddress: ":8555", UDPRTPAddress: ":8050", UDPRTCPAddress: ":8051", Handler: h, WriteQueueSize: relayWriteQueueSize, ReadTimeout: 10*time.Second, WriteTimeout: 10*time.Second, IdleTimeout: 60*time.Second}; if err := srv.Start(); err != nil { log.Fatalf("server start: %v", err) }
 	startMetadata(srv, paths["metadata"]); for _, p := range []string{"main", "jpeg", "sub1", "sub2"} { go relayPath(srv, paths[p], p) }; log.Printf("RTSP tunnel relay listening on :8555"); if err := srv.Wait(); err != nil { log.Fatal(err) }
 }
