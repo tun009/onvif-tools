@@ -404,6 +404,12 @@ std::string MockSubscriptionManager::handlePullMessages(const std::string& subId
                       filter.find("MotionAlarm") != std::string::npos;
     bool emitGSC    = wantAll || subtreeVS ||
                       filter.find("GlobalSceneChange") != std::string::npos;
+    bool subtreeMedia = filter.find("Media//.") != std::string::npos ||
+                        filter.find("Media//*") != std::string::npos;
+    bool emitProfileChanged = wantAll || subtreeMedia ||
+                              filter.find("ProfileChanged") != std::string::npos;
+    bool emitConfigurationChanged = wantAll || subtreeMedia ||
+                                    filter.find("ConfigurationChanged") != std::string::npos;
 
     // Helper phát 1 NotificationMessage. Topic path phải đầy đủ prefix trên
     // MỌI segment: `tns1:VideoSource/tns1:MotionAlarm` (không phải
@@ -433,6 +439,8 @@ std::string MockSubscriptionManager::handlePullMessages(const std::string& subId
     std::vector<std::pair<const char*, const char*>> matched;
     if (emitMotion) matched.push_back({"tns1:VideoSource/tns1:MotionAlarm",       "false"});
     if (emitGSC)    matched.push_back({"tns1:VideoSource/tns1:GlobalSceneChange", "false"});
+    if (emitProfileChanged) matched.push_back({"tns1:Media/tns1:ProfileChanged", "true"});
+    if (emitConfigurationChanged) matched.push_back({"tns1:Media/tns1:ConfigurationChanged", "true"});
 
     std::ostringstream body;
     body << "<tev:PullMessagesResponse>"
