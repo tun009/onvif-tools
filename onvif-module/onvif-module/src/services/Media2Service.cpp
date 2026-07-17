@@ -724,7 +724,9 @@ int Media2Service::GetVideoEncoderConfigurationOptions(
         // the unchanged RTP stream during its resolution verification step.
         std::vector<std::pair<int, int>> resolutions;
         if (profileToken == "profile_sub1") {
-            resolutions.push_back({1280, 720});
+            // Keep this aligned with MockCameraBackend::buildProfiles().
+            // profile_sub1 is the 1080p stream, not 720p.
+            resolutions.push_back({1920, 1080});
         } else if (profileToken == "profile_sub2") {
             resolutions.push_back({640, 480});
         } else {
