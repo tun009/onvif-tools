@@ -8,9 +8,12 @@ MEDIAMTX="$ROOT_DIR/bin/mediamtx"
 
 mkdir -p "$LOG_DIR" "$PID_DIR"
 
-echo "[INFO] Checking nvv4l2 plugins..."
-gst-inspect-1.0 nvv4l2h264enc &>/dev/null || { echo "[ERROR] nvv4l2h264enc not found"; exit 1; }
-gst-inspect-1.0 nvv4l2h265enc &>/dev/null || { echo "[ERROR] nvv4l2h265enc not found"; exit 1; }
+echo "[INFO] Checking H264 encoder..."
+if gst-inspect-1.0 nvv4l2h264enc &>/dev/null || gst-inspect-1.0 openh264enc &>/dev/null; then
+    echo "[INFO] H264 encoder available"
+else
+    echo "[ERROR] No supported H264 encoder found"; exit 1
+fi
 
 echo "[INFO] Starting MediaMTX..."
 if pgrep -x mediamtx > /dev/null; then
