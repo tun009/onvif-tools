@@ -5,6 +5,7 @@ PROFILE="${1:-}"; WIDTH="${2:-}"; HEIGHT="${3:-}"; FPS="${4:-}"; BITRATE="${5:-}
 case "$PROFILE" in
   profile_main) SCRIPT="start_main.sh"; PID="stream_main.pid"; DEFAULT_B=20000000 ;;
   profile_sub1) SCRIPT="start_sub1.sh"; PID="stream_sub1.pid"; DEFAULT_B=4000000 ;;
+  profile_sub2) SCRIPT="start_sub2.sh"; PID="stream_sub2.pid"; DEFAULT_B=512000 ;;
   *) echo "[ERROR] unsupported reconfigure profile: $PROFILE" >&2; exit 2 ;;
 esac
 case "$WIDTH:$HEIGHT:$FPS:$BITRATE" in

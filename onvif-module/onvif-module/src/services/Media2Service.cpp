@@ -726,11 +726,12 @@ int Media2Service::GetVideoEncoderConfigurationOptions(
         // DTT 24.12 may send the profile display token (for example
         // "profile_Main 4K") instead of the backend token. ConfigurationToken
         // is the stable Media2 identifier, so use it as the primary mapping.
+        const bool isSpare = configToken == "video_encoder_config_spare";
         const bool isSub1 = configToken == "video_encoder_config_profile_sub1" ||
                             profileToken == "profile_sub1";
         const bool isSub2 = configToken == "video_encoder_config_profile_sub2" ||
                             profileToken == "profile_sub2";
-        if (isSub1) {
+        if (isSpare || isSub1) {
             // Keep this aligned with MockCameraBackend::buildProfiles().
             // profile_sub1 is the 1080p stream, not 720p.
             resolutions.push_back({1920, 1080});
@@ -814,6 +815,15 @@ int Media2Service::SetVideoEncoderConfiguration(
     std::string profileToken = "profile_main";
     if (configToken.find("profile_sub1") != std::string::npos) profileToken = "profile_sub1";
     else if (configToken.find("profile_sub2") != std::string::npos) profileToken = "profile_sub2";
+
+    // The spare configuration is intentionally unassigned.  It is a
+    // capability/configuration-pool entry, not an alias for profile_main.
+    // Reconfiguring the main publisher while DTT validates the spare token
+    // changes the active SDP and causes unrelated streaming regressions.
+    if (configToken == "video_encoder_config_spare") {
+        std::cout << "[Media2Service] SetVideoEncoderConfiguration spare token accepted without publisher change" << std::endl;
+        return SOAP_OK;
+    }
     
     // Lấy cấu hình cũ làm gốc
     std::vector<StreamProfile> profiles;
