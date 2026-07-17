@@ -837,6 +837,11 @@ std::string MediaLegacyHandler::handleSetVideoEncoderConfiguration(const std::st
     std::string mtxPath = vecTokenToPath(cfgTok);
     std::string mtxEnc = v.encoding;
     int mtxW = v.width, mtxH = v.height, mtxFps = v.frameRate;
+    // Keep MediaMTX paths codec-stable. DTT may apply a JPEG encoder
+    // configuration to a profile whose original token maps to "main"; never
+    // restart the H.264 main path as MJPEG. JPEG is served by the dedicated
+    // jpeg path, while H.264 remains on the corresponding video path.
+    if (mtxEnc == "JPEG") mtxPath = "jpeg";
     patchMediamtxPath(mtxPath, mtxEnc, mtxW, mtxH, mtxFps);
     return "<trt:SetVideoEncoderConfigurationResponse/>";
 }
