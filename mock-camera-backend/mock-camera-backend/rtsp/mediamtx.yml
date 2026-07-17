@@ -13,15 +13,9 @@ apiAddress:   :19997
 logLevel:     info
 
 paths:
-  main:
+  main: {}
     # profile_main declare 3840x2160@30 trong Media1/Media2 VEC → serve đúng 4K
     # để RTSS-1-1-42/48 (H.264 RESOLUTION verify) không mismatch.
-    runOnInit: >-
-      ffmpeg -re -f lavfi -i testsrc2=size=3840x2160:rate=30
-      -c:v libx264 -preset ultrafast -tune zerolatency
-      -f rtsp -rtsp_transport tcp
-      rtsp://127.0.0.1:8554/main
-    runOnInitRestart: yes
 
   jpeg:
     # profile_jpeg = MJPEG 1920x1080@30. RTSS-1-1-31..36/53 cần JPEG stream với
@@ -35,13 +29,7 @@ paths:
       rtsp://127.0.0.1:8554/jpeg
     runOnInitRestart: yes
 
-  sub1:
-    runOnInit: >-
-      ffmpeg -re -f lavfi -i testsrc2=size=1280x720:rate=15
-      -c:v libx264 -preset ultrafast -tune zerolatency
-      -f rtsp -rtsp_transport tcp
-      rtsp://127.0.0.1:8554/sub1
-    runOnInitRestart: yes
+  sub1: {}
 
   sub2:
     runOnInit: >-

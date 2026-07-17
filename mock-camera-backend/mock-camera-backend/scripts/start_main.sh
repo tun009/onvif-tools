@@ -13,7 +13,7 @@ if ! gst-inspect-1.0 rtspclientsink >/dev/null 2>&1 && command -v ffmpeg >/dev/n
     -f lavfi -i "testsrc2=size=${WIDTH}x${HEIGHT}:rate=${FPS}" \
     -c:v libx264 -preset ultrafast -tune zerolatency -b:v "${BITRATE}" \
     -g "$((FPS * 2))" -pix_fmt yuv420p -f rtsp -rtsp_transport tcp \
-    "rtsp://mock:mock123@127.0.0.1:8554/main" \
+    "rtsp://127.0.0.1:8554/main" \
     > "$LOG_DIR/stream_main.log" 2>&1 &
   echo $! > "$PID_FILE"
   echo "[INFO] main started (pid=$(cat $PID_FILE))"
