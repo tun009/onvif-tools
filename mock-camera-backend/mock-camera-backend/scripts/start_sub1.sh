@@ -7,6 +7,18 @@ mkdir -p "$LOG_DIR" "$PID_DIR"
 [ -f "$PID_FILE" ] && kill $(cat "$PID_FILE") 2>/dev/null; sleep 0.5
 WIDTH="${WIDTH:-1280}"; HEIGHT="${HEIGHT:-720}"; FPS="${FPS:-15}"; BITRATE="${BITRATE:-4000000}"
 echo "[INFO] Starting sub1: ${WIDTH}x${HEIGHT} ${FPS}fps..."
+if ! gst-inspect-1.0 rtspclientsink >/dev/null 2>&1 && command -v ffmpeg >/dev/null 2>&1; then
+  echo "[INFO] rtspclientsink unavailable; using ffmpeg/libx264"
+  ffmpeg -hide_banner -loglevel warning -re \
+    -f lavfi -i "testsrc2=size=${WIDTH}x${HEIGHT}:rate=${FPS}" \
+    -c:v libx264 -preset ultrafast -tune zerolatency -b:v "${BITRATE}" \
+    -g "$((FPS * 2))" -pix_fmt yuv420p -f rtsp -rtsp_transport tcp \
+    "rtsp://mock:mock123@127.0.0.1:8554/sub1" \
+    > "$LOG_DIR/stream_sub1.log" 2>&1 &
+  echo $! > "$PID_FILE"
+  echo "[INFO] sub1 started (pid=$(cat $PID_FILE))"
+  exit 0
+fi
 if gst-inspect-1.0 nvv4l2h264enc >/dev/null 2>&1; then
   ENCODER_ARGS=(nvv4l2h264enc bitrate=${BITRATE} profile=Main preset-level=1 insert-sps-pps=true iframeinterval=30)
 else
