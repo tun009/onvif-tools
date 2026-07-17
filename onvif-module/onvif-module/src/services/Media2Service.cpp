@@ -723,11 +723,18 @@ int Media2Service::GetVideoEncoderConfigurationOptions(
         // legitimately applies SetVideoEncoderConfiguration and then rejects
         // the unchanged RTP stream during its resolution verification step.
         std::vector<std::pair<int, int>> resolutions;
-        if (profileToken == "profile_sub1") {
+        // DTT 24.12 may send the profile display token (for example
+        // "profile_Main 4K") instead of the backend token. ConfigurationToken
+        // is the stable Media2 identifier, so use it as the primary mapping.
+        const bool isSub1 = configToken == "video_encoder_config_profile_sub1" ||
+                            profileToken == "profile_sub1";
+        const bool isSub2 = configToken == "video_encoder_config_profile_sub2" ||
+                            profileToken == "profile_sub2";
+        if (isSub1) {
             // Keep this aligned with MockCameraBackend::buildProfiles().
             // profile_sub1 is the 1080p stream, not 720p.
             resolutions.push_back({1920, 1080});
-        } else if (profileToken == "profile_sub2") {
+        } else if (isSub2) {
             resolutions.push_back({640, 480});
         } else {
             resolutions.push_back({3840, 2160});
