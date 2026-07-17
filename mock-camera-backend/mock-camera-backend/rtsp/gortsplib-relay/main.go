@@ -23,7 +23,10 @@ type handler struct { paths map[string]*pathStream }
 
 const (
 	relayWriteQueueSize = 65536
-	maxReconnectDelay   = 8 * time.Second
+	// DTT waits only a few seconds for frames after SetVideoEncoderConfiguration.
+	// MediaMTX restarts the publisher during that operation, so an 8s backoff
+	// can outlive the test window and produce a false zero-frame failure.
+	maxReconnectDelay   = 2 * time.Second
 )
 
 // Profile M/T require Digest authentication at the RTSP layer.  Keep the
