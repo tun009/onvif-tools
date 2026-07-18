@@ -779,6 +779,12 @@ int Media2Service::GetVideoEncoderConfigurationOptions(
         } else if (isSub2) {
             resolutions.push_back({640, 480});
         } else {
+            // The main encoder is currently returned as 1920x1080 by
+            // GetVideoEncoderConfigurations, while 4K remains a supported
+            // target for the main stream.  Options must contain the current
+            // value as well as supported values; advertising only 4K makes
+            // DTT reject the configuration/options consistency check.
+            resolutions.push_back({1920, 1080});
             resolutions.push_back({3840, 2160});
         }
         for (const auto& r : resolutions) {
