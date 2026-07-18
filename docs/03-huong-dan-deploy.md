@@ -101,6 +101,16 @@ cd ~/onvif-tools/onvif-module
 
 ## 5. Cấu hình Tường lửa (Firewall) & Khắc phục lỗi
 
+### Ghi chú debug Profile M/T
+
+Ba nhóm cần kiểm tra độc lập trước khi chạy lại full DTT:
+
+1. **Registry profile/encoder**: `GetProfiles`, `GetVideoEncoderConfigurations` và `GetVideoEncoderConfigurationOptions` phải dùng cùng token, codec, source token và độ phân giải. ONVIF server lấy profile từ JSON của backend; không được dựng một danh sách hardcode khác.
+2. **H.264 resolution runtime**: sau `SetVideoEncoderConfiguration`, publisher RTSP phải thực sự phát đúng độ phân giải mới; response SOAP đúng một mình chưa đủ.
+3. **Metadata configuration**: sau `SetMetadataConfiguration`, `GetMetadataConfigurations` phải echo toàn bộ field DTT vừa đặt, gồm `Name`, `Events`, `Analytics`, `Multicast` và `SessionTimeout`.
+
+Hai lỗi RTSP-over-HTTP/TCP của lần m64 được tách riêng và chưa nằm trong phạm vi ba nhóm trên.
+
 ### Tường lửa (UFW)
 Nếu test trong mạng nội bộ, khuyên dùng tắt hẳn tường lửa:
 ```bash

@@ -107,7 +107,7 @@ std::vector<StreamProfile> MockCameraBackend::buildProfiles() const {
     sub1.token                  = "profile_sub1";
     sub1.name                   = "Sub Stream 1080p";
     sub1.streamType             = StreamType::SUB1;
-    sub1.sourceToken            = "src_sub1";
+    sub1.sourceToken            = "src_main";
     sub1.videoConfig.codec      = Codec::H264;
     sub1.videoConfig.resolution = RES_1080P;
     sub1.videoConfig.framerate  = 15;
@@ -119,7 +119,7 @@ std::vector<StreamProfile> MockCameraBackend::buildProfiles() const {
     sub2.token                  = "profile_sub2";
     sub2.name                   = "Sub Stream 480p";
     sub2.streamType             = StreamType::SUB2;
-    sub2.sourceToken            = "src_sub2";
+    sub2.sourceToken            = "src_main";
     sub2.videoConfig.codec      = Codec::H265;
     sub2.videoConfig.resolution = RES_480P;
     sub2.videoConfig.framerate  = 10;

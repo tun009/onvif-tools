@@ -336,6 +336,13 @@ std::string Media2MetadataService::handleSetMetadataConfiguration(const std::str
     // Match by local name so both <Configuration xmlns="..."> and
     // <tr2:Configuration ...> are captured.
     std::string inner = extractElementInnerByLocalName(req, "Configuration");
+    if (inner.empty()) {
+        const auto start = req.find("<Configuration");
+        const auto openEnd = req.find('>', start);
+        const auto close = req.find("</Configuration>", openEnd);
+        if (start != std::string::npos && openEnd != std::string::npos && close != std::string::npos)
+            inner = req.substr(openEnd + 1, close - openEnd - 1);
+    }
     if (!inner.empty()) {
         const std::string timeout = innerTag(inner, "SessionTimeout");
         if (timeout == "invalid") {

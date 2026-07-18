@@ -6,6 +6,28 @@
 #include <cstdio>
 #include <stdexcept>
 #include <sstream>
+#include <vector>
+
+namespace {
+std::vector<std::string> jsonObjectsInArray(const std::string& json,
+                                             const std::string& key) {
+    std::vector<std::string> result;
+    const std::string marker = "\"" + key + "\":";
+    const auto arrayStart = json.find('[', json.find(marker));
+    if (arrayStart == std::string::npos) return result;
+    int depth = 0; bool quoted = false; bool escaped = false;
+    std::size_t objectStart = std::string::npos;
+    for (std::size_t i = arrayStart + 1; i < json.size(); ++i) {
+        const char c = json[i];
+        if (quoted) { if (escaped) escaped = false; else if (c == '\\') escaped = true; else if (c == '"') quoted = false; continue; }
+        if (c == '"') { quoted = true; continue; }
+        if (c == '{') { if (depth++ == 0) objectStart = i; }
+        else if (c == '}' && depth > 0) { if (--depth == 0 && objectStart != std::string::npos) { result.push_back(json.substr(objectStart, i-objectStart+1)); objectStart = std::string::npos; } }
+        else if (c == ']' && depth == 0) break;
+    }
+    return result;
+}
+}
 
 // Minimal JSON helpers (avoid dependency for onvif-module side)
 #include "utils/SimpleJson.h"
@@ -197,9 +219,27 @@ bool BackendConnector::factoryReset(bool hard) {
 std::vector<StreamProfile> BackendConnector::getProfiles() {
     auto resp = sendRequest(ipc::MsgType::REQ_GET_PROFILES, "{}");
     std::string j(resp.payload.begin(), resp.payload.end());
-    // Parse array - simplified: return 3 hardcoded profiles for now
-    // TODO: implement full JSON array parser
     std::vector<StreamProfile> profiles;
+    for (const auto& object : jsonObjectsInArray(j, "profiles")) {
+        StreamProfile p;
+        p.token = SimpleJson::getString(object, "token");
+        if (p.token.empty()) continue;
+        p.name = SimpleJson::getString(object, "name");
+        p.sourceToken = SimpleJson::getString(object, "sourceToken", "src_main");
+        p.streamType = static_cast<StreamType>(SimpleJson::getInt(object, "streamType", 0));
+        p.videoConfig.codec = static_cast<Codec>(SimpleJson::getInt(object, "codec", 0));
+        p.videoConfig.resolution.width = SimpleJson::getInt(object, "width", 1920);
+        p.videoConfig.resolution.height = SimpleJson::getInt(object, "height", 1080);
+        p.videoConfig.framerate = SimpleJson::getInt(object, "framerate", 30);
+        p.videoConfig.bitrate = SimpleJson::getInt(object, "bitrate", 4000);
+        p.videoConfig.profile = SimpleJson::getString(object, "profile", "Main");
+        profiles.push_back(std::move(p));
+    }
+    if (!profiles.empty()) return profiles;
+    // Keep a hard failure here: silently falling back to stale profiles makes
+    // GetProfiles and the encoder registry disagree again.
+    throw std::runtime_error("IPC GetProfiles returned no profiles");
+    /*
     // Mock camera có 1 VideoSource vật lý duy nhất (src_main); 3 profile là
     // 3 encoding variants của cùng source. Nếu để mỗi profile 1 sourceToken
     // riêng, VideoSourceConfiguration sẽ inconsistent giữa GetProfiles và
@@ -219,7 +259,7 @@ std::vector<StreamProfile> BackendConnector::getProfiles() {
     s2.videoConfig.codec=Codec::H264; s2.videoConfig.resolution=RES_480P;
     s2.videoConfig.framerate=10; s2.videoConfig.bitrate=512;
     profiles.push_back(s2);
-    return profiles;
+    return profiles; */
 }
 
 StreamUri BackendConnector::getStreamUri(const std::string& token,
