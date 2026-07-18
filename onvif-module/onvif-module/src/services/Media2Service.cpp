@@ -76,8 +76,13 @@ int Media2Service::GetProfiles(
     try {
         profiles = backend_->getProfiles();
     } catch (const std::exception& e) {
-        std::cerr << "[Media2Service] GetProfiles error: " << e.what() << std::endl;
-        return soap_receiver_fault(soap, "Internal error", nullptr);
+        std::cerr << "[Media2Service] GetProfiles backend/IPC error: "
+                  << e.what() << std::endl;
+        // gSOAP's generic receiver fault emits an empty Subcode, which is
+        // schema-invalid and causes DTT to cascade-fail unrelated tests.
+        return m2SendOnvifFault(soap, "SOAP-ENV:Receiver",
+                                "ter:InternalError", nullptr,
+                                "Internal error");
     }
 
     // Xác định Type filter mà tool yêu cầu

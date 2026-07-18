@@ -92,5 +92,8 @@ private:
     std::atomic<bool>     evtRunning_{false};
 
     std::mutex                               cbMutex_;
+    // The control socket is a request/response channel. Serialize it so
+    // concurrent ONVIF workers cannot consume each other's responses.
+    std::mutex                               requestMutex_;
     std::map<std::string, EventCallback>     callbacks_;
 };

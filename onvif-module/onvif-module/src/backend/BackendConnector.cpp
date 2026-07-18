@@ -35,6 +35,7 @@ bool BackendConnector::recvMessage(int fd, ipc::Message& msg) {
 
 ipc::Message BackendConnector::sendRequest(ipc::MsgType type,
                                             const std::string& json) {
+    std::lock_guard<std::mutex> lock(requestMutex_);
     ipc::Message req;
     req.header.magic      = ipc::MAGIC;
     req.header.version    = ipc::VERSION;
