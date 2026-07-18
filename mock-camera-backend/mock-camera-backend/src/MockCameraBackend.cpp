@@ -157,7 +157,7 @@ bool MockCameraBackend::setVideoEncoderConfig(const std::string& token,
                                                const VideoEncoderConfig& cfg) {
     printf("[MockCameraBackend] setVideoEncoderConfig token=%s %dx%d\n",
            token.c_str(), cfg.resolution.width, cfg.resolution.height);
-    if (token != "profile_main" && token != "profile_sub1") {
+    if (token != "profile_main" && token != "profile_sub1" && token != "profile_sub2") {
         videoConfigs_[token] = cfg;
         return true;
     }

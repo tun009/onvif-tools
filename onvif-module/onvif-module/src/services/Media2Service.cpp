@@ -188,8 +188,8 @@ int Media2Service::GetProfiles(
                     if (vsc->Bounds) {
                         vsc->Bounds->x = 0;
                         vsc->Bounds->y = 0;
-                        vsc->Bounds->width = 1920;
-                        vsc->Bounds->height = 1080;
+                        vsc->Bounds->width = fp ? fp->videoConfig.resolution.width : 1920;
+                        vsc->Bounds->height = fp ? fp->videoConfig.resolution.height : 1080;
                     }
                     profile->Configurations->VideoSource = vsc;
                 }
@@ -432,8 +432,18 @@ int Media2Service::GetVideoSourceConfigurations(
         if (vsc->Bounds) {
             vsc->Bounds->x = 0;
             vsc->Bounds->y = 0;
-            vsc->Bounds->width = 1920;
-            vsc->Bounds->height = 1080;
+            // The source configuration must describe the same active source
+            // geometry exposed by GetProfiles, including the 4K main stream.
+            if (profToken == "profile_sub2") {
+                vsc->Bounds->width = 640;
+                vsc->Bounds->height = 480;
+            } else if (profToken == "profile_main") {
+                vsc->Bounds->width = 3840;
+                vsc->Bounds->height = 2160;
+            } else {
+                vsc->Bounds->width = 1920;
+                vsc->Bounds->height = 1080;
+            }
         }
         resp.Configurations.push_back(vsc);
     }
@@ -481,7 +491,7 @@ int Media2Service::GetVideoEncoderConfigurations(
         if (!enc) return;
         enc->token = cfgToken;
         enc->Name  = cfgName;
-        enc->Encoding = "H264";
+        enc->Encoding = cfgToken == "video_encoder_config_profile_sub2" ? "H265" : "H264";
         enc->Quality = 50.0f;
         enc->Resolution = soap_new_tt__VideoResolution2(soap);
         enc->Resolution->Width = 1920; enc->Resolution->Height = 1080;
@@ -772,9 +782,14 @@ int Media2Service::GetVideoEncoderConfigurationOptions(
         return opt;
     };
 
-    // Mock camera only implements H.264; do not advertise an unsupported H.265 encoder.
-    auto optH264 = createOption("H264");
-    if (optH264) resp.Options.push_back(optH264);
+    // Keep options aligned with the configuration registry. The sub2 stream is
+    // H.265 in the backend; advertising H.264 for that token makes DTT reject
+    // the profile/configuration consistency check before streaming starts.
+    const std::string optionCodec =
+        (configToken == "video_encoder_config_profile_sub2" ||
+         profileToken == "profile_sub2") ? "H265" : "H264";
+    auto option = createOption(optionCodec);
+    if (option) resp.Options.push_back(option);
 
     return SOAP_OK;
 }
