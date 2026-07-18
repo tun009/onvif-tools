@@ -71,30 +71,50 @@ std::string extractElementInnerByLocalName(const std::string& xml,
         }
 
         std::size_t openEnd = xml.find('>', nameEnd);
-        if (openEnd == std::string::npos || xml[openEnd - 1] == '/') return "";
-        std::string closeTag = "</" + qname + ">";
-        std::size_t closeStart = xml.find(closeTag, openEnd + 1);
-        if (closeStart == std::string::npos && colon == std::string::npos) {
-            closeStart = xml.find("</" + local + ">", openEnd + 1);
-        }
-        // gSOAP/DTT may serialize the closing tag with a different prefix
-        // from the opening tag. Match any qualified closing Configuration.
-        if (closeStart == std::string::npos) {
-            closeStart = xml.find("</", openEnd + 1);
-            while (closeStart != std::string::npos) {
-                std::size_t closeEnd = xml.find('>', closeStart + 2);
-                if (closeEnd == std::string::npos) break;
-                std::string closeName = xml.substr(closeStart + 2,
-                                                   closeEnd - closeStart - 2);
-                std::size_t closeColon = closeName.find(':');
-                if (closeColon != std::string::npos)
-                    closeName = closeName.substr(closeColon + 1);
-                if (closeName == local) break;
-                closeStart = xml.find("</", closeEnd + 1);
+        if (openEnd == std::string::npos ||
+            (openEnd > 0 && xml[openEnd - 1] == '/')) return "";
+
+        // Match the corresponding closing element, including nested elements
+        // with the same local name. A simple find("</Configuration>") is not
+        // sufficient for SOAP bodies that contain qualified tags or nested
+        // Configuration elements.
+        int depth = 1;
+        std::size_t scan = openEnd + 1;
+        while (scan < xml.size()) {
+            std::size_t next = xml.find('<', scan);
+            if (next == std::string::npos) break;
+            if (next + 1 < xml.size() && xml[next + 1] != '?' &&
+                xml[next + 1] != '!') {
+                bool closing = xml[next + 1] == '/';
+                std::size_t tagStart = next + (closing ? 2 : 1);
+                std::size_t tagEnd = tagStart;
+                while (tagEnd < xml.size() && xml[tagEnd] != '>' &&
+                       xml[tagEnd] != '/' && xml[tagEnd] != ' ' &&
+                       xml[tagEnd] != '\t' && xml[tagEnd] != '\r' &&
+                       xml[tagEnd] != '\n') ++tagEnd;
+                std::string nestedName = xml.substr(tagStart, tagEnd - tagStart);
+                std::size_t nestedColon = nestedName.find(':');
+                if (nestedColon != std::string::npos)
+                    nestedName = nestedName.substr(nestedColon + 1);
+                std::size_t tagClose = xml.find('>', tagEnd);
+                if (tagClose == std::string::npos) break;
+                bool selfClosing = !closing && tagClose > next &&
+                                   xml[tagClose - 1] == '/';
+                if (nestedName == local) {
+                    if (closing) {
+                        if (--depth == 0)
+                            return xml.substr(openEnd + 1,
+                                              next - openEnd - 1);
+                    } else if (!selfClosing) {
+                        ++depth;
+                    }
+                }
+                scan = tagClose + 1;
+            } else {
+                scan = next + 1;
             }
         }
-        if (closeStart == std::string::npos) return "";
-        return xml.substr(openEnd + 1, closeStart - openEnd - 1);
+        return "";
     }
     return "";
 }

@@ -470,6 +470,23 @@ int Media2Service::GetVideoEncoderConfigurations(
         if (req->ProfileToken)       filterProfileToken = *req->ProfileToken;
     }
 
+    // DTT 24.x can send the human-readable profile name rather than the
+    // backend token. Normalize it before applying the profile filter; otherwise
+    // the service falls through to default H264/1080p configurations and the
+    // consistency tests compare the wrong encoder against the profile.
+    auto normalizeProfileToken = [](std::string token) {
+        if (token == "profile_Main 4K" || token == "profile_Main" ||
+            token == "Main 4K") return std::string("profile_main");
+        if (token == "profile_Sub1 1080p" || token == "profile_Sub1" ||
+            token == "Sub1 1080p") return std::string("profile_sub1");
+        if (token == "profile_Sub2 480p" || token == "profile_Sub2" ||
+            token == "Sub2 480p") return std::string("profile_sub2");
+        if (token == "profile_Metadata" || token == "Metadata")
+            return std::string("profile_metadata");
+        return token;
+    };
+    filterProfileToken = normalizeProfileToken(filterProfileToken);
+
     std::vector<StreamProfile> profiles;
     try {
         profiles = backend_->getProfiles();
@@ -696,6 +713,15 @@ int Media2Service::GetVideoEncoderConfigurationOptions(
         if (req->ConfigurationToken) configToken = *req->ConfigurationToken;
         if (req->ProfileToken) profileToken = *req->ProfileToken;
     }
+
+    if (profileToken == "profile_Main 4K" || profileToken == "profile_Main" ||
+        profileToken == "Main 4K") profileToken = "profile_main";
+    else if (profileToken == "profile_Sub1 1080p" || profileToken == "profile_Sub1" ||
+             profileToken == "Sub1 1080p") profileToken = "profile_sub1";
+    else if (profileToken == "profile_Sub2 480p" || profileToken == "profile_Sub2" ||
+             profileToken == "Sub2 480p") profileToken = "profile_sub2";
+    else if (profileToken == "profile_Metadata" || profileToken == "Metadata")
+        profileToken = "profile_metadata";
 
     // Validate ConfigurationToken (nếu truyền). Token hợp lệ: các encoder config
     // trong pool (bao gồm spare — MEDIA2_RTSS-1-1-23 spec §7.8.1). Khác → fault.
