@@ -1105,6 +1105,7 @@ int Media2Service::DeleteProfile(
         if (it != g_dynProfiles.end()) {
             g_dynProfiles.erase(it);
             std::cout << "[Media2Service] DeleteProfile [" << req->Token << "] dyn" << std::endl;
+            MockSubscriptionManager::getInstance().fireProfileChanged(req->Token);
             return SOAP_OK;
         }
     }
@@ -1117,6 +1118,7 @@ int Media2Service::DeleteProfile(
         std::lock_guard<std::mutex> lk(g_profMtx);
         g_deletedFixedTokens.insert(req->Token);
         std::cout << "[Media2Service] DeleteProfile [" << req->Token << "] fixed->marked" << std::endl;
+        MockSubscriptionManager::getInstance().fireProfileChanged(req->Token);
         return SOAP_OK;
     }
     for (const auto& p : profiles) {
@@ -1124,6 +1126,7 @@ int Media2Service::DeleteProfile(
             std::lock_guard<std::mutex> lk(g_profMtx);
             g_deletedFixedTokens.insert(req->Token);
             std::cout << "[Media2Service] DeleteProfile [" << req->Token << "] fixed→marked" << std::endl;
+            MockSubscriptionManager::getInstance().fireProfileChanged(req->Token);
             return SOAP_OK;
         }
     }
