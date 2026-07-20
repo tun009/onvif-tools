@@ -274,19 +274,41 @@ std::string MockSubscriptionManager::handleGetEventProperties(const std::string&
         // Rollback: bỏ MessageDescription (thêm vào regressed EVENT-3-1-25/38
         // mà không fix được 16/33/34/35 — tool-side crash bên .NET).
         // Property topic để leaf trống với wstop:topic="true".
+        // Mỗi topic leaf kèm <tt:MessageDescription> để DTT Preliminary Check
+        // xác định feature = SUPPORTED (không có MessageDescription → NOT SUPPORTED
+        // dù topic tồn tại). tt:/xs: đã khai trong envelope wrap.
+        // KHÔNG khai tampering (ImageTooBlurry/Dark/Bright): thiết bị pass M+T (HALO)
+        // không khai → tránh bị DTT đòi tampering hoạt động (Profile T errata).
         "<wstop:TopicSet>"
           "<tns1:VideoSource>"
-            "<tns1:MotionAlarm wstop:topic=\"true\"/>"
-            "<tns1:GlobalSceneChange wstop:topic=\"true\"/>"
-            "<tns1:ImageTooBlurry wstop:topic=\"true\"/>"
-            "<tns1:ImageTooDark wstop:topic=\"true\"/>"
-            "<tns1:ImageTooBright wstop:topic=\"true\"/>"
+            "<tns1:MotionAlarm wstop:topic=\"true\">"
+              "<tt:MessageDescription IsProperty=\"true\">"
+                "<tt:Source><tt:SimpleItemDescription Name=\"Source\" Type=\"tt:ReferenceToken\"/></tt:Source>"
+                "<tt:Data><tt:SimpleItemDescription Name=\"State\" Type=\"xs:boolean\"/></tt:Data>"
+              "</tt:MessageDescription>"
+            "</tns1:MotionAlarm>"
+            "<tns1:GlobalSceneChange wstop:topic=\"true\">"
+              "<tt:MessageDescription IsProperty=\"true\">"
+                "<tt:Source><tt:SimpleItemDescription Name=\"Source\" Type=\"tt:ReferenceToken\"/></tt:Source>"
+                "<tt:Data><tt:SimpleItemDescription Name=\"State\" Type=\"xs:boolean\"/></tt:Data>"
+              "</tt:MessageDescription>"
+            "</tns1:GlobalSceneChange>"
           "</tns1:VideoSource>"
-          // Profile M/T mandatory Media event topics.  The conformance
-            // preliminary check reads these from TopicSet before running tests.
-            "<tns1:Media>"
-            "<tns1:ProfileChanged wstop:topic=\"true\"/>"
-            "<tns1:ConfigurationChanged wstop:topic=\"true\"/>"
+          // Profile M/T mandatory Media event topics.
+          "<tns1:Media>"
+            "<tns1:ProfileChanged wstop:topic=\"true\">"
+              "<tt:MessageDescription IsProperty=\"false\">"
+                "<tt:Data><tt:SimpleItemDescription Name=\"Token\" Type=\"tt:ReferenceToken\"/></tt:Data>"
+              "</tt:MessageDescription>"
+            "</tns1:ProfileChanged>"
+            "<tns1:ConfigurationChanged wstop:topic=\"true\">"
+              "<tt:MessageDescription IsProperty=\"false\">"
+                "<tt:Data>"
+                  "<tt:SimpleItemDescription Name=\"Token\" Type=\"tt:ReferenceToken\"/>"
+                  "<tt:SimpleItemDescription Name=\"Type\" Type=\"xs:string\"/>"
+                "</tt:Data>"
+              "</tt:MessageDescription>"
+            "</tns1:ConfigurationChanged>"
           "</tns1:Media>"
         "</wstop:TopicSet>"
         "<wsnt:TopicExpressionDialect>http://www.onvif.org/ver10/tev/topicExpression/ConcreteSet</wsnt:TopicExpressionDialect>"
