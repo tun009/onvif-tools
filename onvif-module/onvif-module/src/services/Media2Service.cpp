@@ -775,29 +775,32 @@ int Media2Service::GetVideoEncoderConfigurationOptions(
         // legitimately applies SetVideoEncoderConfiguration and then rejects
         // the unchanged RTP stream during its resolution verification step.
         std::vector<std::pair<int, int>> resolutions;
-        // DTT 24.12 may send the profile display token (for example
-        // "profile_Main 4K") instead of the backend token. ConfigurationToken
-        // is the stable Media2 identifier, so use it as the primary mapping.
-        const bool isSpare = configToken == "video_encoder_config_spare";
-        const bool isSub1 = configToken == "video_encoder_config_profile_sub1" ||
-                            profileToken == "profile_sub1";
-        const bool isSub2 = configToken == "video_encoder_config_profile_sub2" ||
-                            profileToken == "profile_sub2";
-        if (isSpare || isSub1) {
-            // Keep this aligned with MockCameraBackend::buildProfiles().
-            // profile_sub1 is the 1080p stream, not 720p.
-            resolutions.push_back({1920, 1080});
-        } else if (isSub2) {
-            resolutions.push_back({640, 480});
-        } else {
-            // The main encoder is currently returned as 1920x1080 by
-            // GetVideoEncoderConfigurations, while 4K remains a supported
-            // target for the main stream.  Options must contain the current
-            // value as well as supported values; advertising only 4K makes
-            // DTT reject the configuration/options consistency check.
-            resolutions.push_back({1920, 1080});
-            resolutions.push_back({3840, 2160});
+        // Options PHẢI khớp GetVideoEncoderConfigurations (MEDIA2-2-3-2/3) và chỉ
+        // quảng bá resolution stream thật phát ra (RTSS-1-1-48 set rồi verify khung
+        // hình). Cả hai đọc CÙNG nguồn backend → nhất quán tự động. Map token →
+        // backend profile; spare/dynamic/unknown → default 1920x1080 (khớp
+        // addDefaultEncoderConfig).
+        std::string beProfile;
+        if (configToken == "video_encoder_config_profile_sub1" || profileToken == "profile_sub1")
+            beProfile = "profile_sub1";
+        else if (configToken == "video_encoder_config_profile_sub2" || profileToken == "profile_sub2")
+            beProfile = "profile_sub2";
+        else if (configToken == "video_encoder_config" || profileToken == "profile_main")
+            beProfile = "profile_main";
+        int rw = 1920, rh = 1080;  // default: spare / dynamic / fallback
+        if (!beProfile.empty()) {
+            try {
+                for (const auto& p : backend_->getProfiles()) {
+                    if (p.token != beProfile) continue;
+                    if (p.videoConfig.resolution.width > 0 && p.videoConfig.resolution.height > 0) {
+                        rw = p.videoConfig.resolution.width;
+                        rh = p.videoConfig.resolution.height;
+                    }
+                    break;
+                }
+            } catch (...) {}
         }
+        resolutions.push_back({rw, rh});
         for (const auto& r : resolutions) {
             auto res = soap_new_tt__VideoResolution2(soap);
             if (res) {
