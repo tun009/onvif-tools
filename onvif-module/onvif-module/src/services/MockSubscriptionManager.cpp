@@ -453,6 +453,55 @@ static std::string echoTopic(const std::string& filter,
     return fallback;
 }
 
+// ── Fire event từ thao tác Media2 (enqueue vào subscription khớp) ────────────
+void MockSubscriptionManager::fireProfileChanged(const std::string& token) {
+    std::lock_guard<std::mutex> lk(mtx_);
+    std::string now = getXmlUtcTime(0);
+    for (auto& kv : subscriptions_) {
+        const std::string& f = kv.second.topicFilter;
+        bool match = f.empty() ||
+                     f.find("ProfileChanged") != std::string::npos ||
+                     f.find("Media//.") != std::string::npos ||
+                     f.find("Media//*") != std::string::npos;
+        if (!match) continue;
+        std::string topic = echoTopic(f, "ProfileChanged", "tns1:Media/ProfileChanged");
+        std::ostringstream m;
+        m << "<wsnt:NotificationMessage>"
+          << "<wsnt:Topic Dialect=\"" << TOPIC_DIALECT << "\">" << topic << "</wsnt:Topic>"
+          << "<wsnt:Message><tt:Message UtcTime=\"" << now << "\">"
+          << "<tt:Source><tt:SimpleItem Name=\"Token\" Value=\"" << token << "\"/></tt:Source>"
+          << "</tt:Message></wsnt:Message>"
+          << "</wsnt:NotificationMessage>";
+        kv.second.pending.push_back(m.str());
+    }
+}
+
+void MockSubscriptionManager::fireConfigurationChanged(const std::string& token,
+                                                       const std::string& type) {
+    std::lock_guard<std::mutex> lk(mtx_);
+    std::string now = getXmlUtcTime(0);
+    for (auto& kv : subscriptions_) {
+        const std::string& f = kv.second.topicFilter;
+        bool match = f.empty() ||
+                     f.find("ConfigurationChanged") != std::string::npos ||
+                     f.find("Media//.") != std::string::npos ||
+                     f.find("Media//*") != std::string::npos;
+        if (!match) continue;
+        std::string topic = echoTopic(f, "ConfigurationChanged", "tns1:Media/ConfigurationChanged");
+        std::ostringstream m;
+        m << "<wsnt:NotificationMessage>"
+          << "<wsnt:Topic Dialect=\"" << TOPIC_DIALECT << "\">" << topic << "</wsnt:Topic>"
+          << "<wsnt:Message><tt:Message UtcTime=\"" << now << "\">"
+          << "<tt:Source>"
+          << "<tt:SimpleItem Name=\"Token\" Value=\"" << token << "\"/>"
+          << "<tt:SimpleItem Name=\"Type\" Value=\"" << type << "\"/>"
+          << "</tt:Source>"
+          << "</tt:Message></wsnt:Message>"
+          << "</wsnt:NotificationMessage>";
+        kv.second.pending.push_back(m.str());
+    }
+}
+
 // ── PullMessages ────────────────────────────────────────────────────────────
 std::string MockSubscriptionManager::handlePullMessages(const std::string& subId,
                                                         const std::string& req) {
@@ -460,6 +509,7 @@ std::string MockSubscriptionManager::handlePullMessages(const std::string& subId
     std::string filter;
     int timeout = 60;
     unsigned long pullNo = 0;
+    std::vector<std::string> pending;   // event do thao tác (ProfileChanged/ConfigurationChanged)
     {
         std::lock_guard<std::mutex> lk(mtx_);
         purgeExpired();
@@ -473,6 +523,7 @@ std::string MockSubscriptionManager::handlePullMessages(const std::string& subId
         timeout = it->second.timeoutSeconds;
         filter = it->second.topicFilter;
         pullNo = it->second.pullCount++;
+        pending.swap(it->second.pending);   // lấy ra + xóa khỏi subscription
     }
 
     // MessageLimit từ request (tool set để giới hạn tối đa messages trả về).
@@ -541,15 +592,21 @@ std::string MockSubscriptionManager::handlePullMessages(const std::string& subId
     if (emitBlurry) matched.push_back({echoTopic(filter, "ImageTooBlurry", "tns1:VideoSource/ImageTooBlurry/ImagingService"), "false"});
     if (emitDark)   matched.push_back({echoTopic(filter, "ImageTooDark", "tns1:VideoSource/ImageTooDark/ImagingService"), "false"});
     if (emitBright) matched.push_back({echoTopic(filter, "ImageTooBright", "tns1:VideoSource/ImageTooBright/ImagingService"), "false"});
-    if (emitProfileChanged) matched.push_back({echoTopic(filter, "ProfileChanged", "tns1:Media/tns1:ProfileChanged"), "true"});
-    if (emitConfigurationChanged) matched.push_back({echoTopic(filter, "ConfigurationChanged", "tns1:Media/tns1:ConfigurationChanged"), "true"});
+    // ProfileChanged/ConfigurationChanged KHÔNG phát synthetic ở đây — chúng là
+    // change event, chỉ phát khi có thao tác thật (qua pending, fireXxx).
+    (void)emitProfileChanged; (void)emitConfigurationChanged;
 
     std::ostringstream body;
     body << "<tev:PullMessagesResponse>"
          << "<tev:CurrentTime>" << now << "</tev:CurrentTime>"
          << "<tev:TerminationTime>" << getXmlUtcTime(timeout) << "</tev:TerminationTime>";
     int emitted = 0;
-    if (!matched.empty()) {
+    // Ưu tiên event do thao tác (ProfileChanged/ConfigurationChanged đã dựng sẵn).
+    for (const auto& p : pending) {
+        if (emitted >= msgLimit) break;
+        body << p; ++emitted;
+    }
+    if (emitted < msgLimit && !matched.empty()) {
         size_t start = pullNo % matched.size();
         for (size_t i = 0; i < matched.size() && emitted < msgLimit; ++i) {
             const auto& m = matched[(start + i) % matched.size()];

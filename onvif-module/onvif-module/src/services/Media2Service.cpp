@@ -1,4 +1,5 @@
 #include "services/Media2Service.h"
+#include "services/MockSubscriptionManager.h"
 #include "auth/WsSecurityHandler.h"
 #include <iostream>
 #include <string>
@@ -639,6 +640,7 @@ int Media2Service::AddConfiguration(
         }
     }
     std::cout << "[Media2Service] AddConfiguration [" << req->ProfileToken << "]" << std::endl;
+    MockSubscriptionManager::getInstance().fireProfileChanged(req->ProfileToken);
     return SOAP_OK;
 }
 
@@ -660,6 +662,7 @@ int Media2Service::RemoveConfiguration(
         g_removedConfigs[req->ProfileToken].insert(c->Type);
     }
     std::cout << "[Media2Service] RemoveConfiguration [" << req->ProfileToken << "]" << std::endl;
+    MockSubscriptionManager::getInstance().fireProfileChanged(req->ProfileToken);
     return SOAP_OK;
 }
 
@@ -852,6 +855,12 @@ int Media2Service::SetVideoSourceConfiguration(
     }
     this->soap->header = nullptr;
     std::cout << "[Media2Service] SetVideoSourceConfiguration called" << std::endl;
+    // MEDIA2-2-2-5: phát ConfigurationChanged (Type=VideoSource) cho subscriber.
+    {
+        std::string tok = (req && req->Configuration) ? req->Configuration->token
+                                                       : std::string("video_source_config");
+        MockSubscriptionManager::getInstance().fireConfigurationChanged(tok, "VideoSource");
+    }
     return SOAP_OK;
 }
 
@@ -927,6 +936,8 @@ int Media2Service::SetVideoEncoderConfiguration(
         return soap_receiver_fault(this->soap, "Backend error", nullptr);
     }
 
+    // MEDIA2-2-3-4: phát ConfigurationChanged (Token=<cfg>, Type=VideoEncoder).
+    MockSubscriptionManager::getInstance().fireConfigurationChanged(configToken, "VideoEncoder");
     return SOAP_OK;
 }
 
@@ -1071,6 +1082,8 @@ int Media2Service::CreateProfile(
     }
     resp.Token = p.token;
     std::cout << "[Media2Service] CreateProfile → " << resp.Token << std::endl;
+    // MEDIA2-1-1-2/3: phát ProfileChanged (Token=<profile mới>) cho subscriber.
+    MockSubscriptionManager::getInstance().fireProfileChanged(resp.Token);
     return SOAP_OK;
 }
 

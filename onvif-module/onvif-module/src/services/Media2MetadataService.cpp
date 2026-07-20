@@ -3,6 +3,7 @@
 
 #include "services/Media2MetadataService.h"
 #include "services/AnalyticsModuleStore.h"
+#include "services/MockSubscriptionManager.h"
 #include "utils/FaultBuilder.h"
 #include <sstream>
 #include <mutex>
@@ -358,6 +359,8 @@ std::string Media2MetadataService::handleSetMetadataConfiguration(const std::str
         std::cout << "[Media2Metadata] WARNING: SetMetadataConfiguration without Configuration body"
                   << std::endl;
     }
+    // MEDIA2-8-1-1: phát ConfigurationChanged (Token=metadata_config, Type=Metadata).
+    MockSubscriptionManager::getInstance().fireConfigurationChanged("metadata_config", "Metadata");
     return "<tr2:SetMetadataConfigurationResponse/>";
 }
 

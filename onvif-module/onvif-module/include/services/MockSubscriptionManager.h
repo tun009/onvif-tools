@@ -21,6 +21,9 @@ struct SubscriptionState {
     int timeoutSeconds = 60;
     std::string topicFilter;   // nội dung TopicExpression (rỗng = không lọc)
     unsigned long pullCount = 0;
+    // Event phát do thao tác (CreateProfile/Set*): mỗi phần tử là 1 chuỗi
+    // <wsnt:NotificationMessage> dựng sẵn, PullMessages trả về rồi xóa.
+    std::vector<std::string> pending;
     // Basic Notification: ConsumerReference URL để POST Notify tới.
     // Rỗng nếu là PullPoint subscription (server không tự push, tool pull).
     std::string consumerUrl;
@@ -34,6 +37,13 @@ public:
     // trả về XML SOAP response. Trả "" nếu không nhận diện được operation.
     std::string dispatch(const std::string& deviceIp, int port,
                          const std::string& subId, const std::string& rawRequest);
+
+    // Phát event khi Media2 thao tác — enqueue vào các subscription khớp filter
+    // để PullMessages trả về. Gọi từ Media2Service/Media2MetadataService.
+    //   tns1:Media/ProfileChanged: Source SimpleItem Token=<profile token>
+    //   tns1:Media/ConfigurationChanged: Source Token=<cfg token> + Type=<type>
+    void fireProfileChanged(const std::string& token);
+    void fireConfigurationChanged(const std::string& token, const std::string& type);
 
 private:
     // ── Handlers từng operation ───────────────────────────────────────────
