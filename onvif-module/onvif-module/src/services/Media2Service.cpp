@@ -513,10 +513,19 @@ int Media2Service::GetVideoEncoderConfigurations(
         if (!enc) return;
         enc->token = cfgToken;
         enc->Name  = cfgName;
-        enc->Encoding = cfgToken == "video_encoder_config_profile_sub2" ? "H265" : "H264";
+        // The mock backend exposes H.264 for every video profile, including
+        // profile_sub2. Keep the registry response consistent with the
+        // actual publisher and with GetVideoEncoderConfigurationOptions.
+        enc->Encoding = "H264";
         enc->Quality = 50.0f;
         enc->Resolution = soap_new_tt__VideoResolution2(soap);
-        enc->Resolution->Width = 1920; enc->Resolution->Height = 1080;
+        if (cfgToken == "video_encoder_config_profile_sub2") {
+            enc->Resolution->Width = 640;
+            enc->Resolution->Height = 480;
+        } else {
+            enc->Resolution->Width = 1920;
+            enc->Resolution->Height = 1080;
+        }
         enc->RateControl = soap_new_tt__VideoRateControl2(soap);
         enc->RateControl->FrameRateLimit = 30.0f;
         enc->RateControl->BitrateLimit = 4000;
@@ -555,7 +564,9 @@ int Media2Service::GetVideoEncoderConfigurations(
                 enc->Name = (p.token == "profile_main")
                           ? "VideoEncoderConfig"
                           : "VideoEncoderConfig_" + p.token;
-                enc->Encoding = p.videoConfig.codec == Codec::H265 ? "H265" : "H264";
+                // H.265 is not implemented by the mock publishers. Never
+                // advertise it for a configuration whose stream is H.264.
+                enc->Encoding = "H264";
                 enc->Quality = 50.0f;
                 enc->Resolution = soap_new_tt__VideoResolution2(soap);
                 if (enc->Resolution) {
@@ -819,13 +830,9 @@ int Media2Service::GetVideoEncoderConfigurationOptions(
         return opt;
     };
 
-    // Keep options aligned with the configuration registry. The sub2 stream is
-    // H.265 in the backend; advertising H.264 for that token makes DTT reject
-    // the profile/configuration consistency check before streaming starts.
-    const std::string optionCodec =
-        (configToken == "video_encoder_config_profile_sub2" ||
-         profileToken == "profile_sub2") ? "H265" : "H264";
-    auto option = createOption(optionCodec);
+    // Keep options aligned with the configuration registry. All mock video
+    // publishers currently emit H.264; H.265 is not an available option.
+    auto option = createOption("H264");
     if (option) resp.Options.push_back(option);
 
     return SOAP_OK;
@@ -893,8 +900,10 @@ int Media2Service::SetVideoEncoderConfiguration(
 
     // Cập nhật các trường mới nhận được từ request
     if (!newEnc->Encoding.empty()) {
-        if (newEnc->Encoding == "H265") vecConfig.codec = Codec::H265;
-        else vecConfig.codec = Codec::H264;
+        if (newEnc->Encoding != "H264") {
+            return soap_sender_fault(this->soap, "Unsupported video encoding", nullptr);
+        }
+        vecConfig.codec = Codec::H264;
     }
     
     if (newEnc->Resolution) {
