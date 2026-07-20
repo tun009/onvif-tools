@@ -432,11 +432,21 @@ static std::string echoTopic(const std::string& filter,
         std::size_t a = seg.find_first_not_of(" \t\r\n");
         std::size_t b = seg.find_last_not_of(" \t\r\n");
         if (a != std::string::npos) seg = seg.substr(a, b - a + 1);
-        std::size_t slash = seg.rfind('/');
-        std::string last = (slash == std::string::npos) ? seg : seg.substr(slash + 1);
-        std::size_t colon = last.rfind(':');
-        std::string lastLocal = (colon == std::string::npos) ? last : last.substr(colon + 1);
-        if (lastLocal == localName && !seg.empty()) return seg;
+        // Khớp localName với BẤT KỲ path-component (prefix-stripped), không chỉ
+        // segment cuối — vì topic 3 cấp có localName ở giữa
+        // (tns1:VideoSource/ImageTooBlurry/ImagingService → khớp "ImageTooBlurry").
+        bool hit = false;
+        std::size_t cs = 0;
+        while (cs <= seg.size()) {
+            std::size_t sl = seg.find('/', cs);
+            std::string comp = (sl == std::string::npos) ? seg.substr(cs) : seg.substr(cs, sl - cs);
+            std::size_t cc = comp.rfind(':');
+            std::string cl = (cc == std::string::npos) ? comp : comp.substr(cc + 1);
+            if (cl == localName) { hit = true; break; }
+            if (sl == std::string::npos) break;
+            cs = sl + 1;
+        }
+        if (hit && !seg.empty()) return seg;
         if (bar == std::string::npos) break;
         start = bar + 1;
     }
@@ -486,14 +496,12 @@ std::string MockSubscriptionManager::handlePullMessages(const std::string& subId
                       filter.find("MotionAlarm") != std::string::npos;
     bool emitGSC    = wantAll || subtreeVS ||
                       filter.find("GlobalSceneChange") != std::string::npos;
-    // Tampering: Profile T §7.6 cần ≥1 event tampering nhận được. Emit như MotionAlarm
-    // để subscription subtree (tns1:VideoSource//.) hoặc explicit nhận đủ.
-    bool emitBlurry = wantAll || subtreeVS ||
-                      filter.find("ImageTooBlurry") != std::string::npos;
-    bool emitDark   = wantAll || subtreeVS ||
-                      filter.find("ImageTooDark") != std::string::npos;
-    bool emitBright = wantAll || subtreeVS ||
-                      filter.find("ImageTooBright") != std::string::npos;
+    // Tampering: CHỈ emit khi filter explicit tên topic (IMAGING-4-1-1/2/3), KHÔNG
+    // theo subtree/wantAll — tránh làm nhiễu subscription subtree (EVENT-2-1-25
+    // "returned only required"). Topic 3 cấp .../ImagingService.
+    bool emitBlurry = filter.find("ImageTooBlurry") != std::string::npos;
+    bool emitDark   = filter.find("ImageTooDark") != std::string::npos;
+    bool emitBright = filter.find("ImageTooBright") != std::string::npos;
     bool subtreeMedia = filter.find("Media//.") != std::string::npos ||
                         filter.find("Media//*") != std::string::npos;
     bool emitProfileChanged = wantAll || subtreeMedia ||
@@ -530,9 +538,9 @@ std::string MockSubscriptionManager::handlePullMessages(const std::string& subId
     std::vector<std::pair<std::string, std::string>> matched;
     if (emitMotion) matched.push_back({echoTopic(filter, "MotionAlarm", "tns1:VideoSource/tns1:MotionAlarm"), "false"});
     if (emitGSC)    matched.push_back({echoTopic(filter, "GlobalSceneChange", "tns1:VideoSource/tns1:GlobalSceneChange"), "false"});
-    if (emitBlurry) matched.push_back({echoTopic(filter, "ImageTooBlurry", "tns1:VideoSource/tns1:ImageTooBlurry"), "false"});
-    if (emitDark)   matched.push_back({echoTopic(filter, "ImageTooDark", "tns1:VideoSource/tns1:ImageTooDark"), "false"});
-    if (emitBright) matched.push_back({echoTopic(filter, "ImageTooBright", "tns1:VideoSource/tns1:ImageTooBright"), "false"});
+    if (emitBlurry) matched.push_back({echoTopic(filter, "ImageTooBlurry", "tns1:VideoSource/ImageTooBlurry/ImagingService"), "false"});
+    if (emitDark)   matched.push_back({echoTopic(filter, "ImageTooDark", "tns1:VideoSource/ImageTooDark/ImagingService"), "false"});
+    if (emitBright) matched.push_back({echoTopic(filter, "ImageTooBright", "tns1:VideoSource/ImageTooBright/ImagingService"), "false"});
     if (emitProfileChanged) matched.push_back({echoTopic(filter, "ProfileChanged", "tns1:Media/tns1:ProfileChanged"), "true"});
     if (emitConfigurationChanged) matched.push_back({echoTopic(filter, "ConfigurationChanged", "tns1:Media/tns1:ConfigurationChanged"), "true"});
 
@@ -661,15 +669,16 @@ void MockSubscriptionManager::notifyPushLoop() {
                               t.filter.find("MotionAlarm") != std::string::npos;
             bool wantGSC = wantAll || subtreeVS ||
                            t.filter.find("GlobalSceneChange") != std::string::npos;
-            bool wantBlurry = wantAll || subtreeVS || t.filter.find("ImageTooBlurry") != std::string::npos;
-            bool wantDark   = wantAll || subtreeVS || t.filter.find("ImageTooDark") != std::string::npos;
-            bool wantBright = wantAll || subtreeVS || t.filter.find("ImageTooBright") != std::string::npos;
+            // Tampering: chỉ khi filter explicit (không subtree/wantAll) — tránh nhiễu.
+            bool wantBlurry = t.filter.find("ImageTooBlurry") != std::string::npos;
+            bool wantDark   = t.filter.find("ImageTooDark") != std::string::npos;
+            bool wantBright = t.filter.find("ImageTooBright") != std::string::npos;
             std::vector<std::pair<std::string, std::string>> topics;
             if (wantMotion) topics.push_back({echoTopic(t.filter, "MotionAlarm", "tns1:VideoSource/tns1:MotionAlarm"), "false"});
             if (wantGSC)    topics.push_back({echoTopic(t.filter, "GlobalSceneChange", "tns1:VideoSource/tns1:GlobalSceneChange"), "false"});
-            if (wantBlurry) topics.push_back({echoTopic(t.filter, "ImageTooBlurry", "tns1:VideoSource/tns1:ImageTooBlurry"), "false"});
-            if (wantDark)   topics.push_back({echoTopic(t.filter, "ImageTooDark", "tns1:VideoSource/tns1:ImageTooDark"), "false"});
-            if (wantBright) topics.push_back({echoTopic(t.filter, "ImageTooBright", "tns1:VideoSource/tns1:ImageTooBright"), "false"});
+            if (wantBlurry) topics.push_back({echoTopic(t.filter, "ImageTooBlurry", "tns1:VideoSource/ImageTooBlurry/ImagingService"), "false"});
+            if (wantDark)   topics.push_back({echoTopic(t.filter, "ImageTooDark", "tns1:VideoSource/ImageTooDark/ImagingService"), "false"});
+            if (wantBright) topics.push_back({echoTopic(t.filter, "ImageTooBright", "tns1:VideoSource/ImageTooBright/ImagingService"), "false"});
             if (topics.empty()) continue;
 
             // EVENT-2-1-25/27: tool subscribe rồi Unsubscribe rất nhanh (~2s)
