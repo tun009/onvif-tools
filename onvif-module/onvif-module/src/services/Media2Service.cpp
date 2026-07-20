@@ -219,8 +219,34 @@ int Media2Service::GetProfiles(
                     vec->Quality = 50.0f;
                     vec->Resolution = soap_new_tt__VideoResolution2(soap);
                     if (vec->Resolution) {
-                        vec->Resolution->Width  = fp ? fp->videoConfig.resolution.width  : 1920;
-                        vec->Resolution->Height = fp ? fp->videoConfig.resolution.height : 1080;
+                        // MEDIA2-2-3-3 (consistency): resolution nhúng ở đây PHẢI
+                        // khớp GetVideoEncoderConfigurationOptions. Đọc backend fresh
+                        // theo token (giống hệt Options) thay vì snapshot fp — tránh
+                        // lệch khi state thay đổi giữa 2 lần đọc.
+                        int rw = fp ? fp->videoConfig.resolution.width  : 1920;
+                        int rh = fp ? fp->videoConfig.resolution.height : 1080;
+                        std::string beProf;
+                        if (vec->token == "video_encoder_config_profile_sub1" || e.token == "profile_sub1")
+                            beProf = "profile_sub1";
+                        else if (vec->token == "video_encoder_config_profile_sub2" || e.token == "profile_sub2")
+                            beProf = "profile_sub2";
+                        else if (vec->token == "video_encoder_config" || e.token == "profile_main")
+                            beProf = "profile_main";
+                        if (!beProf.empty() && backend_) {
+                            try {
+                                for (const auto& bp : backend_->getProfiles()) {
+                                    if (bp.token != beProf) continue;
+                                    if (bp.videoConfig.resolution.width > 0 &&
+                                        bp.videoConfig.resolution.height > 0) {
+                                        rw = bp.videoConfig.resolution.width;
+                                        rh = bp.videoConfig.resolution.height;
+                                    }
+                                    break;
+                                }
+                            } catch (...) {}
+                        }
+                        vec->Resolution->Width  = rw;
+                        vec->Resolution->Height = rh;
                     }
                     vec->RateControl = soap_new_tt__VideoRateControl2(soap);
                     if (vec->RateControl) {
