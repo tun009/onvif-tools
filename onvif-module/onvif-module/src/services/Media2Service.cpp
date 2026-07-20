@@ -33,6 +33,28 @@ static std::mutex g_profMtx;
 static std::map<std::string, DynProfile> g_dynProfiles;
 static std::map<std::string, std::set<std::string>> g_removedConfigs;
 static std::set<std::string> g_deletedFixedTokens;
+
+// ── Persist config do Set* (MEDIA2-2-2-5 / 2-3-4) ──────────────────────────
+// Lưu các field DTT set, echo lại ở Get* CHỈ khi request không kèm ProfileToken
+// (đúng pattern compare: "Get [ConfigurationToken=..., no ProfileToken]"). Query
+// có ProfileToken (các test khác đang pass) vẫn dùng default → không regression.
+struct VSCOverride {
+    bool has = false;
+    std::string name;
+    bool hasBounds = false; int x = 0, y = 0, w = 0, h = 0;
+};
+struct VECOverride {
+    bool has = false;
+    std::string name;
+    bool hasEncoding = false; std::string encoding;
+    bool hasQuality = false;  float quality = 0;
+    bool hasRes = false;      int w = 0, h = 0;
+    bool hasRate = false;     float framerate = 0; int bitrate = 0;
+    bool hasGov = false;      int gov = 0;
+    bool hasProfile = false;  std::string profile;
+};
+static std::map<std::string, VSCOverride> g_vscOverride;
+static std::map<std::string, VECOverride> g_vecOverride;
 }
 
 // Forward declaration — định nghĩa cuối file. Cần cho các op gọi fault sớm.
@@ -477,6 +499,20 @@ int Media2Service::GetVideoSourceConfigurations(
                 vsc->Bounds->height = 1080;
             }
         }
+        // MEDIA2-2-2-5: nếu đã SetVideoSourceConfiguration và query KHÔNG kèm
+        // ProfileToken → echo lại field đã set (Name/Bounds).
+        if (profToken.empty()) {
+            std::lock_guard<std::mutex> lk(g_profMtx);
+            auto it = g_vscOverride.find(VALID_VS_CONFIG);
+            if (it != g_vscOverride.end() && it->second.has) {
+                const auto& ov = it->second;
+                if (!ov.name.empty()) vsc->Name = ov.name;
+                if (ov.hasBounds && vsc->Bounds) {
+                    vsc->Bounds->x = ov.x; vsc->Bounds->y = ov.y;
+                    vsc->Bounds->width = ov.w; vsc->Bounds->height = ov.h;
+                }
+            }
+        }
         resp.Configurations.push_back(vsc);
     }
 
@@ -620,6 +656,40 @@ int Media2Service::GetVideoEncoderConfigurations(
             if (c && c->token == "video_encoder_config_spare") { spareAlready = true; break; }
         if (!spareAlready) {
             addDefaultEncoderConfig("video_encoder_config_spare", "VideoEncoderConfigSpare");
+        }
+    }
+
+    // MEDIA2-2-3-4: nếu đã SetVideoEncoderConfiguration và query KHÔNG kèm
+    // ProfileToken → echo lại field đã set cho config token tương ứng.
+    if (filterProfileToken.empty()) {
+        std::lock_guard<std::mutex> lk(g_profMtx);
+        for (auto* enc : resp.Configurations) {
+            if (!enc) continue;
+            auto it = g_vecOverride.find(enc->token);
+            if (it == g_vecOverride.end() || !it->second.has) continue;
+            const auto& ov = it->second;
+            if (!ov.name.empty())    enc->Name = ov.name;
+            if (ov.hasEncoding)      enc->Encoding = ov.encoding;
+            if (ov.hasQuality)       enc->Quality = ov.quality;
+            if (ov.hasRes) {
+                if (!enc->Resolution) enc->Resolution = soap_new_tt__VideoResolution2(soap);
+                if (enc->Resolution) { enc->Resolution->Width = ov.w; enc->Resolution->Height = ov.h; }
+            }
+            if (ov.hasRate) {
+                if (!enc->RateControl) enc->RateControl = soap_new_tt__VideoRateControl2(soap);
+                if (enc->RateControl) {
+                    enc->RateControl->FrameRateLimit = ov.framerate;
+                    enc->RateControl->BitrateLimit = ov.bitrate;
+                }
+            }
+            if (ov.hasGov) {
+                if (!enc->GovLength) enc->GovLength = (int*)soap_malloc(soap, sizeof(int));
+                if (enc->GovLength) *enc->GovLength = ov.gov;
+            }
+            if (ov.hasProfile) {
+                if (!enc->Profile) enc->Profile = soap_new_std__string(soap);
+                if (enc->Profile) *enc->Profile = ov.profile;
+            }
         }
     }
 
@@ -881,12 +951,24 @@ int Media2Service::SetVideoSourceConfiguration(
     }
     this->soap->header = nullptr;
     std::cout << "[Media2Service] SetVideoSourceConfiguration called" << std::endl;
-    // MEDIA2-2-2-5: phát ConfigurationChanged (Type=VideoSource) cho subscriber.
-    {
-        std::string tok = (req && req->Configuration) ? req->Configuration->token
-                                                       : std::string("video_source_config");
-        MockSubscriptionManager::getInstance().fireConfigurationChanged(tok, "VideoSource");
+    std::string tok = (req && req->Configuration) ? req->Configuration->token
+                                                   : std::string("video_source_config");
+    // MEDIA2-2-2-5: lưu field đã set để GetVideoSourceConfigurations echo lại.
+    if (req && req->Configuration) {
+        auto* cfg = req->Configuration;
+        VSCOverride ov;
+        ov.has = true;
+        ov.name = cfg->Name;
+        if (cfg->Bounds) {
+            ov.hasBounds = true;
+            ov.x = cfg->Bounds->x; ov.y = cfg->Bounds->y;
+            ov.w = cfg->Bounds->width; ov.h = cfg->Bounds->height;
+        }
+        std::lock_guard<std::mutex> lk(g_profMtx);
+        g_vscOverride[tok] = ov;
     }
+    // MEDIA2-2-2-5: phát ConfigurationChanged (Type=VideoSource) cho subscriber.
+    MockSubscriptionManager::getInstance().fireConfigurationChanged(tok, "VideoSource");
     return SOAP_OK;
 }
 
@@ -962,6 +1044,26 @@ int Media2Service::SetVideoEncoderConfiguration(
         return soap_receiver_fault(this->soap, "Backend error", nullptr);
     }
 
+    // MEDIA2-2-3-4: lưu field đã set để GetVideoEncoderConfigurations echo lại.
+    {
+        VECOverride ov;
+        ov.has = true;
+        ov.name = newEnc->Name;
+        if (!newEnc->Encoding.empty()) { ov.hasEncoding = true; ov.encoding = newEnc->Encoding; }
+        ov.hasQuality = true; ov.quality = newEnc->Quality;
+        if (newEnc->Resolution) {
+            ov.hasRes = true; ov.w = newEnc->Resolution->Width; ov.h = newEnc->Resolution->Height;
+        }
+        if (newEnc->RateControl) {
+            ov.hasRate = true;
+            ov.framerate = newEnc->RateControl->FrameRateLimit;
+            ov.bitrate = newEnc->RateControl->BitrateLimit;
+        }
+        if (newEnc->GovLength) { ov.hasGov = true; ov.gov = *newEnc->GovLength; }
+        if (newEnc->Profile)   { ov.hasProfile = true; ov.profile = *newEnc->Profile; }
+        std::lock_guard<std::mutex> lk(g_profMtx);
+        g_vecOverride[configToken] = ov;
+    }
     // MEDIA2-2-3-4: phát ConfigurationChanged (Token=<cfg>, Type=VideoEncoder).
     MockSubscriptionManager::getInstance().fireConfigurationChanged(configToken, "VideoEncoder");
     return SOAP_OK;
