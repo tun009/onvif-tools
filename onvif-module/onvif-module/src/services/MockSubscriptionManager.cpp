@@ -436,9 +436,10 @@ std::string MockSubscriptionManager::handlePullMessages(const std::string& subId
     bool emitConfigurationChanged = wantAll || subtreeMedia ||
                                     filter.find("ConfigurationChanged") != std::string::npos;
 
-    // Helper phát 1 NotificationMessage. Topic path phải đầy đủ prefix trên
-    // MỌI segment: `tns1:VideoSource/tns1:MotionAlarm` (không phải
-    // `tns1:VideoSource/MotionAlarm`) — EVENT-3-1-16 tool validate strict.
+    // Topic path dạng canonical ONVIF: CHỈ prefix ở segment gốc
+    // (`tns1:VideoSource/MotionAlarm`), KHÔNG prefix mọi segment. DTT khớp topic
+    // notification với filter theo dạng này (IMAGING-4-1-5 reject dạng
+    // `tns1:VideoSource/tns1:MotionAlarm`). Verify không regress EVENT-3-1-16.
     std::string now = getXmlUtcTime(0);
     auto emit = [&](std::ostringstream& b, const char* topicPath,
                     const char* srcVal, const char* stateVal) {
@@ -462,10 +463,10 @@ std::string MockSubscriptionManager::handlePullMessages(const std::string& subId
     // pullCount để mọi topic đều được nhận (EVENT-3-1-33/35). Nếu msgLimit>=2
     // trả cả 2 luôn.
     std::vector<std::pair<const char*, const char*>> matched;
-    if (emitMotion) matched.push_back({"tns1:VideoSource/tns1:MotionAlarm",       "false"});
-    if (emitGSC)    matched.push_back({"tns1:VideoSource/tns1:GlobalSceneChange", "false"});
-    if (emitProfileChanged) matched.push_back({"tns1:Media/tns1:ProfileChanged", "true"});
-    if (emitConfigurationChanged) matched.push_back({"tns1:Media/tns1:ConfigurationChanged", "true"});
+    if (emitMotion) matched.push_back({"tns1:VideoSource/MotionAlarm",       "false"});
+    if (emitGSC)    matched.push_back({"tns1:VideoSource/GlobalSceneChange", "false"});
+    if (emitProfileChanged) matched.push_back({"tns1:Media/ProfileChanged", "true"});
+    if (emitConfigurationChanged) matched.push_back({"tns1:Media/ConfigurationChanged", "true"});
 
     std::ostringstream body;
     body << "<tev:PullMessagesResponse>"
@@ -593,8 +594,8 @@ void MockSubscriptionManager::notifyPushLoop() {
             bool wantGSC = wantAll || subtreeVS ||
                            t.filter.find("GlobalSceneChange") != std::string::npos;
             std::vector<std::pair<const char*, const char*>> topics;
-            if (wantMotion) topics.push_back({"tns1:VideoSource/tns1:MotionAlarm", "false"});
-            if (wantGSC)    topics.push_back({"tns1:VideoSource/tns1:GlobalSceneChange", "false"});
+            if (wantMotion) topics.push_back({"tns1:VideoSource/MotionAlarm", "false"});
+            if (wantGSC)    topics.push_back({"tns1:VideoSource/GlobalSceneChange", "false"});
             if (topics.empty()) continue;
 
             // EVENT-2-1-25/27: tool subscribe rồi Unsubscribe rất nhanh (~2s)
