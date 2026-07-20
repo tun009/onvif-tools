@@ -277,8 +277,9 @@ std::string MockSubscriptionManager::handleGetEventProperties(const std::string&
         // Mỗi topic leaf kèm <tt:MessageDescription> để DTT Preliminary Check
         // xác định feature = SUPPORTED (không có MessageDescription → NOT SUPPORTED
         // dù topic tồn tại). tt:/xs: đã khai trong envelope wrap.
-        // KHÔNG khai tampering (ImageTooBlurry/Dark/Bright): thiết bị pass M+T (HALO)
-        // không khai → tránh bị DTT đòi tampering hoạt động (Profile T errata).
+        // Tampering (ImageTooBlurry/Dark/Bright) + GlobalSceneChange: Profile T
+        // §7.6 yêu cầu ≥1 trong 4 event này supported (nếu tất cả unsupported →
+        // Profile T FAILED). Khai đủ 4 (property event như MotionAlarm).
         // WS-Topics: CHỈ node gốc (VideoSource/Media) mang prefix tns1:; topic con
         // để KHÔNG prefix (đối chiếu topicset thiết bị thật). Prefix ở leaf khiến
         // DTT dựng sai topic-path → không nhận ra topic nào → tất cả event NOT SUPPORTED.
@@ -296,6 +297,24 @@ std::string MockSubscriptionManager::handleGetEventProperties(const std::string&
                 "<tt:Data><tt:SimpleItemDescription Name=\"State\" Type=\"xs:boolean\"/></tt:Data>"
               "</tt:MessageDescription>"
             "</GlobalSceneChange>"
+            "<ImageTooBlurry wstop:topic=\"true\">"
+              "<tt:MessageDescription IsProperty=\"true\">"
+                "<tt:Source><tt:SimpleItemDescription Name=\"Source\" Type=\"tt:ReferenceToken\"/></tt:Source>"
+                "<tt:Data><tt:SimpleItemDescription Name=\"State\" Type=\"xs:boolean\"/></tt:Data>"
+              "</tt:MessageDescription>"
+            "</ImageTooBlurry>"
+            "<ImageTooDark wstop:topic=\"true\">"
+              "<tt:MessageDescription IsProperty=\"true\">"
+                "<tt:Source><tt:SimpleItemDescription Name=\"Source\" Type=\"tt:ReferenceToken\"/></tt:Source>"
+                "<tt:Data><tt:SimpleItemDescription Name=\"State\" Type=\"xs:boolean\"/></tt:Data>"
+              "</tt:MessageDescription>"
+            "</ImageTooDark>"
+            "<ImageTooBright wstop:topic=\"true\">"
+              "<tt:MessageDescription IsProperty=\"true\">"
+                "<tt:Source><tt:SimpleItemDescription Name=\"Source\" Type=\"tt:ReferenceToken\"/></tt:Source>"
+                "<tt:Data><tt:SimpleItemDescription Name=\"State\" Type=\"xs:boolean\"/></tt:Data>"
+              "</tt:MessageDescription>"
+            "</ImageTooBright>"
           "</tns1:VideoSource>"
           // Profile M/T mandatory Media event topics.
           "<tns1:Media>"
