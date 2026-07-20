@@ -767,20 +767,11 @@ int Media2Service::GetVideoEncoderConfigurationOptions(
         // DTT 24.12 may send the profile display token (for example
         // "profile_Main 4K") instead of the backend token. ConfigurationToken
         // is the stable Media2 identifier, so use it as the primary mapping.
-        // ConfigurationToken is authoritative when it is present.  DTT may
-        // include ProfileToken as context, but allowing that field to override
-        // the configuration token makes the same Options request return
-        // different results as profiles are reconfigured.
-        const std::string effectiveConfigToken = configToken.empty()
-            ? (profileToken == "profile_sub1"
-                ? "video_encoder_config_profile_sub1"
-                : profileToken == "profile_sub2"
-                    ? "video_encoder_config_profile_sub2"
-                    : "video_encoder_config")
-            : configToken;
-        const bool isSpare = effectiveConfigToken == "video_encoder_config_spare";
-        const bool isSub1 = effectiveConfigToken == "video_encoder_config_profile_sub1";
-        const bool isSub2 = effectiveConfigToken == "video_encoder_config_profile_sub2";
+        const bool isSpare = configToken == "video_encoder_config_spare";
+        const bool isSub1 = configToken == "video_encoder_config_profile_sub1" ||
+                            profileToken == "profile_sub1";
+        const bool isSub2 = configToken == "video_encoder_config_profile_sub2" ||
+                            profileToken == "profile_sub2";
         if (isSpare || isSub1) {
             // Keep this aligned with MockCameraBackend::buildProfiles().
             // profile_sub1 is the 1080p stream, not 720p.
@@ -831,15 +822,9 @@ int Media2Service::GetVideoEncoderConfigurationOptions(
     // Keep options aligned with the configuration registry. The sub2 stream is
     // H.265 in the backend; advertising H.264 for that token makes DTT reject
     // the profile/configuration consistency check before streaming starts.
-    const std::string effectiveConfigToken = configToken.empty()
-        ? (profileToken == "profile_sub2"
-            ? "video_encoder_config_profile_sub2"
-            : profileToken == "profile_sub1"
-                ? "video_encoder_config_profile_sub1"
-                : "video_encoder_config")
-        : configToken;
     const std::string optionCodec =
-        effectiveConfigToken == "video_encoder_config_profile_sub2" ? "H265" : "H264";
+        (configToken == "video_encoder_config_profile_sub2" ||
+         profileToken == "profile_sub2") ? "H265" : "H264";
     auto option = createOption(optionCodec);
     if (option) resp.Options.push_back(option);
 
