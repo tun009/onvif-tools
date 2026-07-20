@@ -10,6 +10,7 @@
 
 #include <string>
 #include <map>
+#include <vector>
 #include <mutex>
 #include <chrono>
 #include <atomic>
