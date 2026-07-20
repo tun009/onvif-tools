@@ -386,6 +386,34 @@ std::string MockSubscriptionManager::handleCreateSubscription(const std::string&
     return wrapEnvelope(ACT_CREATE, rel, body.str());
 }
 
+// Phát topic notification ĐÚNG DẠNG client dùng trong subscription filter.
+// DTT so sánh chuỗi topic notification với filter của nó: EVENT-3-1-x dùng
+// `tns1:VideoSource/tns1:MotionAlarm` (prefix mọi segment), IMAGING-4-1-5 dùng
+// `tns1:VideoSource/MotionAlarm` (single). Không thể hardcode 1 dạng → echo lại
+// đúng segment trong filter. Filter có thể là `A|B` (conjunction). Không tìm
+// thấy (subtree/wildcard) → fallback dạng double (các test subtree là EVENT-era).
+static std::string echoTopic(const std::string& filter,
+                             const std::string& localName,
+                             const std::string& fallback) {
+    std::size_t start = 0;
+    while (start <= filter.size()) {
+        std::size_t bar = filter.find('|', start);
+        std::string seg = (bar == std::string::npos)
+                        ? filter.substr(start) : filter.substr(start, bar - start);
+        std::size_t a = seg.find_first_not_of(" \t\r\n");
+        std::size_t b = seg.find_last_not_of(" \t\r\n");
+        if (a != std::string::npos) seg = seg.substr(a, b - a + 1);
+        std::size_t slash = seg.rfind('/');
+        std::string last = (slash == std::string::npos) ? seg : seg.substr(slash + 1);
+        std::size_t colon = last.rfind(':');
+        std::string lastLocal = (colon == std::string::npos) ? last : last.substr(colon + 1);
+        if (lastLocal == localName && !seg.empty()) return seg;
+        if (bar == std::string::npos) break;
+        start = bar + 1;
+    }
+    return fallback;
+}
+
 // ── PullMessages ────────────────────────────────────────────────────────────
 std::string MockSubscriptionManager::handlePullMessages(const std::string& subId,
                                                         const std::string& req) {
@@ -462,11 +490,11 @@ std::string MockSubscriptionManager::handlePullMessages(const std::string& subId
     // Round-robin: khi msgLimit=1 và filter match nhiều topic → luân phiên theo
     // pullCount để mọi topic đều được nhận (EVENT-3-1-33/35). Nếu msgLimit>=2
     // trả cả 2 luôn.
-    std::vector<std::pair<const char*, const char*>> matched;
-    if (emitMotion) matched.push_back({"tns1:VideoSource/MotionAlarm",       "false"});
-    if (emitGSC)    matched.push_back({"tns1:VideoSource/GlobalSceneChange", "false"});
-    if (emitProfileChanged) matched.push_back({"tns1:Media/ProfileChanged", "true"});
-    if (emitConfigurationChanged) matched.push_back({"tns1:Media/ConfigurationChanged", "true"});
+    std::vector<std::pair<std::string, std::string>> matched;
+    if (emitMotion) matched.push_back({echoTopic(filter, "MotionAlarm", "tns1:VideoSource/tns1:MotionAlarm"), "false"});
+    if (emitGSC)    matched.push_back({echoTopic(filter, "GlobalSceneChange", "tns1:VideoSource/tns1:GlobalSceneChange"), "false"});
+    if (emitProfileChanged) matched.push_back({echoTopic(filter, "ProfileChanged", "tns1:Media/tns1:ProfileChanged"), "true"});
+    if (emitConfigurationChanged) matched.push_back({echoTopic(filter, "ConfigurationChanged", "tns1:Media/tns1:ConfigurationChanged"), "true"});
 
     std::ostringstream body;
     body << "<tev:PullMessagesResponse>"
@@ -477,7 +505,7 @@ std::string MockSubscriptionManager::handlePullMessages(const std::string& subId
         size_t start = pullNo % matched.size();
         for (size_t i = 0; i < matched.size() && emitted < msgLimit; ++i) {
             const auto& m = matched[(start + i) % matched.size()];
-            emit(body, m.first, "VideoSourceToken", m.second);
+            emit(body, m.first.c_str(), "VideoSourceToken", m.second.c_str());
             ++emitted;
         }
     }
@@ -593,9 +621,9 @@ void MockSubscriptionManager::notifyPushLoop() {
                               t.filter.find("MotionAlarm") != std::string::npos;
             bool wantGSC = wantAll || subtreeVS ||
                            t.filter.find("GlobalSceneChange") != std::string::npos;
-            std::vector<std::pair<const char*, const char*>> topics;
-            if (wantMotion) topics.push_back({"tns1:VideoSource/MotionAlarm", "false"});
-            if (wantGSC)    topics.push_back({"tns1:VideoSource/GlobalSceneChange", "false"});
+            std::vector<std::pair<std::string, std::string>> topics;
+            if (wantMotion) topics.push_back({echoTopic(t.filter, "MotionAlarm", "tns1:VideoSource/tns1:MotionAlarm"), "false"});
+            if (wantGSC)    topics.push_back({echoTopic(t.filter, "GlobalSceneChange", "tns1:VideoSource/tns1:GlobalSceneChange"), "false"});
             if (topics.empty()) continue;
 
             // EVENT-2-1-25/27: tool subscribe rồi Unsubscribe rất nhanh (~2s)
