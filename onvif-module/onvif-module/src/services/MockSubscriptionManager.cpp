@@ -279,37 +279,39 @@ std::string MockSubscriptionManager::handleGetEventProperties(const std::string&
         // dù topic tồn tại). tt:/xs: đã khai trong envelope wrap.
         // KHÔNG khai tampering (ImageTooBlurry/Dark/Bright): thiết bị pass M+T (HALO)
         // không khai → tránh bị DTT đòi tampering hoạt động (Profile T errata).
+        // WS-Topics: CHỈ node gốc (VideoSource/Media) mang prefix tns1:; topic con
+        // để KHÔNG prefix (đối chiếu topicset thiết bị thật). Prefix ở leaf khiến
+        // DTT dựng sai topic-path → không nhận ra topic nào → tất cả event NOT SUPPORTED.
         "<wstop:TopicSet>"
           "<tns1:VideoSource>"
-            "<tns1:MotionAlarm wstop:topic=\"true\">"
+            "<MotionAlarm wstop:topic=\"true\">"
               "<tt:MessageDescription IsProperty=\"true\">"
                 "<tt:Source><tt:SimpleItemDescription Name=\"Source\" Type=\"tt:ReferenceToken\"/></tt:Source>"
                 "<tt:Data><tt:SimpleItemDescription Name=\"State\" Type=\"xs:boolean\"/></tt:Data>"
               "</tt:MessageDescription>"
-            "</tns1:MotionAlarm>"
-            "<tns1:GlobalSceneChange wstop:topic=\"true\">"
+            "</MotionAlarm>"
+            "<GlobalSceneChange wstop:topic=\"true\">"
               "<tt:MessageDescription IsProperty=\"true\">"
                 "<tt:Source><tt:SimpleItemDescription Name=\"Source\" Type=\"tt:ReferenceToken\"/></tt:Source>"
                 "<tt:Data><tt:SimpleItemDescription Name=\"State\" Type=\"xs:boolean\"/></tt:Data>"
               "</tt:MessageDescription>"
-            "</tns1:GlobalSceneChange>"
+            "</GlobalSceneChange>"
           "</tns1:VideoSource>"
           // Profile M/T mandatory Media event topics.
           "<tns1:Media>"
-            // Chuẩn ONVIF: Token/Type nằm trong <tt:Source>, KHÔNG phải <tt:Data>.
-            "<tns1:ProfileChanged wstop:topic=\"true\">"
+            "<ProfileChanged wstop:topic=\"true\">"
               "<tt:MessageDescription IsProperty=\"false\">"
                 "<tt:Source><tt:SimpleItemDescription Name=\"Token\" Type=\"tt:ReferenceToken\"/></tt:Source>"
               "</tt:MessageDescription>"
-            "</tns1:ProfileChanged>"
-            "<tns1:ConfigurationChanged wstop:topic=\"true\">"
+            "</ProfileChanged>"
+            "<ConfigurationChanged wstop:topic=\"true\">"
               "<tt:MessageDescription IsProperty=\"false\">"
                 "<tt:Source>"
                   "<tt:SimpleItemDescription Name=\"Token\" Type=\"tt:ReferenceToken\"/>"
                   "<tt:SimpleItemDescription Name=\"Type\" Type=\"xs:string\"/>"
                 "</tt:Source>"
               "</tt:MessageDescription>"
-            "</tns1:ConfigurationChanged>"
+            "</ConfigurationChanged>"
           "</tns1:Media>"
         "</wstop:TopicSet>"
         "<wsnt:TopicExpressionDialect>http://www.onvif.org/ver10/tev/topicExpression/ConcreteSet</wsnt:TopicExpressionDialect>"
