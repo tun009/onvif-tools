@@ -17,6 +17,7 @@
 #include <iostream>
 #include <cstring>
 #include <string>
+#include <thread>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -24,6 +25,8 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
+#include <poll.h>
 #include <fcntl.h>
 #endif
 
@@ -67,6 +70,63 @@ static const unsigned char JPEG_STUB_BYTES[] = {
     0x11,0x00,0x3f,0x00,0x8b,0x01,0x28,0xdf,0xc0,0x00,0x00,0x00,
     0x01,0xff,0xd9
 };
+
+#ifndef _WIN32
+// ── RTSP-over-HTTP tunnel (Apple) proxy ───────────────────────────────────────
+// MEDIA2_RTSS-1-1-2 / 4-1-2: DTT mở 2 kết nối HTTP tới path stream trên CÙNG
+// cổng web service (8080) — GET (kênh server→client) + POST (kênh client→
+// server, RTSP base64) — header `x-rtsp-tunnelled`. gSOAP không tunnel được.
+// Relay gortsplib ở 127.0.0.1:8555 xử lý đúng chuẩn (đã verify: Media1 HTTP
+// streaming pass + script tunnel GET/POST chạy OK) và correlate 2 kênh theo
+// x-sessioncookie. Ta chỉ RAW-PROXY 2 chiều byte giữa client ↔ 8555, mỗi kết
+// nối 1 thread detached (listenLoop serial — tunnel sống lâu, không được block).
+static void proxyRtspHttpTunnel(int clientFd) {
+    int relay = ::socket(AF_INET, SOCK_STREAM, 0);
+    if (relay < 0) { ::close(clientFd); return; }
+    struct sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(8555);
+    inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+    if (::connect(relay, (struct sockaddr*)&addr, sizeof(addr)) != 0) {
+        ::close(relay); ::close(clientFd); return;
+    }
+    struct pollfd fds[2];
+    fds[0].fd = clientFd;
+    fds[1].fd = relay;
+    char buf[16384];
+    bool alive = true;
+    while (alive) {
+        fds[0].events = fds[1].events = POLLIN;
+        fds[0].revents = fds[1].revents = 0;
+        int pr = ::poll(fds, 2, 120000);   // 120s idle → đóng
+        if (pr <= 0) break;
+        // client → relay
+        if (fds[0].revents & POLLIN) {
+            ssize_t n = ::recv(clientFd, buf, sizeof(buf), 0);
+            if (n <= 0) break;
+            for (ssize_t off = 0; off < n; ) {
+                ssize_t w = ::send(relay, buf + off, n - off, MSG_NOSIGNAL);
+                if (w <= 0) { alive = false; break; }
+                off += w;
+            }
+        }
+        // relay → client
+        if (alive && (fds[1].revents & POLLIN)) {
+            ssize_t n = ::recv(relay, buf, sizeof(buf), 0);
+            if (n <= 0) break;
+            for (ssize_t off = 0; off < n; ) {
+                ssize_t w = ::send(clientFd, buf + off, n - off, MSG_NOSIGNAL);
+                if (w <= 0) { alive = false; break; }
+                off += w;
+            }
+        }
+        // Chỉ đóng khi lỗi/hangup thực sự (không đóng vì kênh kia im lặng).
+        if ((fds[0].revents | fds[1].revents) & (POLLERR | POLLNVAL)) break;
+    }
+    ::close(relay);
+    ::close(clientFd);
+}
+#endif
 
 // gSOAP HTTP GET handler — được gọi tự động khi request là "GET /..." thay vì POST.
 // Thay cho peek trước soap_begin_serve (timing không tin cậy, tool nhận 405).
@@ -251,7 +311,42 @@ void OnvifServer::listenLoop() {
             break;
         }
 
-
+#ifndef _WIN32
+        // ── RTSP-over-HTTP tunnel: chuyển hướng TRƯỚC gSOAP ──────────────────
+        // Chờ dữ liệu tới (poll ngắn) rồi MSG_PEEK (KHÔNG tiêu thụ). CHỈ chuyển
+        // hướng request tunnel (GET/POST + path stream + header x-rtsp-tunnelled)
+        // sang relay 8555. Mọi request khác (SOAP, /snapshot) rơi xuống gSOAP với
+        // socket buffer nguyên vẹn → tuyệt đối không ảnh hưởng case đang pass.
+        {
+            struct pollfd pfd{clientSocket, POLLIN, 0};
+            if (::poll(&pfd, 1, 3000) > 0 && (pfd.revents & POLLIN)) {
+                char peek[2048];
+                ssize_t pn = ::recv(clientSocket, peek, sizeof(peek) - 1, MSG_PEEK);
+                if (pn > 0) {
+                    std::string h(peek, static_cast<size_t>(pn));
+                    // request-line: "GET /path ..." hoặc "POST /path ..."
+                    bool isGet = h.rfind("GET ", 0) == 0;
+                    bool isPost = h.rfind("POST ", 0) == 0;
+                    // path stream (bỏ /onvif/*, /snapshot, /subscription...)
+                    bool streamPath =
+                        h.find(" /main")     != std::string::npos ||
+                        h.find(" /sub1")     != std::string::npos ||
+                        h.find(" /sub2")     != std::string::npos ||
+                        h.find(" /jpeg")     != std::string::npos ||
+                        h.find(" /metadata") != std::string::npos;
+                    bool tunnelled = h.find("x-rtsp-tunnelled") != std::string::npos;
+                    if ((isGet || isPost) && streamPath && tunnelled) {
+                        std::cout << "[OnvifServer] RTSP-over-HTTP tunnel → 8555"
+                                  << std::endl;
+                        soap->socket = SOAP_INVALID_SOCKET;  // gSOAP nhả socket
+                        std::thread(proxyRtspHttpTunnel,
+                                    static_cast<int>(clientSocket)).detach();
+                        continue;  // thread sở hữu socket; KHÔNG soap_begin_serve
+                    }
+                }
+            }
+        }
+#endif
 
         // ── Khởi tạo các Service trước để tránh constructor reset state của soap context ────────────────
         DeviceService deviceSvc(soap, cfg_, backend_);
