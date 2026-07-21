@@ -37,7 +37,8 @@ std::string actUrl(const char* op) {
 // kill old ffmpeg + spawn new (~3-5s). Cần OperationDelay >= 5000ms trong tool.
 static void patchMediamtxPath(const std::string& pathName,
                                const std::string& encoding,
-                               int width, int height, int fps) {
+                               int width, int height, int fps,
+                               int bitrateBps = 0) {
 #ifdef __linux__
     if (pathName.empty() || width <= 0 || height <= 0 || fps <= 0) return;
     std::ostringstream cmd;
@@ -47,6 +48,13 @@ static void patchMediamtxPath(const std::string& pathName,
         cmd << "-c:v mjpeg -huffman default -pix_fmt yuvj420p -q:v 5 ";
     } else {
         cmd << "-c:v libx264 -preset ultrafast -tune zerolatency ";
+        // bitrateBps > 0: cap CBR (dùng cho /main để tunnel nhẹ + đồng bộ cap
+        // mediamtx.yml). = 0: giữ nguyên hành vi cũ (jpeg/sub2, không đụng).
+        if (bitrateBps > 0) {
+            cmd << "-b:v " << bitrateBps << " -maxrate " << bitrateBps
+                << " -bufsize " << bitrateBps << " -g " << fps
+                << " -pix_fmt yuv420p ";
+        }
     }
     cmd << "-f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/" << pathName;
     // Escape JSON string
@@ -81,7 +89,7 @@ static void patchMediamtxPath(const std::string& pathName,
     }
     ::close(sock);
 #else
-    (void)pathName; (void)encoding; (void)width; (void)height; (void)fps;
+    (void)pathName; (void)encoding; (void)width; (void)height; (void)fps; (void)bitrateBps;
 #endif
 }
 
@@ -842,14 +850,18 @@ std::string MediaLegacyHandler::handleSetVideoEncoderConfiguration(const std::st
     // restart the H.264 main path as MJPEG. JPEG is served by the dedicated
     // jpeg path, while H.264 remains on the corresponding video path.
     if (mtxEnc == "JPEG") mtxPath = "jpeg";
-    // CHỈ reconfigure stream cho jpeg/sub2. KHÔNG đụng main/sub1: chúng là stream
-    // mà các test streaming (MEDIA2_RTSS-1-1-2/4-1-2) đọc. Trong full run, test
-    // Media1 RESOLUTION (RTSS-1-1-24/25/26...) set fps thấp cho main/sub1 →
-    // patchMediamtxPath restart ffmpeg mediamtx ở fps thấp → stream kẹt fps thấp
-    // → streaming test SAU đói frame (fail phụ thuộc trình tự; verified: Set sub1
-    // fps=5 → /sub1 thành 5fps). Giữ main/sub1 ổn định default cho streaming.
-    // (jpeg giữ nguyên cho RTSS-1-1-46 JPEG RESOLUTION.)
-    if (mtxPath == "jpeg" || mtxPath == "sub2") {
+    if (mtxPath == "main") {
+        // RTSS-1-1-48 (H.264 RESOLUTION): đổi resolution /main thật để DTT verify
+        // (giống RTSS-1-1-46 JPEG đã pass). ÉP fps=30 + cap 2Mbps:
+        //  - fps=30 (bỏ qua fps client Set): DTT chỉ kiểm RESOLUTION, không có
+        //    test verify stream-fps → an toàn; tránh test set fps thấp (vd 5fps)
+        //    để lại → MEDIA2_RTSS-1-1-2/4-1-2 (stream /main SAU đó) đói frame.
+        //  - cap 2Mbps: giữ tunnel nhẹ (đồng bộ cap trong mediamtx.yml) → streaming
+        //    qua tunnel vẫn đủ frame dù /main ở resolution nào.
+        // Test tuần tự + RTSS-1-1-48 tự restore 4K ở cuối → /main về 4K trước khi
+        // MEDIA2_RTSS chạy. sub1 KHÔNG đụng (giữ ổn định). jpeg/sub2 giữ nguyên.
+        patchMediamtxPath("main", "H264", mtxW, mtxH, 30, 2000000);
+    } else if (mtxPath == "jpeg" || mtxPath == "sub2") {
         patchMediamtxPath(mtxPath, mtxEnc, mtxW, mtxH, mtxFps);
     }
     return "<trt:SetVideoEncoderConfigurationResponse/>";
