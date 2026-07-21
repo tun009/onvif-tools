@@ -37,7 +37,7 @@ private:
     // Video Encoder Config
     static std::string handleGetVideoEncoderConfigurations();
     static std::string handleGetVideoEncoderConfiguration(const std::string& req);
-    static std::string handleGetVideoEncoderConfigurationOptions();
+    static std::string handleGetVideoEncoderConfigurationOptions(const std::string& req);
     static std::string handleGetCompatibleVideoEncoderConfigurations();
     static std::string handleAddVideoEncoderConfiguration(const std::string& req);
     static std::string handleRemoveVideoEncoderConfiguration(const std::string& req);

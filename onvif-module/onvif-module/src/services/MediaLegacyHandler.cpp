@@ -705,8 +705,37 @@ std::string MediaLegacyHandler::handleGetVideoEncoderConfiguration(const std::st
     return os.str();
 }
 
-std::string MediaLegacyHandler::handleGetVideoEncoderConfigurationOptions() {
-    // Thêm JPEG option cho profile_jpeg tests + full resolution list.
+std::string MediaLegacyHandler::handleGetVideoEncoderConfigurationOptions(const std::string& req) {
+    // RTSS-1-1-48 (H.264 RESOLUTION) iterate qua MỌI H.264 encoder config
+    // (main/sub1/sub2), mỗi config PLAY rồi decode frame để verify highest/
+    // median/lowest resolution trong ResolutionsAvailable. Streaming stack:
+    //   - main: GetStreamUri route Option D → 4K (relay 8555/main), 720
+    //     (main720), 640 (main640) — pre-warmed stream riêng → cả 3 pass.
+    //   - sub1/sub2: KHÔNG có stream đa resolution; GetStreamUri → relay
+    //     8555/subX phục vụ ĐÚNG default (sub1=720, sub2=480, SDP cache trong
+    //     SPS, relay không rebuild được). Nếu options liệt kê 4K/1280/640 cho
+    //     subX → DTT test 4K/640 → relay vẫn trả default → mismatch → FAILED.
+    //
+    // Fix: options TRẢ THEO TOKEN. main giữ full list (Option D lo được các mức
+    // được test). sub1/sub2 chỉ quảng bá ĐÚNG 1 resolution = default thật của
+    // stream → highest=median=lowest → DTT chỉ test mức relay phục vụ được →
+    // PASS, và khớp GetVideoEncoderConfigurations (consistency). Không đụng main
+    // (đang pass) + không cần cascade stream sub1_4k/sub2_4k...
+    std::string h264Res;
+    if (req.find("sub2") != std::string::npos) {
+        h264Res = "<tt:ResolutionsAvailable><tt:Width>640</tt:Width><tt:Height>480</tt:Height></tt:ResolutionsAvailable>";
+    } else if (req.find("sub1") != std::string::npos) {
+        h264Res = "<tt:ResolutionsAvailable><tt:Width>1280</tt:Width><tt:Height>720</tt:Height></tt:ResolutionsAvailable>";
+    } else {
+        // main / no-token: full list. Option D phục vụ 4K/720/640 (mức DTT
+        // chọn làm highest/median/lowest). 1920 giữ để không đổi hành vi đang
+        // pass (không nằm trong highest/median/lowest nên không bị stream-test).
+        h264Res =
+            "<tt:ResolutionsAvailable><tt:Width>3840</tt:Width><tt:Height>2160</tt:Height></tt:ResolutionsAvailable>"
+            "<tt:ResolutionsAvailable><tt:Width>1920</tt:Width><tt:Height>1080</tt:Height></tt:ResolutionsAvailable>"
+            "<tt:ResolutionsAvailable><tt:Width>1280</tt:Width><tt:Height>720</tt:Height></tt:ResolutionsAvailable>"
+            "<tt:ResolutionsAvailable><tt:Width>640</tt:Width><tt:Height>480</tt:Height></tt:ResolutionsAvailable>";
+    }
     return
         "<trt:GetVideoEncoderConfigurationOptionsResponse>"
           "<trt:Options>"
@@ -719,14 +748,7 @@ std::string MediaLegacyHandler::handleGetVideoEncoderConfigurationOptions() {
               "<tt:EncodingIntervalRange><tt:Min>1</tt:Min><tt:Max>1</tt:Max></tt:EncodingIntervalRange>"
             "</tt:JPEG>"
             "<tt:H264>"
-              // Keep every currently exposed H264 profile resolution in the
-              // options response. DTT validates the current profile
-              // configuration against this list before it runs streaming
-              // checks.
-              "<tt:ResolutionsAvailable><tt:Width>3840</tt:Width><tt:Height>2160</tt:Height></tt:ResolutionsAvailable>"
-              "<tt:ResolutionsAvailable><tt:Width>1920</tt:Width><tt:Height>1080</tt:Height></tt:ResolutionsAvailable>"
-              "<tt:ResolutionsAvailable><tt:Width>1280</tt:Width><tt:Height>720</tt:Height></tt:ResolutionsAvailable>"
-              "<tt:ResolutionsAvailable><tt:Width>640</tt:Width><tt:Height>480</tt:Height></tt:ResolutionsAvailable>"
+              + h264Res +
               "<tt:GovLengthRange><tt:Min>1</tt:Min><tt:Max>60</tt:Max></tt:GovLengthRange>"
               "<tt:FrameRateRange><tt:Min>1</tt:Min><tt:Max>30</tt:Max></tt:FrameRateRange>"
               "<tt:EncodingIntervalRange><tt:Min>1</tt:Min><tt:Max>1</tt:Max></tt:EncodingIntervalRange>"
@@ -1024,7 +1046,7 @@ std::string MediaLegacyHandler::dispatch(const std::string& req) {
     if (req.find("GetGuaranteedNumberOfVideoEncoderInstances") != std::string::npos)
         return wrap(actUrl("GetGuaranteedNumberOfVideoEncoderInstances"), rel, handleGetGuaranteedNumberOfVideoEncoderInstances(req));
     if (req.find("GetVideoEncoderConfigurationOptions") != std::string::npos)
-        return wrap(actUrl("GetVideoEncoderConfigurationOptions"), rel, handleGetVideoEncoderConfigurationOptions());
+        return wrap(actUrl("GetVideoEncoderConfigurationOptions"), rel, handleGetVideoEncoderConfigurationOptions(req));
     if (req.find("GetCompatibleVideoEncoderConfigurations") != std::string::npos)
         return wrap(actUrl("GetCompatibleVideoEncoderConfigurations"), rel, handleGetCompatibleVideoEncoderConfigurations());
     if (req.find("GetVideoEncoderConfigurations") != std::string::npos)
