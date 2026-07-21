@@ -19,7 +19,7 @@ const char* METADATA_STREAM_PORT = "8555";
 // Video RTSP is served by the gortsplib relay, which also enforces RTSP
 // Digest authentication required by Profiles M and T.
 const char* RTSP_RELAY_PORT = "8555";
-const char* RTSP_HTTP_TUNNEL_PORT = "8080";
+const char* RTSP_HTTP_TUNNEL_PORT = "8555";
 
 struct DynProfile {
     std::string token;
