@@ -5,6 +5,8 @@
 
 #include <string>
 
+class ICameraBackend;  // fwd-decl: dùng để reconfigure stream publisher thật
+
 class MediaLegacyHandler {
 public:
     // Nhận diện request Media ver10 trong body; trả response XML nếu match,
@@ -12,6 +14,9 @@ public:
     static std::string dispatch(const std::string& rawRequest);
     // Đặt deviceIp + httpPort để build URL trong response (GetStreamUri...).
     static void setEndpoint(const std::string& ip, int port);
+    // Backend để reconfigure RTSP publisher /main khi Media1
+    // SetVideoEncoderConfiguration đổi resolution (RTSS-1-1-48). Có thể null.
+    static void setBackend(ICameraBackend* backend);
 
 private:
     // Discovery + info
