@@ -989,7 +989,32 @@ int Media2Service::SetVideoEncoderConfiguration(
 
     auto newEnc = req->Configuration;
     std::string configToken = newEnc->token;
-    
+
+    // MEDIA2-2-3-4: lưu field đã set (để GetVideoEncoderConfigurations echo lại)
+    // và phát ConfigurationChanged. Dùng chung cho mọi nhánh (kể cả spare).
+    auto persistAndNotify = [&]() {
+        VECOverride ov;
+        ov.has = true;
+        ov.name = newEnc->Name;
+        if (!newEnc->Encoding.empty()) { ov.hasEncoding = true; ov.encoding = newEnc->Encoding; }
+        ov.hasQuality = true; ov.quality = newEnc->Quality;
+        if (newEnc->Resolution) {
+            ov.hasRes = true; ov.w = newEnc->Resolution->Width; ov.h = newEnc->Resolution->Height;
+        }
+        if (newEnc->RateControl) {
+            ov.hasRate = true;
+            ov.framerate = newEnc->RateControl->FrameRateLimit;
+            ov.bitrate = newEnc->RateControl->BitrateLimit;
+        }
+        if (newEnc->GovLength) { ov.hasGov = true; ov.gov = *newEnc->GovLength; }
+        if (newEnc->Profile)   { ov.hasProfile = true; ov.profile = *newEnc->Profile; }
+        {
+            std::lock_guard<std::mutex> lk(g_profMtx);
+            g_vecOverride[configToken] = ov;
+        }
+        MockSubscriptionManager::getInstance().fireConfigurationChanged(configToken, "VideoEncoder");
+    };
+
     // Ánh xạ configToken về profileToken tương ứng
     std::string profileToken = "profile_main";
     if (configToken.find("profile_sub1") != std::string::npos) profileToken = "profile_sub1";
@@ -999,8 +1024,11 @@ int Media2Service::SetVideoEncoderConfiguration(
     // capability/configuration-pool entry, not an alias for profile_main.
     // Reconfiguring the main publisher while DTT validates the spare token
     // changes the active SDP and causes unrelated streaming regressions.
+    // Vẫn lưu override + phát ConfigurationChanged (MEDIA2-2-3-4 STEP 79 chờ
+    // notification + so sánh cho spare), chỉ KHÔNG đụng publisher backend.
     if (configToken == "video_encoder_config_spare") {
         std::cout << "[Media2Service] SetVideoEncoderConfiguration spare token accepted without publisher change" << std::endl;
+        persistAndNotify();
         return SOAP_OK;
     }
     
@@ -1044,28 +1072,8 @@ int Media2Service::SetVideoEncoderConfiguration(
         return soap_receiver_fault(this->soap, "Backend error", nullptr);
     }
 
-    // MEDIA2-2-3-4: lưu field đã set để GetVideoEncoderConfigurations echo lại.
-    {
-        VECOverride ov;
-        ov.has = true;
-        ov.name = newEnc->Name;
-        if (!newEnc->Encoding.empty()) { ov.hasEncoding = true; ov.encoding = newEnc->Encoding; }
-        ov.hasQuality = true; ov.quality = newEnc->Quality;
-        if (newEnc->Resolution) {
-            ov.hasRes = true; ov.w = newEnc->Resolution->Width; ov.h = newEnc->Resolution->Height;
-        }
-        if (newEnc->RateControl) {
-            ov.hasRate = true;
-            ov.framerate = newEnc->RateControl->FrameRateLimit;
-            ov.bitrate = newEnc->RateControl->BitrateLimit;
-        }
-        if (newEnc->GovLength) { ov.hasGov = true; ov.gov = *newEnc->GovLength; }
-        if (newEnc->Profile)   { ov.hasProfile = true; ov.profile = *newEnc->Profile; }
-        std::lock_guard<std::mutex> lk(g_profMtx);
-        g_vecOverride[configToken] = ov;
-    }
-    // MEDIA2-2-3-4: phát ConfigurationChanged (Token=<cfg>, Type=VideoEncoder).
-    MockSubscriptionManager::getInstance().fireConfigurationChanged(configToken, "VideoEncoder");
+    // MEDIA2-2-3-4: lưu field đã set + phát ConfigurationChanged.
+    persistAndNotify();
     return SOAP_OK;
 }
 
