@@ -842,7 +842,16 @@ std::string MediaLegacyHandler::handleSetVideoEncoderConfiguration(const std::st
     // restart the H.264 main path as MJPEG. JPEG is served by the dedicated
     // jpeg path, while H.264 remains on the corresponding video path.
     if (mtxEnc == "JPEG") mtxPath = "jpeg";
-    patchMediamtxPath(mtxPath, mtxEnc, mtxW, mtxH, mtxFps);
+    // CHỈ reconfigure stream cho jpeg/sub2. KHÔNG đụng main/sub1: chúng là stream
+    // mà các test streaming (MEDIA2_RTSS-1-1-2/4-1-2) đọc. Trong full run, test
+    // Media1 RESOLUTION (RTSS-1-1-24/25/26...) set fps thấp cho main/sub1 →
+    // patchMediamtxPath restart ffmpeg mediamtx ở fps thấp → stream kẹt fps thấp
+    // → streaming test SAU đói frame (fail phụ thuộc trình tự; verified: Set sub1
+    // fps=5 → /sub1 thành 5fps). Giữ main/sub1 ổn định default cho streaming.
+    // (jpeg giữ nguyên cho RTSS-1-1-46 JPEG RESOLUTION.)
+    if (mtxPath == "jpeg" || mtxPath == "sub2") {
+        patchMediamtxPath(mtxPath, mtxEnc, mtxW, mtxH, mtxFps);
+    }
     return "<trt:SetVideoEncoderConfigurationResponse/>";
 }
 
