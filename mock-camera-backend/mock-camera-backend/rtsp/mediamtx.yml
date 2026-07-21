@@ -45,6 +45,18 @@ paths:
       rtsp://127.0.0.1:8554/main640
     runOnInitRestart: yes
 
+  # RTSS-1-1-48 kiểm cả MEDIAN 1280x720 (ngoài highest 4K + lowest 640). Tương tự
+  # main640, phục vụ 720 từ stream riêng main720 (pre-warmed) — relay không phục
+  # vụ được 720 (cache SDP 4K).
+  main720:
+    runOnInit: >-
+      ffmpeg -re -f lavfi -i testsrc2=size=1280x720:rate=30
+      -c:v libx264 -preset ultrafast -tune zerolatency
+      -b:v 2000k -maxrate 2000k -bufsize 2000k -g 30 -pix_fmt yuv420p
+      -f rtsp -rtsp_transport tcp
+      rtsp://127.0.0.1:8554/main720
+    runOnInitRestart: yes
+
   jpeg:
     # profile_jpeg = MJPEG 1920x1080@30. RTSS-1-1-31..36/53 cần JPEG stream với
     # STANDARD Huffman tables (RFC 2435 yêu cầu). ffmpeg mjpeg mặc định dùng

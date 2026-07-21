@@ -931,11 +931,14 @@ std::string MediaLegacyHandler::handleGetStreamUri(const std::string& req) {
     // → DTT decode đúng 640. KHÔNG đụng /main dùng chung → relay + MEDIA2_RTSS
     // streaming không ảnh hưởng. Chỉ áp cho RTSP thường (không HTTP tunnel), đúng
     // transport RTSS-1-1-48 dùng. mediamtx 8554 mở (unauth) + reachable từ DTT.
-    if (stream == "main" && protocol != "HTTP" && protocol != "HTTPS" &&
-        mainW == 640 && mainH == 480) {
-        stream = "main640";
-        scheme = "rtsp://";
-        port   = 8554;
+    if (stream == "main" && protocol != "HTTP" && protocol != "HTTPS") {
+        // RTSS-1-1-48 kiểm 3 mức: 4K (relay), median 1280x720, lowest 640x480.
+        // Non-4K phục vụ từ stream pre-warmed riêng qua mediamtx 8554.
+        if (mainW == 640 && mainH == 480) {
+            stream = "main640"; scheme = "rtsp://"; port = 8554;
+        } else if (mainW == 1280 && mainH == 720) {
+            stream = "main720"; scheme = "rtsp://"; port = 8554;
+        }
     }
 
     std::ostringstream os;
