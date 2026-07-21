@@ -16,6 +16,7 @@
 #include "services/MockSubscriptionManager.h"
 #include <iostream>
 #include <cstring>
+#include <cstdlib>
 #include <string>
 #include <thread>
 
@@ -179,6 +180,51 @@ static int custom_fsend(struct soap *soap, const char *buf, size_t len) {
     std::cout << "[DEBUG SEND] " << data << std::endl;
     return original_fsend ? original_fsend(soap, buf, len) : -1;
 }
+
+#ifndef _WIN32
+// Nạp đủ HTTP body cho manual (registry) services trước khi dispatch. gSOAP đọc
+// body theo nhu cầu và tự xử lý body lớn, nhưng registry đọc g_current_headers
+// NGAY — với request lớn (Set config nhiều field) body có thể chưa tới đủ (TCP
+// segmentation) → g_current_headers bị cắt → dispatch string-match trượt →
+// fallthrough gSOAP → fault "Data required" (RTSS-1-1-48 Media1 Set, MEDIA2-8-1-1
+// metadata Set). Dùng MSG_PEEK (KHÔNG tiêu thụ) nạp phần body còn thiếu vào
+// g_current_headers; gSOAP vẫn đọc socket bình thường sau nếu fallthrough. Chỉ
+// làm việc khi body thiếu — request đủ/nhỏ là no-op.
+static void ensureFullBody(struct soap* soap) {
+    const std::string& h = g_current_headers;
+    size_t he = h.find("\r\n\r\n");
+    if (he == std::string::npos) return;
+    size_t bodyStart = he + 4;
+    size_t clPos = std::string::npos;
+    static const char* keys[] = {"Content-Length:", "content-length:", "Content-length:"};
+    for (const char* k : keys) {
+        size_t p = h.find(k);
+        if (p != std::string::npos) { clPos = p + std::strlen(k); break; }
+    }
+    if (clPos == std::string::npos) return;          // không có Content-Length
+    long contentLength = std::strtol(h.c_str() + clPos, nullptr, 10);
+    if (contentLength <= 0) return;
+    long bodyHave = static_cast<long>(h.size()) - static_cast<long>(bodyStart);
+    if (bodyHave >= contentLength) return;           // đã đủ → no-op
+    long remaining = contentLength - bodyHave;
+    if (remaining > 1024 * 1024) return;             // chặn body bất thường
+    std::string tail;
+    std::vector<char> pk(static_cast<size_t>(remaining));
+    for (int tries = 0; tries < 100 && static_cast<long>(tail.size()) < remaining; ++tries) {
+        struct pollfd p{soap->socket, POLLIN, 0};
+        if (::poll(&p, 1, 100) <= 0) {
+            if (!tail.empty()) break;                // dừng tới → dùng những gì có
+            continue;
+        }
+        ssize_t n = ::recv(soap->socket, pk.data(),
+                           static_cast<size_t>(remaining), MSG_PEEK);
+        if (n <= 0) break;
+        tail.assign(pk.data(), static_cast<size_t>(n));  // PEEK: luôn từ đầu vùng chưa đọc
+        if (static_cast<long>(n) >= remaining) break;
+    }
+    g_current_headers.append(tail);
+}
+#endif
 
 OnvifServer::OnvifServer(const ServiceConfig& cfg, std::shared_ptr<ICameraBackend> backend)
     : cfg_(cfg), backend_(std::move(backend)) {
@@ -478,6 +524,12 @@ void OnvifServer::listenLoop() {
             // 1 service trả non-empty. Cho phép nhiều service cùng /onvif/media:
             //   MediaLegacyService (Media1) → Media2MetadataService (metadata/analytics)
             // Tất cả trả "" → fallthrough xuống if-else (gSOAP: Media2/Imaging/Device).
+#ifndef _WIN32
+            // Nạp đủ body (nếu bị TCP-segment cắt) để manual service thấy trọn
+            // request. Non-consuming (MSG_PEEK) → gSOAP fallthrough vẫn đọc bình
+            // thường. Chỉ tác động request lớn bị cắt → không ảnh hưởng case khác.
+            ensureFullBody(soap);
+#endif
             bool handledByRegistry = false;
             for (IOnvifService* svc : registry_.matching(path)) {
                 std::string resp = svc->handle(g_current_headers);
