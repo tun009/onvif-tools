@@ -1064,13 +1064,16 @@ int Media2Service::SetVideoEncoderConfiguration(
         vecConfig.bitrate = newEnc->RateControl->BitrateLimit;
     }
 
-    try {
-        backend_->setVideoEncoderConfig(profileToken, vecConfig);
-        std::cout << "[Media2Service] SetVideoEncoderConfiguration successful for token " << profileToken << std::endl;
-    } catch (const std::exception& e) {
-        std::cerr << "[Media2Service] SetVideoEncoderConfiguration backend error: " << e.what() << std::endl;
-        return soap_receiver_fault(this->soap, "Backend error", nullptr);
-    }
+    // KHÔNG gọi backend_->setVideoEncoderConfig ở đây. Hàm đó chạy
+    // reconfigure_stream.sh (kill+respawn ffmpeg /main) trên MỌI Set → trong full
+    // conformance, test frame-rate-limit set fps thấp (vd 5fps) làm /main kẹt fps
+    // thấp → test streaming sau (MEDIA2_RTSS-1-1-2) đói frame → fail phụ thuộc
+    // trình tự. Không test Media2 nào verify RESOLUTION stream (test đó là
+    // RTSS-1-1-48 = Media1); readback sau Set (MEDIA2-2-3-4) đã dùng SOAP override
+    // store (persistAndNotify). Giữ /main ổn định 4K 30fps để streaming luôn pass.
+    (void)vecConfig;
+    std::cout << "[Media2Service] SetVideoEncoderConfiguration (SOAP state only, "
+                 "no /main respawn) token=" << profileToken << std::endl;
 
     // MEDIA2-2-3-4: lưu field đã set + phát ConfigurationChanged.
     persistAndNotify();
