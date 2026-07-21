@@ -144,10 +144,10 @@ int DeviceService::GetDeviceInformation(
         info = backend_->getDeviceInfo();
     } catch (const std::exception& e) {
         std::cerr << "[DeviceService] Error getting device info from backend: " << e.what() << std::endl;
-        info.manufacturer = "MockCam Inc.";
-        info.model = "MockCam-4K";
-        info.firmwareVersion = "1.0.0";
-        info.serialNumber = "MOCK-001-2026";
+        info.manufacturer = "Erabyte";
+        info.model = "ALG2-B808";
+        info.firmwareVersion = "3.4.1";
+        info.serialNumber = "1908120176009";
         info.hardwareId = "JetsonOrinNX-8GB";
     }
 

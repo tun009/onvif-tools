@@ -26,10 +26,10 @@ MockCameraBackend::MockCameraBackend(const std::string& configPath)
 
 DeviceInfo MockCameraBackend::buildDeviceInfo() const {
     DeviceInfo d;
-    d.manufacturer    = "MockCam Inc.";
-    d.model           = "MockCam-4K";
-    d.firmwareVersion = "1.0.0";
-    d.serialNumber    = "MOCK-001-2024";
+    d.manufacturer    = "Erabyte";
+    d.model           = "ALG2-B808";
+    d.firmwareVersion = "3.4.1";
+    d.serialNumber    = "1908120176009";
     d.hardwareId      = "JetsonOrinNX-8GB";
     return d;
 }
