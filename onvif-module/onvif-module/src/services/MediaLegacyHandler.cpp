@@ -891,6 +891,7 @@ std::string MediaLegacyHandler::handleGetStreamUri(const std::string& req) {
     // VEC vào profile_main, phải return path "jpeg" (không phải "main").
     // Otherwise fixed mapping theo profile token.
     std::string stream = "main";
+    int mainW = 0, mainH = 0;   // resolution VEC của /main (cho RTSS-1-1-48 route)
     {
         std::lock_guard<std::mutex> lk(g_stateMtx);
         ensureFixedVecState();
@@ -909,6 +910,9 @@ std::string MediaLegacyHandler::handleGetStreamUri(const std::string& req) {
         } else if (token == "profile_sub1") stream = "sub1";
         else if (token == "profile_sub2") stream = "sub2";
         else if (token == "profile_jpeg") stream = "jpeg";
+        if (stream == "main" && vit != g_vecState.end()) {
+            mainW = vit->second.width; mainH = vit->second.height;
+        }
     }
     // Transport/Protocol (ONVIF ver10 enum: UDP/TCP/RTSP/HTTP/HTTPS). HTTP = RTSP
     // tunneled over HTTP. MediaMTX itself does not expose this tunnel, so a
@@ -919,6 +923,20 @@ std::string MediaLegacyHandler::handleGetStreamUri(const std::string& req) {
     int port = 8555;
     if (protocol == "HTTP")       { scheme = "http://";  port = g_rtspHttpTunnelPort; }
     else if (protocol == "HTTPS") { scheme = "https://"; port = g_rtspHttpTunnelPort; }
+
+    // RTSS-1-1-48 (H.264 RESOLUTION) — mức lowest 640x480: relay 8555 cache SDP
+    // 4K của /main lần đầu và không refresh được (relay không rebuild được) →
+    // không phục vụ đúng 640 (H.264 nhét resolution trong SPS/SDP). Phục vụ 640
+    // từ stream RIÊNG main640 (pre-warmed 640x480@30) TRỰC TIẾP qua mediamtx 8554
+    // → DTT decode đúng 640. KHÔNG đụng /main dùng chung → relay + MEDIA2_RTSS
+    // streaming không ảnh hưởng. Chỉ áp cho RTSP thường (không HTTP tunnel), đúng
+    // transport RTSS-1-1-48 dùng. mediamtx 8554 mở (unauth) + reachable từ DTT.
+    if (stream == "main" && protocol != "HTTP" && protocol != "HTTPS" &&
+        mainW == 640 && mainH == 480) {
+        stream = "main640";
+        scheme = "rtsp://";
+        port   = 8554;
+    }
 
     std::ostringstream os;
     os << "<trt:GetStreamUriResponse>"
