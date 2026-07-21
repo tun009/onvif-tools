@@ -4,7 +4,6 @@
 // per profile. Không backend real — profile CRUD chỉ ack (không persist Media1 riêng).
 
 #include "services/MediaLegacyHandler.h"
-#include "interface/ICameraBackend.h"
 #include <sstream>
 #include <mutex>
 #include <map>
@@ -26,7 +25,6 @@ const char* ACT = "http://www.onvif.org/ver10/media/wsdl/Media/";
 std::string g_deviceIp = "127.0.0.1";
 int         g_httpPort = 8080;
 int         g_rtspPort = 8554;
-ICameraBackend* g_backend = nullptr;   // reconfigure RTSP publisher (RTSS-1-1-48)
 int         g_rtspHttpTunnelPort = 8555;
 
 std::string actUrl(const char* op) {
@@ -187,10 +185,6 @@ void MediaLegacyHandler::setEndpoint(const std::string& ip, int port) {
     g_deviceIp = ip;
     g_httpPort = port;
     // RTSP port config từ ServiceConfig — mock giữ 8554
-}
-
-void MediaLegacyHandler::setBackend(ICameraBackend* backend) {
-    g_backend = backend;
 }
 
 std::string MediaLegacyHandler::extractMessageId(const std::string& xml) {
@@ -828,7 +822,6 @@ std::string MediaLegacyHandler::handleSetVideoEncoderConfiguration(const std::st
     std::lock_guard<std::mutex> lk(g_stateMtx);
     ensureFixedVecState();
     auto& v = g_vecState[cfgTok];
-    int oldW = v.width, oldH = v.height;   // để phát hiện đổi resolution (RTSS-1-1-48)
     if (!enc.empty()) v.encoding = enc;
     if (!ws.empty()) v.width = nw;
     if (!hs.empty()) v.height = nh;
@@ -849,25 +842,7 @@ std::string MediaLegacyHandler::handleSetVideoEncoderConfiguration(const std::st
     // restart the H.264 main path as MJPEG. JPEG is served by the dedicated
     // jpeg path, while H.264 remains on the corresponding video path.
     if (mtxEnc == "JPEG") mtxPath = "jpeg";
-    if (mtxPath == "main") {
-        // RTSS-1-1-48: /main do ffmpeg NGOÀI publish (source=rtspSession) nên
-        // patchMediamtxPath (đặt runOnInit) KHÔNG chiếm được path → resolution
-        // không đổi. Dùng backend reconfigure_stream.sh (kill+respawn ffmpeg
-        // đúng size) — CHỈ khi resolution thực sự đổi, để không gián đoạn stream
-        // với các test set-không-đổi đang pass. sub1/sub2/jpeg giữ nguyên
-        // patchMediamtxPath (không đụng RTSS-1-1-46 JPEG đang xanh).
-        if (g_backend && (mtxW != oldW || mtxH != oldH)) {
-            VideoEncoderConfig cfg;
-            cfg.codec             = Codec::H264;
-            cfg.resolution.width  = mtxW;
-            cfg.resolution.height = mtxH;
-            cfg.framerate         = mtxFps;
-            cfg.bitrate           = v.bitrate;
-            g_backend->setVideoEncoderConfig("profile_main", cfg);
-        }
-    } else {
-        patchMediamtxPath(mtxPath, mtxEnc, mtxW, mtxH, mtxFps);
-    }
+    patchMediamtxPath(mtxPath, mtxEnc, mtxW, mtxH, mtxFps);
     return "<trt:SetVideoEncoderConfigurationResponse/>";
 }
 

@@ -301,9 +301,6 @@ void OnvifServer::listenLoop() {
 
     // Wire Media1 legacy handler với deviceIp/port (dùng trong GetStreamUri/SnapshotUri)
     MediaLegacyHandler::setEndpoint(cfg_.deviceIp, cfg_.httpPort);
-    // Backend để Media1 SetVideoEncoderConfiguration reconfigure publisher /main
-    // (RTSS-1-1-48 — đổi resolution stream thật).
-    MediaLegacyHandler::setBackend(backend_.get());
 
     while (running_) {
         SOAP_SOCKET clientSocket = soap_accept(soap);
