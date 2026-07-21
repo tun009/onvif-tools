@@ -25,6 +25,7 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <poll.h>
 #include <fcntl.h>
@@ -90,6 +91,12 @@ static void proxyRtspHttpTunnel(int clientFd) {
     if (::connect(relay, (struct sockaddr*)&addr, sizeof(addr)) != 0) {
         ::close(relay); ::close(clientFd); return;
     }
+    // TCP_NODELAY: tắt Nagle trên CẢ 2 chiều. RTP interleaved là nhiều gói nhỏ;
+    // nếu để Nagle, mỗi gói bị trễ tới ~40ms → 1 frame (nhiều gói) mất hàng
+    // trăm ms → DTT chỉ nhận ~1.6fps → timeout đếm frame (MEDIA2_RTSS-1-1-2).
+    int one = 1;
+    ::setsockopt(clientFd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+    ::setsockopt(relay,    IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
     struct pollfd fds[2];
     fds[0].fd = clientFd;
     fds[1].fd = relay;
