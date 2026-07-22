@@ -1193,6 +1193,52 @@ static int m2SendOnvifFault(struct soap* soap,
     return SOAP_STOP;
 }
 
+// gSOAP (build hiện tại) KHÔNG deserialize được phần tử <Configuration>
+// (ns1:ConfigurationRef kế thừa xsd__anyType) trong CreateProfile → req->Configuration
+// rỗng dù body có đủ (đã xác nhận: log body chứa <Configuration> nhưng vector rỗng).
+// Hậu quả: profile tạo ra mất association config → MEDIA2-1-1-2 STEP 28
+// "inappropriate VideoSource configuration". Fallback: parse Type/Token thủ công từ
+// raw request body (g_current_headers định nghĩa ở OnvifServer.cpp, chứa trọn body
+// request hiện tại nhờ custom_frecv + ensureFullBody).
+extern thread_local std::string g_current_headers;
+
+namespace {
+// Nội dung ngay sau chuỗi kết thúc tag mở (vd "Type>") tới '<' kế tiếp; chịu được
+// cả có/không prefix namespace ("<Type>" hoặc "<tt:Type>").
+std::string innerAfterTagEnd(const std::string& seg, const char* tagEnd) {
+    size_t o = seg.find(tagEnd);
+    if (o == std::string::npos) return "";
+    o += std::strlen(tagEnd);
+    size_t e = seg.find('<', o);
+    if (e == std::string::npos) return "";
+    std::string v = seg.substr(o, e - o);
+    size_t a = v.find_first_not_of(" \t\r\n");
+    size_t b = v.find_last_not_of(" \t\r\n");
+    return (a == std::string::npos) ? "" : v.substr(a, b - a + 1);
+}
+// Điền các *Token còn rỗng của DynProfile từ các khối <Configuration> trong raw body.
+void fillDynProfileConfigsFromRawBody(DynProfile& p) {
+    const std::string& body = g_current_headers;
+    size_t pos = 0;
+    while ((pos = body.find("<Configuration", pos)) != std::string::npos) {
+        size_t gt = body.find('>', pos);
+        if (gt == std::string::npos) break;
+        size_t end = body.find("</Configuration", gt);
+        std::string seg = body.substr(gt + 1,
+            (end == std::string::npos ? body.size() : end) - (gt + 1));
+        std::string type = innerAfterTagEnd(seg, "Type>");
+        std::string tok  = innerAfterTagEnd(seg, "Token>");
+        if (!tok.empty()) {
+            if      (type == "VideoSource"  && p.vsToken.empty()) p.vsToken = tok;
+            else if (type == "VideoEncoder" && p.veToken.empty()) p.veToken = tok;
+            else if (type == "Metadata"     && p.mdToken.empty()) p.mdToken = tok;
+            else if (type == "Analytics"    && p.anToken.empty()) p.anToken = tok;
+        }
+        pos = (end == std::string::npos) ? body.size() : end + 1;
+    }
+}
+} // namespace
+
 // ── CreateProfile / DeleteProfile (Profile T mục 7.8) ──────────────────────
 int Media2Service::CreateProfile(
     _ns1__CreateProfile *req,
@@ -1215,6 +1261,9 @@ int Media2Service::CreateProfile(
         else if (c->Type == "Metadata")     p.mdToken = *c->Token;
         else if (c->Type == "Analytics")    p.anToken = *c->Token;
     }
+    // Fallback: gSOAP thường trả req->Configuration rỗng (xem note trên) → parse tay
+    // từ raw body cho các token còn thiếu (giữ consistency CreateProfile+GetProfiles).
+    fillDynProfileConfigsFromRawBody(p);
     {
         std::lock_guard<std::mutex> lk(g_profMtx);
         g_dynProfiles[p.token] = p;
