@@ -1286,6 +1286,15 @@ int Media2Service::CreateProfile(
     {
         std::lock_guard<std::mutex> lk(g_profMtx);
         g_dynProfiles[p.token] = p;
+        // ROOT-CAUSE fix instability MEDIA2-1-1-2: g_removedConfigs/g_deletedFixedTokens
+        // keyed theo token, KHÔNG xóa khi DeleteProfile → rò rỉ XUYÊN RUN. DTT tái dùng
+        // tên profile (vd "testMedia2") mỗi run: run trước RemoveConfiguration(All) trên
+        // profile_testMedia2 (MEDIA2-1-1-6) đánh dấu removed=All; run sau tạo LẠI cùng
+        // token → GetProfiles thấy removed=All → showVS=false → profile RỖNG →
+        // "inappropriate VideoSource configuration". Giải thích chuẩn "pass run này, fail
+        // run sau ~1 tiếng". Profile MỚI tạo = slate sạch: mọi config có mặt, chưa remove.
+        g_removedConfigs.erase(p.token);
+        g_deletedFixedTokens.erase(p.token);
     }
     resp.Token = p.token;
     std::cout << "[Media2Service] CreateProfile → " << resp.Token << std::endl;
@@ -1311,6 +1320,9 @@ int Media2Service::DeleteProfile(
         auto it = g_dynProfiles.find(req->Token);
         if (it != g_dynProfiles.end()) {
             g_dynProfiles.erase(it);
+            // Dọn marker removed-config theo token để không rò rỉ sang profile tạo lại
+            // cùng token (xem chú thích ở CreateProfile).
+            g_removedConfigs.erase(req->Token);
             std::cout << "[Media2Service] DeleteProfile [" << req->Token << "] dyn" << std::endl;
             MockSubscriptionManager::getInstance().fireProfileChanged(req->Token);
             return SOAP_OK;
