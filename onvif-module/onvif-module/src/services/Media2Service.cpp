@@ -57,22 +57,6 @@ static std::map<std::string, VSCOverride> g_vscOverride;
 static std::map<std::string, VECOverride> g_vecOverride;
 }
 
-// ROOT-CAUSE fix cho instability (MEDIA2-1-1-2 & lớp consistency): state
-// Media2 (override VSC/VEC, fixed-profile đã Delete, config đã Remove) là static
-// KHÔNG reset giữa các test → tích tụ xuyên suốt full run → GetXConfigurations echo
-// giá trị đã Set nhưng profile nhúng lại dùng default → lệch → consistency FAIL
-// CHẬP CHỜN theo thứ tự test. resetPerTestState() được gọi ở đầu MỖI test (DTT luôn
-// gọi GetServices đầu test) → mỗi test chạy trạng thái SẠCH = giống hệt chạy riêng
-// (vốn luôn pass). KHÔNG reset g_dynProfiles: đó là object profile test đang thao
-// tác qua nhiều step, xoá giữa chừng sẽ hỏng (Create→...→Get trong cùng test).
-void Media2ResetPerTestState() {
-    std::lock_guard<std::mutex> lk(g_profMtx);
-    g_vscOverride.clear();
-    g_vecOverride.clear();
-    g_deletedFixedTokens.clear();
-    g_removedConfigs.clear();
-}
-
 // Forward declaration — định nghĩa cuối file. Cần cho các op gọi fault sớm.
 static int m2SendOnvifFault(struct soap* soap,
                             const char* code,
