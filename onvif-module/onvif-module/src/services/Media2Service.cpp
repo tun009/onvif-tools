@@ -127,11 +127,13 @@ int Media2Service::GetProfiles(
     std::set<std::string> deletedFixed;
     std::map<std::string, std::set<std::string>> removed;
     std::vector<DynProfile> dyns;
+    std::map<std::string, VSCOverride> vscOv;   // snapshot override VSC (MEDIA2-1-1-2 consistency)
     {
         std::lock_guard<std::mutex> lk(g_profMtx);
         deletedFixed = g_deletedFixedTokens;
         removed = g_removedConfigs;
         for (auto& kv : g_dynProfiles) dyns.push_back(kv.second);
+        vscOv = g_vscOverride;
     }
 
     // Duyệt qua backend fixed profiles (bỏ profile đã Delete) + dynamic profiles
@@ -218,6 +220,23 @@ int Media2Service::GetProfiles(
                         vsc->Bounds->y = 0;
                         vsc->Bounds->width = fp ? fp->videoConfig.resolution.width : 1920;
                         vsc->Bounds->height = fp ? fp->videoConfig.resolution.height : 1080;
+                    }
+                    // MEDIA2-1-1-2 (stability): video_source_config có thể đã bị
+                    // SetVideoSourceConfiguration (override sống xuyên test — không reset
+                    // per-test). GetVideoSourceConfigurations (no ProfileToken) echo giá
+                    // trị override; profile ĐỘNG phải phản ánh CÙNG giá trị, nếu không
+                    // DTT thấy VSC "inappropriate" (lệch Bounds/Name) → fail CHẬP CHỜN
+                    // theo thứ tự test full-run. Fixed profile giữ geometry backend.
+                    if (dp && vsc->Bounds) {
+                        auto ovit = vscOv.find(vsc->token);
+                        if (ovit != vscOv.end() && ovit->second.has) {
+                            const auto& ov = ovit->second;
+                            if (!ov.name.empty()) vsc->Name = ov.name;
+                            if (ov.hasBounds) {
+                                vsc->Bounds->x = ov.x; vsc->Bounds->y = ov.y;
+                                vsc->Bounds->width = ov.w; vsc->Bounds->height = ov.h;
+                            }
+                        }
                     }
                     profile->Configurations->VideoSource = vsc;
                 }
