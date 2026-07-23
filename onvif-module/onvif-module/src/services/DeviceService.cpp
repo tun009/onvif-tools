@@ -322,6 +322,10 @@ int DeviceService::GetCapabilities(
 }
 
 // ── GetServices ──────────────────────────────────────────────────────────────
+// Định nghĩa ở Media2Service.cpp — reset state per-test (xem chú thích ở đó).
+// DTT gọi GetServices đầu mỗi test → đây là điểm reset để cô lập test.
+void Media2ResetPerTestState();
+
 int DeviceService::GetServices(
     _tds__GetServices *tds__GetServices,
     _tds__GetServicesResponse &tds__GetServicesResponse)
@@ -329,6 +333,10 @@ int DeviceService::GetServices(
     this->soap->mustUnderstand = 0;
     this->soap->header = nullptr;
     auto soap = this->soap;
+
+    // ROOT-CAUSE stability: reset state Media2 tích tụ từ test trước (override
+    // VSC/VEC, deleted/removed configs). Mỗi test bắt đầu bằng GetServices → sạch.
+    Media2ResetPerTestState();
 
     const bool includeCaps = tds__GetServices && tds__GetServices->IncludeCapability;
     const std::string base = "http://" + cfg_.deviceIp + ":" + std::to_string(cfg_.httpPort);
