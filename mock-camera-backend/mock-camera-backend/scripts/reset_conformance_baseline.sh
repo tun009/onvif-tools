@@ -35,6 +35,14 @@ patch_path jpeg "testsrc2=size=1920x1080:rate=30" "-c:v mjpeg -huffman default -
 patch_path sub2 "testsrc2=size=640x480:rate=10" "-c:v libx264 -preset ultrafast -tune zerolatency"
 sleep 5
 
+echo "== 1b) Restart relay gortsplib (bắt lại feed mediamtx sạch; reconnect nhanh 200ms) =="
+RELAY_DIR="$BACKEND_DIR/rtsp/gortsplib-relay"
+RPID=$(pgrep -f mock-rtsp-metadata-poc)
+[ -n "$RPID" ] && kill -9 $RPID
+sleep 1
+( cd "$RELAY_DIR" && setsid nohup ./mock-rtsp-metadata-poc >/tmp/mock-rtsp-metadata.log 2>&1 </dev/null & )
+sleep 2
+
 echo "== 2) Restart backend + onvif (xóa state RAM: override/removed-marker/subscription) =="
 # Kill theo PID (pkill -f đôi khi KHÔNG diệt được — bài học vận hành).
 PIDS=$(pgrep -f 'onvif-server|mock-camera-server')
