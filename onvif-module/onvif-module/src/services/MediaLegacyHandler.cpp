@@ -985,9 +985,11 @@ std::string MediaLegacyHandler::handleGetStreamUri(const std::string& req) {
     // trong 0.4s bất kể fps DTT set → loại HẲN gap respawn LẪN biên fps thấp.
     if (stream == "jpeg") {
         if (jpegW == 640 && jpegH == 480) {
-            stream = "jpeg640";   // scheme/port giữ nguyên (rtsp:8555 hoặc http:8080 tunnel)
+            stream = "jpeg640";   // lowest — scheme/port giữ nguyên
+        } else if (jpegW == 1280 && jpegH == 720) {
+            stream = "jpeg1280";  // median — RTSS-1-1-46 test 3 mức, thiếu path này → mismatch
         }
-        // else: giữ "jpeg" (1920x1080 default) — RTSS-1-1-46 highest qua RTSP chịu được
+        // else: giữ "jpeg" (1920x1080 highest / default)
     }
 
     std::ostringstream os;
