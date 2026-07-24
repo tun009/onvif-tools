@@ -40,9 +40,19 @@ static void patchMediamtxPath(const std::string& pathName,
                                int width, int height, int fps) {
 #ifdef __linux__
     if (pathName.empty() || width <= 0 || height <= 0 || fps <= 0) return;
+    // JPEG STREAM framerate floor: RTSS-1-1-46 changes jpeg RESOLUTION, which
+    // restarts the MediaMTX jpeg publisher (~1-2s gap while ffmpeg respawns +
+    // relay re-attaches). The DTT waits only 5s for 12 frames; at the low fps it
+    // sets (e.g. 5) that leaves ~25 frames total — the respawn gap can drop it
+    // below 12 over the network → "Frames waiting timeout" (RTSS-1-1-46/53).
+    // No ONVIF JPEG test validates the STREAM framerate (34/35/36=transport,
+    // 46=resolution, 53=RTP ext), and GetVideoEncoderConfiguration still reports
+    // the configured fps from g_vecState. So publish jpeg at >=30fps → 12 frames
+    // arrive in <0.5s, immune to the gap; resolution (the checked field) is kept.
+    int streamFps = (encoding == "JPEG") ? std::max(fps, 30) : fps;
     std::ostringstream cmd;
     cmd << "ffmpeg -re -f lavfi -i testsrc2=size=" << width << "x" << height
-        << ":rate=" << fps << " ";
+        << ":rate=" << streamFps << " ";
     if (encoding == "JPEG") {
         cmd << "-c:v mjpeg -huffman default -pix_fmt yuvj420p -q:v 5 ";
     } else {
