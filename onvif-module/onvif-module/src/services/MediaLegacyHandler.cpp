@@ -870,8 +870,11 @@ std::string MediaLegacyHandler::handleSetVideoEncoderConfiguration(const std::st
     // patchMediamtxPath restart ffmpeg mediamtx ở fps thấp → stream kẹt fps thấp
     // → streaming test SAU đói frame (fail phụ thuộc trình tự; verified: Set sub1
     // fps=5 → /sub1 thành 5fps). Giữ main/sub1 ổn định default cho streaming.
-    // (jpeg giữ nguyên cho RTSS-1-1-46 JPEG RESOLUTION.)
-    if (mtxPath == "jpeg" || mtxPath == "sub2") {
+    // jpeg KHÔNG respawn nữa: RTSS-1-1-46 đổi resolution jpeg → respawn ffmpeg tạo
+    // gap frame → relay đói frame → "Frames waiting timeout" (46/53). Thay vào đó
+    // phục vụ mỗi resolution jpeg từ stream PRE-WARMED riêng (/jpeg=1920, /jpeg640),
+    // GetStreamUri route theo config → KHÔNG respawn, KHÔNG gap. Chỉ sub2 còn patch.
+    if (mtxPath == "sub2") {
         patchMediamtxPath(mtxPath, mtxEnc, mtxW, mtxH, mtxFps);
     }
     return "<trt:SetVideoEncoderConfigurationResponse/>";
@@ -914,6 +917,7 @@ std::string MediaLegacyHandler::handleGetStreamUri(const std::string& req) {
     // Otherwise fixed mapping theo profile token.
     std::string stream = "main";
     int mainW = 0, mainH = 0;   // resolution VEC của /main (cho RTSS-1-1-48 route)
+    int jpegW = 0, jpegH = 0;   // resolution VEC jpeg (cho RTSS-1-1-46 route)
     {
         std::lock_guard<std::mutex> lk(g_stateMtx);
         ensureFixedVecState();
@@ -929,9 +933,13 @@ std::string MediaLegacyHandler::handleGetStreamUri(const std::string& req) {
         auto vit = g_vecState.find(vecToken);
         if (vit != g_vecState.end() && vit->second.encoding == "JPEG") {
             stream = "jpeg";
+            jpegW = vit->second.width; jpegH = vit->second.height;
         } else if (token == "profile_sub1") stream = "sub1";
         else if (token == "profile_sub2") stream = "sub2";
-        else if (token == "profile_jpeg") stream = "jpeg";
+        else if (token == "profile_jpeg") {
+            stream = "jpeg";
+            if (vit != g_vecState.end()) { jpegW = vit->second.width; jpegH = vit->second.height; }
+        }
         if (stream == "main" && vit != g_vecState.end()) {
             mainW = vit->second.width; mainH = vit->second.height;
         }
@@ -961,6 +969,19 @@ std::string MediaLegacyHandler::handleGetStreamUri(const std::string& req) {
         } else if (mainW == 1280 && mainH == 720) {
             stream = "main720"; scheme = "rtsp://"; port = 8554;
         }
+    }
+
+    // RTSS-1-1-46 (JPEG RESOLUTION) đổi jpeg giữa highest(1920) và lowest(640).
+    // KHÔNG respawn /jpeg (gap frame → 46/53 timeout). Phục vụ mỗi resolution từ
+    // stream pre-warmed: /jpeg=1920 (default, đang chạy), /jpeg640=640x480. Route
+    // theo config jpeg → không respawn. GIỮ qua relay 8555 (port đã set) vì
+    // RTSS-1-1-53 cần RTP header extension mà relay thêm; MJPEG resolution nằm
+    // per-frame nên relay phục vụ mọi resolution được (khác H.264 nhét trong SPS).
+    if (stream == "jpeg" && protocol != "HTTP" && protocol != "HTTPS") {
+        if (jpegW == 640 && jpegH == 480) {
+            stream = "jpeg640";   // port 8555 (relay) giữ nguyên
+        }
+        // else: giữ "jpeg" (1920x1080 default, đang chạy sẵn)
     }
 
     std::ostringstream os;
