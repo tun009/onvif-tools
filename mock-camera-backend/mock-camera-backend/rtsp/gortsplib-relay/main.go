@@ -23,13 +23,10 @@ type handler struct { paths map[string]*pathStream }
 
 const (
 	relayWriteQueueSize = 65536
-	// DTT waits only ~5s for 12 frames after SetVideoEncoderConfiguration.
-	// MediaMTX restarts the publisher during that operation (jpeg/sub2 via
-	// patchMediamtxPath). The relay must re-attach to the restarted upstream
-	// as fast as possible: RTSS-1-1-36/46/53 (JPEG) failed with "Frames waiting
-	// timeout" because a 1s->2s backoff + the ffmpeg respawn together exceeded
-	// the 5s window. Poll fast (200ms, cap 400ms) so the gap ~= respawn time.
-	maxReconnectDelay   = 400 * time.Millisecond
+	// DTT waits only a few seconds for frames after SetVideoEncoderConfiguration.
+	// MediaMTX restarts the publisher during that operation, so an 8s backoff
+	// can outlive the test window and produce a false zero-frame failure.
+	maxReconnectDelay   = 2 * time.Second
 )
 
 // Profile M/T require Digest authentication at the RTSP layer.  Keep the
@@ -91,8 +88,7 @@ func setStream(server *gortsplib.Server, ps *pathStream, desc *description.Sessi
 
 func relayPath(server *gortsplib.Server, ps *pathStream, path string) {
 	src := "rtsp://127.0.0.1:8554/" + path
-	const initialReconnectDelay = 200 * time.Millisecond
-	delay := initialReconnectDelay
+	delay := time.Second
 	for {
 		if err := relayOnce(server, ps, path, src); err != nil {
 			log.Printf("relay %s: %v; reconnecting in %s", path, err, delay)
@@ -100,7 +96,7 @@ func relayPath(server *gortsplib.Server, ps *pathStream, path string) {
 			if delay < maxReconnectDelay { delay *= 2; if delay > maxReconnectDelay { delay = maxReconnectDelay } }
 			continue
 		}
-		delay = initialReconnectDelay
+		delay = time.Second
 	}
 }
 
@@ -205,10 +201,10 @@ func startMetadata(server *gortsplib.Server, ps *pathStream, media *description.
 }
 
 func main() {
-	paths := map[string]*pathStream{"main": {}, "jpeg": {}, "jpeg640": {}, "jpeg1280": {}, "sub1": {}, "sub2": {}, "metadata": {}}
+	paths := map[string]*pathStream{"main": {}, "jpeg": {}, "sub1": {}, "sub2": {}, "metadata": {}}
 	// DTT consumes the 4K stream over RTSP/TCP. The gortsplib default queue
 	// (256 packets) is too small for a short client-side scheduling stall and
 	// causes the server to close the session with "write queue is full".
 	h := &handler{paths: paths}; srv := &gortsplib.Server{RTSPAddress: ":8555", UDPRTPAddress: ":8050", UDPRTCPAddress: ":8051", MulticastIPRange: "239.10.0.0/16", MulticastRTPPort: 10000, MulticastRTCPPort: 10001, Handler: h, WriteQueueSize: relayWriteQueueSize, ReadTimeout: 10*time.Second, WriteTimeout: 10*time.Second, IdleTimeout: 60*time.Second}; if err := srv.Start(); err != nil { log.Fatalf("server start: %v", err) }
-	startMetadata(srv, paths["metadata"], metadataMedia(), "metadata"); for _, p := range []string{"main", "jpeg", "jpeg640", "jpeg1280", "sub1", "sub2"} { go relayPath(srv, paths[p], p) }; log.Printf("RTSP tunnel relay listening on :8555"); if err := srv.Wait(); err != nil { log.Fatal(err) }
+	startMetadata(srv, paths["metadata"], metadataMedia(), "metadata"); for _, p := range []string{"main", "jpeg", "sub1", "sub2"} { go relayPath(srv, paths[p], p) }; log.Printf("RTSP tunnel relay listening on :8555"); if err := srv.Wait(); err != nil { log.Fatal(err) }
 }

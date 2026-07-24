@@ -69,31 +69,6 @@ paths:
       rtsp://127.0.0.1:8554/jpeg
     runOnInitRestart: yes
 
-  # jpeg640 = MJPEG 640x480 pre-warmed. RTSS-1-1-46 (JPEG RESOLUTION) test jpeg ở
-  # highest(1920)+lowest(640). Thay vì respawn /jpeg khi đổi resolution (tạo gap
-  # frame → relay đói frame → "Frames waiting timeout" ở 46/53), phục vụ mức 640
-  # từ stream RIÊNG luôn chạy sẵn; Media1 GetStreamUri route jpeg→jpeg640 khi config
-  # jpeg=640x480. Relay 8555 relay path này để có RTP header extension (RTSS-1-1-53).
-  jpeg640:
-    runOnInit: >-
-      ffmpeg -re -f lavfi -i testsrc2=size=640x480:rate=30
-      -c:v mjpeg -huffman default -pix_fmt yuvj420p -q:v 5
-      -f rtsp -rtsp_transport tcp
-      rtsp://127.0.0.1:8554/jpeg640
-    runOnInitRestart: yes
-
-  # jpeg1280 = MJPEG 1280x720 pre-warmed. RTSS-1-1-46 test 3 mức: highest 1920
-  # (/jpeg), MEDIAN 1280 (path này), lowest 640 (/jpeg640). Thiếu path 1280 →
-  # config 1280 route nhầm /jpeg (1920) → "Checking actual resolution: Verification
-  # failed". Giống main720 của H.264. GetStreamUri route jpeg config 1280x720 → đây.
-  jpeg1280:
-    runOnInit: >-
-      ffmpeg -re -f lavfi -i testsrc2=size=1280x720:rate=30
-      -c:v mjpeg -huffman default -pix_fmt yuvj420p -q:v 5
-      -f rtsp -rtsp_transport tcp
-      rtsp://127.0.0.1:8554/jpeg1280
-    runOnInitRestart: yes
-
   # sub1 = 1280x720 H.264. Trước để {} (không runOnInit) → ffmpeg chết là không
   # tự dậy → sub1 down → RTSS/MEDIA2 sub1 streaming + RTSS-1-1-48 (iterate sub1)
   # fail. Thêm runOnInit + runOnInitRestart để bền vững. Cap 2Mbps, 30fps để đủ
