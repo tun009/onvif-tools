@@ -23,10 +23,13 @@ type handler struct { paths map[string]*pathStream }
 
 const (
 	relayWriteQueueSize = 65536
-	// DTT waits only a few seconds for frames after SetVideoEncoderConfiguration.
-	// MediaMTX restarts the publisher during that operation, so an 8s backoff
-	// can outlive the test window and produce a false zero-frame failure.
-	maxReconnectDelay   = 2 * time.Second
+	// DTT waits only ~5s for 12 frames after SetVideoEncoderConfiguration.
+	// MediaMTX restarts the publisher during that operation (jpeg/sub2 via
+	// patchMediamtxPath). The relay must re-attach to the restarted upstream
+	// as fast as possible: RTSS-1-1-36/46/53 (JPEG) failed with "Frames waiting
+	// timeout" because a 1s->2s backoff + the ffmpeg respawn together exceeded
+	// the 5s window. Poll fast (200ms, cap 400ms) so the gap ~= respawn time.
+	maxReconnectDelay   = 400 * time.Millisecond
 )
 
 // Profile M/T require Digest authentication at the RTSP layer.  Keep the
@@ -88,7 +91,8 @@ func setStream(server *gortsplib.Server, ps *pathStream, desc *description.Sessi
 
 func relayPath(server *gortsplib.Server, ps *pathStream, path string) {
 	src := "rtsp://127.0.0.1:8554/" + path
-	delay := time.Second
+	const initialReconnectDelay = 200 * time.Millisecond
+	delay := initialReconnectDelay
 	for {
 		if err := relayOnce(server, ps, path, src); err != nil {
 			log.Printf("relay %s: %v; reconnecting in %s", path, err, delay)
@@ -96,7 +100,7 @@ func relayPath(server *gortsplib.Server, ps *pathStream, path string) {
 			if delay < maxReconnectDelay { delay *= 2; if delay > maxReconnectDelay { delay = maxReconnectDelay } }
 			continue
 		}
-		delay = time.Second
+		delay = initialReconnectDelay
 	}
 }
 
