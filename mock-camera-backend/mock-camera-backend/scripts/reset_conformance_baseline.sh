@@ -22,18 +22,18 @@ MTX_API="http://127.0.0.1:19997/v3/config/paths"
 BACKEND_DIR="$HOME/tungdt/onvif-tools/mock-camera-backend/mock-camera-backend"
 ONVIF_DIR="$HOME/tungdt/onvif-tools/onvif-module/onvif-module"
 
-echo "== 1) Reset stream jpeg + sub2 về default (2 path bị patchMediamtxPath làm drift) =="
-patch_path() {  # $1=path  $2=ffmpeg-input-args  $3=extra-encoder-args
-  curl -s -o /dev/null -w "   PATCH $1 -> %{http_code}\n" \
-    -X PATCH -H 'Content-Type: application/json' \
-    --data "{\"runOnInit\":\"ffmpeg -re -f lavfi -i $2 $3 -f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/$1\",\"runOnInitRestart\":true}" \
-    "$MTX_API/patch/$1"
-}
-# jpeg = MJPEG 1920x1080@30, Huffman chuẩn (RFC 2435) — RTSS-1-1-46/53.
-patch_path jpeg "testsrc2=size=1920x1080:rate=30" "-c:v mjpeg -huffman default -pix_fmt yuvj420p -q:v 5"
-# sub2 = H.264 640x480@10.
-patch_path sub2 "testsrc2=size=640x480:rate=10" "-c:v libx264 -preset ultrafast -tune zerolatency"
-sleep 5
+echo "== 1) Restart MediaMTX (reload yml → MỌI stream về default + publisher TƯƠI) =="
+# GỐC RỄ vòng lặp JPEG: mediamtx chạy nhiều ngày → respawn ffmpeg (patchMediamtxPath
+# khi RTSS-1-1-46 đổi resolution jpeg) CHẬM → gap frame lớn → relay/DTT đói frame →
+# RTSS-1-1-35/46/53 "Frames waiting timeout". mediamtx VỪA restart → respawn nhanh →
+# jpeg test pass (đã verify: fresh mediamtx cho 25 frame/5s ở 640@5fps ≥12). Restart
+# mediamtx cũng nạp lại yml → mọi stream (jpeg 1920, sub2 640, main 4K, jpeg640...) về
+# default, bỏ mọi drift từ run trước. Đây là mảnh reset script CÒN THIẾU trước đây.
+MPID=$(pgrep -f 'bin/mediamtx.*mediamtx.yml')
+[ -n "$MPID" ] && kill -9 $MPID
+sleep 2
+( cd "$BACKEND_DIR" && setsid nohup ./bin/mediamtx ./rtsp/mediamtx.yml >/tmp/mediamtx.log 2>&1 </dev/null & )
+sleep 8
 
 echo "== 1b) Restart relay gortsplib (bắt lại feed mediamtx sạch; reconnect nhanh 200ms) =="
 RELAY_DIR="$BACKEND_DIR/rtsp/gortsplib-relay"
