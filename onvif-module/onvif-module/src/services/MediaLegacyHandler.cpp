@@ -977,11 +977,17 @@ std::string MediaLegacyHandler::handleGetStreamUri(const std::string& req) {
     // theo config jpeg → không respawn. GIỮ qua relay 8555 (port đã set) vì
     // RTSS-1-1-53 cần RTP header extension mà relay thêm; MJPEG resolution nằm
     // per-frame nên relay phục vụ mọi resolution được (khác H.264 nhét trong SPS).
-    if (stream == "jpeg" && protocol != "HTTP" && protocol != "HTTPS") {
+    // Route MỌI transport (kể cả HTTP tunnel) sang stream pre-warmed đúng resolution.
+    // Bao gồm HTTP tunnel: /jpeg (1920@30 MJPEG ~6MB/s) QUÁ NẶNG cho tunnel 8080 →
+    // RTSS-1-1-35 (JPEG HTTP tunnel) timeout nếu để /jpeg. Route config 640 → jpeg640
+    // (640@30 ~1MB/s, nhẹ, tunnel chịu được). Tunnel proxy là raw byte-proxy nên
+    // forward path /jpeg640 sang relay 8555 vô tư. Pre-warm 30fps → 12 frame tới
+    // trong 0.4s bất kể fps DTT set → loại HẲN gap respawn LẪN biên fps thấp.
+    if (stream == "jpeg") {
         if (jpegW == 640 && jpegH == 480) {
-            stream = "jpeg640";   // port 8555 (relay) giữ nguyên
+            stream = "jpeg640";   // scheme/port giữ nguyên (rtsp:8555 hoặc http:8080 tunnel)
         }
-        // else: giữ "jpeg" (1920x1080 default, đang chạy sẵn)
+        // else: giữ "jpeg" (1920x1080 default) — RTSS-1-1-46 highest qua RTSP chịu được
     }
 
     std::ostringstream os;
