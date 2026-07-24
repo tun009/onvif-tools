@@ -205,10 +205,10 @@ func startMetadata(server *gortsplib.Server, ps *pathStream, media *description.
 }
 
 func main() {
-	paths := map[string]*pathStream{"main": {}, "jpeg": {}, "jpeg640": {}, "sub1": {}, "sub2": {}, "metadata": {}}
+	paths := map[string]*pathStream{"main": {}, "jpeg": {}, "jpeg640": {}, "jpeg1280": {}, "sub1": {}, "sub2": {}, "metadata": {}}
 	// DTT consumes the 4K stream over RTSP/TCP. The gortsplib default queue
 	// (256 packets) is too small for a short client-side scheduling stall and
 	// causes the server to close the session with "write queue is full".
 	h := &handler{paths: paths}; srv := &gortsplib.Server{RTSPAddress: ":8555", UDPRTPAddress: ":8050", UDPRTCPAddress: ":8051", MulticastIPRange: "239.10.0.0/16", MulticastRTPPort: 10000, MulticastRTCPPort: 10001, Handler: h, WriteQueueSize: relayWriteQueueSize, ReadTimeout: 10*time.Second, WriteTimeout: 10*time.Second, IdleTimeout: 60*time.Second}; if err := srv.Start(); err != nil { log.Fatalf("server start: %v", err) }
-	startMetadata(srv, paths["metadata"], metadataMedia(), "metadata"); for _, p := range []string{"main", "jpeg", "jpeg640", "sub1", "sub2"} { go relayPath(srv, paths[p], p) }; log.Printf("RTSP tunnel relay listening on :8555"); if err := srv.Wait(); err != nil { log.Fatal(err) }
+	startMetadata(srv, paths["metadata"], metadataMedia(), "metadata"); for _, p := range []string{"main", "jpeg", "jpeg640", "jpeg1280", "sub1", "sub2"} { go relayPath(srv, paths[p], p) }; log.Printf("RTSP tunnel relay listening on :8555"); if err := srv.Wait(); err != nil { log.Fatal(err) }
 }
