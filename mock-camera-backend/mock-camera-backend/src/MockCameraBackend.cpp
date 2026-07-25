@@ -26,7 +26,7 @@ MockCameraBackend::MockCameraBackend(const std::string& configPath)
 
 DeviceInfo MockCameraBackend::buildDeviceInfo() const {
     DeviceInfo d;
-    d.manufacturer    = "Erabyte";
+    d.manufacturer    = "Erabyte Inc.";
     d.model           = "ALG2-B803";
     d.firmwareVersion = "3.4.0";
     d.serialNumber    = "1908120176009";
