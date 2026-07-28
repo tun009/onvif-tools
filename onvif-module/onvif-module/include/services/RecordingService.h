@@ -24,6 +24,7 @@ public:
 
 private:
     static std::string extractRelatesTo(const std::string& xml);
+    static std::string extractInnerTag(const std::string& xml, const std::string& tag);
     static std::string wrap(const std::string& action,
                             const std::string& relatesTo,
                             const std::string& bodyXml);

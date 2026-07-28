@@ -4,6 +4,8 @@
 // Definition đánh dấu Profile G SUPPORTED. Data model tĩnh → không cần backend/IPC.
 
 #include "services/RecordingService.h"
+#include "utils/FaultBuilder.h"
+#include <mutex>
 #include <sstream>
 
 namespace {
@@ -16,7 +18,7 @@ const char* JOB = "Job_0";
 const char* SRC_PROFILE = "profile_main";   // on-board media source (Media profile)
 
 // RecordingConfiguration — dùng chung GetRecordings & GetRecordingConfiguration.
-std::string recordingConfig() {
+std::string defaultRecordingConfig() {
     return
         "<tt:Source>"
           "<tt:SourceId>http://localhost/sourceId</tt:SourceId>"
@@ -27,6 +29,29 @@ std::string recordingConfig() {
         "</tt:Source>"
         "<tt:Content>Mock on-board recording</tt:Content>"
         "<tt:MaximumRetentionTime>P30D</tt:MaximumRetentionTime>";
+}
+
+std::mutex g_configMtx;
+std::string g_recordingConfig = defaultRecordingConfig();
+
+std::string getRecordingConfig() {
+    std::lock_guard<std::mutex> lock(g_configMtx);
+    return g_recordingConfig;
+}
+
+void setRecordingConfig(const std::string& config) {
+    std::lock_guard<std::mutex> lock(g_configMtx);
+    g_recordingConfig = config;
+}
+
+std::string extractElementContent(const std::string& xml, const std::string& tag) {
+    auto p = xml.find("<" + tag);
+    if (p == std::string::npos) return "";
+    auto gt = xml.find('>', p);
+    if (gt == std::string::npos) return "";
+    auto end = xml.find("</" + tag + ">", gt);
+    if (end == std::string::npos) return "";
+    return xml.substr(gt + 1, end - gt - 1);
 }
 
 // 2 track: VIDEO_0 + META_0 (không audio).
@@ -81,6 +106,17 @@ std::string RecordingService::extractRelatesTo(const std::string& xml) {
     return "";
 }
 
+std::string RecordingService::extractInnerTag(const std::string& xml,
+                                              const std::string& tag) {
+    auto p = xml.find(tag + ">");
+    if (p == std::string::npos) return "";
+    auto gt = xml.find('>', p);
+    if (gt == std::string::npos) return "";
+    auto lt = xml.find('<', gt);
+    if (lt == std::string::npos) return "";
+    return xml.substr(gt + 1, lt - gt - 1);
+}
+
 std::string RecordingService::wrap(const std::string& action,
                                    const std::string& relatesTo,
                                    const std::string& bodyXml) {
@@ -112,6 +148,11 @@ std::string RecordingService::handle(const std::string& req) {
         return wrap(std::string(ACT) + op, rel, body);
     };
     auto has = [&](const char* s) { return req.find(s) != std::string::npos; };
+    auto fault = [](const char* code, const char* reason) {
+        return FaultBuilder::sender("ter:InvalidArgVal", code, reason);
+    };
+    auto recordingToken = [&]() { return extractInnerTag(req, "RecordingToken"); };
+    auto jobToken = [&]() { return extractInnerTag(req, "JobToken"); };
 
     if (has("GetServiceCapabilities"))
         return R("GetServiceCapabilitiesResponse",
@@ -122,45 +163,76 @@ std::string RecordingService::handle(const std::string& req) {
                "Options=\"true\"/>"
             "</trc:GetServiceCapabilitiesResponse>");
 
-    if (has("GetRecordingOptions"))
+    if (has("GetRecordingOptions")) {
+        if (recordingToken() != REC)
+            return fault("ter:NoRecording", "No recording with the given token");
         return R("GetRecordingOptionsResponse",
             "<trc:GetRecordingOptionsResponse>"
-              "<trc:JobOptions Spare=\"1\" CompatibleSources=\"" +
-                  std::string(SRC_PROFILE) + "\"/>"
-              // DynamicTracks=false: báo không còn slot track động.
-              "<trc:TrackOptions SpareTotal=\"0\" SpareVideo=\"0\" "
-                                "SpareAudio=\"0\" SpareMetadata=\"0\"/>"
+              "<trc:Options>"
+                "<trc:Job Spare=\"1\" CompatibleSources=\"" +
+                    std::string(SRC_PROFILE) + "\"/>"
+                // DynamicTracks=false: báo không còn slot track động.
+                "<trc:Track SpareTotal=\"0\" SpareVideo=\"0\" "
+                           "SpareAudio=\"0\" SpareMetadata=\"0\"/>"
+              "</trc:Options>"
             "</trc:GetRecordingOptionsResponse>");
+    }
 
-    if (has("GetRecordingConfiguration"))
+    if (has("GetRecordingConfiguration")) {
+        if (recordingToken() != REC)
+            return fault("ter:NoRecording", "No recording with the given token");
         return R("GetRecordingConfigurationResponse",
             "<trc:GetRecordingConfigurationResponse>"
-              "<trc:RecordingConfiguration>" + recordingConfig() +
+              "<trc:RecordingConfiguration>" + getRecordingConfig() +
               "</trc:RecordingConfiguration>"
             "</trc:GetRecordingConfigurationResponse>");
+    }
 
-    if (has("SetRecordingConfiguration"))
+    if (has("SetRecordingConfiguration")) {
+        if (recordingToken() != REC)
+            return fault("ter:NoRecording", "No recording with the given token");
+        auto config = extractElementContent(req, "RecordingConfiguration");
+        if (!config.empty()) setRecordingConfig(config);
         return R("SetRecordingConfigurationResponse",
             "<trc:SetRecordingConfigurationResponse/>");
+    }
 
-    if (has("GetTrackConfiguration"))
+    if (has("GetTrackConfiguration")) {
+        if (recordingToken() != REC)
+            return fault("ter:NoRecording", "No recording with the given token");
+        const auto trackToken = extractInnerTag(req, "TrackToken");
+        if (trackToken != "VIDEO_0" && trackToken != "META_0")
+            return fault("ter:NoTrack", "No track with the given token");
+        const bool metadata = trackToken == "META_0";
         return R("GetTrackConfigurationResponse",
             "<trc:GetTrackConfigurationResponse>"
               "<trc:TrackConfiguration>"
-                "<tt:TrackType>Video</tt:TrackType>"
-                "<tt:Description>Video track</tt:Description>"
+                "<tt:TrackType>" + std::string(metadata ? "Metadata" : "Video") +
+                "</tt:TrackType>"
+                "<tt:Description>" + std::string(metadata ? "Metadata track" : "Video track") +
+                "</tt:Description>"
               "</trc:TrackConfiguration>"
             "</trc:GetTrackConfigurationResponse>");
+    }
 
-    if (has("SetTrackConfiguration"))
+    if (has("SetTrackConfiguration")) {
+        if (recordingToken() != REC)
+            return fault("ter:NoRecording", "No recording with the given token");
+        const auto trackToken = extractInnerTag(req, "TrackToken");
+        if (trackToken != "VIDEO_0" && trackToken != "META_0")
+            return fault("ter:NoTrack", "No track with the given token");
         return R("SetTrackConfigurationResponse",
             "<trc:SetTrackConfigurationResponse/>");
+    }
 
-    if (has("GetRecordingJobConfiguration"))
+    if (has("GetRecordingJobConfiguration")) {
+        if (jobToken() != JOB)
+            return fault("ter:NoRecordingJob", "No recording job with the given token");
         return R("GetRecordingJobConfigurationResponse",
             "<trc:GetRecordingJobConfigurationResponse>"
               "<trc:JobConfiguration>" + jobConfig() + "</trc:JobConfiguration>"
             "</trc:GetRecordingJobConfigurationResponse>");
+    }
 
     if (has("SetRecordingJobConfiguration"))
         return R("SetRecordingJobConfigurationResponse",
@@ -168,7 +240,9 @@ std::string RecordingService::handle(const std::string& req) {
               "<trc:JobConfiguration>" + jobConfig() + "</trc:JobConfiguration>"
             "</trc:SetRecordingJobConfigurationResponse>");
 
-    if (has("GetRecordingJobState"))
+    if (has("GetRecordingJobState")) {
+        if (jobToken() != JOB)
+            return fault("ter:NoRecordingJob", "No recording job with the given token");
         return R("GetRecordingJobStateResponse",
             "<trc:GetRecordingJobStateResponse>"
               "<trc:State>"
@@ -190,6 +264,7 @@ std::string RecordingService::handle(const std::string& req) {
                 "</tt:Sources>"
               "</trc:State>"
             "</trc:GetRecordingJobStateResponse>");
+    }
 
     if (has("SetRecordingJobMode"))
         return R("SetRecordingJobModeResponse",
@@ -220,7 +295,7 @@ std::string RecordingService::handle(const std::string& req) {
             "<trc:GetRecordingsResponse>"
               "<trc:RecordingItem>"
                 "<tt:RecordingToken>" + std::string(REC) + "</tt:RecordingToken>"
-                "<tt:Configuration>" + recordingConfig() + "</tt:Configuration>"
+                "<tt:Configuration>" + getRecordingConfig() + "</tt:Configuration>"
                 "<tt:Tracks>" + tracks() + "</tt:Tracks>"
               "</trc:RecordingItem>"
             "</trc:GetRecordingsResponse>");

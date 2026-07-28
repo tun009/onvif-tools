@@ -182,10 +182,9 @@ std::string SearchService::handle(const std::string& req) {
             "</tse:GetEventSearchResultsResponse>");
 
     if (has("EndSearch"))
-        // DataPointer = thời điểm cuối (spec: điểm dừng của phiên search).
         return R("EndSearchResponse",
             "<tse:EndSearchResponse>"
-              "<tse:DataPointer>" + std::string(T_UNTIL) + "</tse:DataPointer>"
+              "<tse:Endpoint>" + std::string(T_UNTIL) + "</tse:Endpoint>"
             "</tse:EndSearchResponse>");
 
     return "";  // op không nhận diện → OnvifServer fallback fault.

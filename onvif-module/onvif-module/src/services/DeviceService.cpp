@@ -446,7 +446,7 @@ int DeviceService::GetServices(
             "<trc:Capabilities DynamicRecordings=\"false\" DynamicTracks=\"false\" "
              "DeleteData=\"false\" Encoding=\"H264\" MaxRate=\"20000\" "
              "MaxTotalRate=\"20000\" MaxRecordings=\"1\" MaxRecordingJobs=\"1\" "
-             "Options=\"false\"/>";
+             "Options=\"true\"/>";
         svc("http://www.onvif.org/ver10/recording/wsdl", "/onvif/recording",
             21, 12, recCaps);
 

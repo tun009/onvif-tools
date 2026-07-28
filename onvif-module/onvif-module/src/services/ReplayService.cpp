@@ -4,6 +4,8 @@
 // replay pipeline thật (RTP ext 0xABAC, Range, onvif-replay) là Phase streaming.
 
 #include "services/ReplayService.h"
+#include "utils/FaultBuilder.h"
+#include <mutex>
 #include <sstream>
 
 namespace {
@@ -14,6 +16,19 @@ const char* ACT = "http://www.onvif.org/ver10/replay/wsdl/ReplayPort/";
 // streaming sẽ hiện thực). ponytail: host tĩnh 127.0.0.1 — thay bằng deviceIp
 // thật khi làm RTSP replay endpoint.
 const char* REPLAY_URI = "rtsp://127.0.0.1:8555/replay";
+
+std::mutex g_replayConfigMtx;
+std::string g_sessionTimeout = "PT60S";
+
+std::string getSessionTimeout() {
+    std::lock_guard<std::mutex> lock(g_replayConfigMtx);
+    return g_sessionTimeout;
+}
+
+void setSessionTimeout(const std::string& value) {
+    std::lock_guard<std::mutex> lock(g_replayConfigMtx);
+    g_sessionTimeout = value;
+}
 } // namespace
 
 std::string ReplayService::extractRelatesTo(const std::string& xml) {
@@ -24,6 +39,30 @@ std::string ReplayService::extractRelatesTo(const std::string& xml) {
         if (gt == std::string::npos) continue;
         auto lt = xml.find('<', gt);
         if (lt == std::string::npos) continue;
+        return xml.substr(gt + 1, lt - gt - 1);
+    }
+    return "";
+}
+
+std::string ReplayService::extractInnerTag(const std::string& xml,
+                                           const std::string& tag) {
+    size_t p = 0;
+    while ((p = xml.find(tag, p)) != std::string::npos) {
+        const auto after = p + tag.size();
+        if (after < xml.size() && xml[after] != '>' && xml[after] != ' ' &&
+            xml[after] != '\t' && xml[after] != '\r' && xml[after] != '\n') {
+            p = after;
+            continue;
+        }
+        const auto open = xml.rfind('<', p);
+        if (open == std::string::npos || (open + 1 < xml.size() && xml[open + 1] == '/')) {
+            p = after;
+            continue;
+        }
+        const auto gt = xml.find('>', after);
+        if (gt == std::string::npos) return "";
+        const auto lt = xml.find('<', gt + 1);
+        if (lt == std::string::npos) return "";
         return xml.substr(gt + 1, lt - gt - 1);
     }
     return "";
@@ -64,23 +103,30 @@ std::string ReplayService::handle(const std::string& req) {
                "SessionTimeoutRange=\"0 4294967295\" RTP_RTSP_TCP=\"true\"/>"
             "</trp:GetServiceCapabilitiesResponse>");
 
-    if (has("GetReplayUri"))
+    if (has("GetReplayUri")) {
+        if (extractInnerTag(req, "RecordingToken") != "Recording_0")
+            return FaultBuilder::sender("ter:InvalidArgVal", "ter:NoRecording",
+                                        "No recording with the given token");
         return R("GetReplayUriResponse",
             "<trp:GetReplayUriResponse>"
               "<trp:Uri>" + std::string(REPLAY_URI) + "</trp:Uri>"
             "</trp:GetReplayUriResponse>");
+    }
 
     if (has("GetReplayConfiguration"))
         return R("GetReplayConfigurationResponse",
             "<trp:GetReplayConfigurationResponse>"
               "<trp:Configuration>"
-                "<tt:SessionTimeout>PT60S</tt:SessionTimeout>"
+                "<tt:SessionTimeout>" + getSessionTimeout() + "</tt:SessionTimeout>"
               "</trp:Configuration>"
             "</trp:GetReplayConfigurationResponse>");
 
-    if (has("SetReplayConfiguration"))
+    if (has("SetReplayConfiguration")) {
+        auto timeout = extractInnerTag(req, "SessionTimeout");
+        if (!timeout.empty()) setSessionTimeout(timeout);
         return R("SetReplayConfigurationResponse",
             "<trp:SetReplayConfigurationResponse/>");
+    }
 
     return "";  // op không nhận diện → OnvifServer fallback fault.
 }
