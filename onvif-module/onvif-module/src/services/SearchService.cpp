@@ -347,8 +347,8 @@ std::string SearchService::handle(const std::string& req) {
             "</tt:Result>";
         const std::string eventResults = g_eventMaxMatches == 1
             ? trackState
-            : recordingStart + recordingStop + videoTrackStart + videoTrackStop +
-              trackState + metadataTrackStop;
+            : recordingStart + videoTrackStart + trackState + recordingStop +
+              videoTrackStop + metadataTrackStop;
         return R("GetEventSearchResultsResponse",
             "<tse:GetEventSearchResultsResponse>"
               "<tse:ResultList>"
