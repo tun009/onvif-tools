@@ -4,6 +4,7 @@
 // Definition đánh dấu Profile G SUPPORTED. Data model tĩnh → không cần backend/IPC.
 
 #include "services/RecordingService.h"
+#include "services/MockSubscriptionManager.h"
 #include "utils/FaultBuilder.h"
 #include <mutex>
 #include <sstream>
@@ -73,25 +74,55 @@ std::string tracks() {
         "</tt:Track>";
 }
 
-// RecordingJobConfiguration — 1 job ghi từ profile_main, mode Idle.
-std::string jobConfig() {
+struct JobState {
+    bool exists = true;
+    std::string mode = "Idle";
+    std::string priority = "10";
+    std::string sourceToken = SRC_PROFILE;
+    std::string sourceType = "http://www.onvif.org/ver10/schema/Profile";
+};
+std::mutex g_jobMtx;
+JobState g_job;
+
+std::string extractAttribute(const std::string& xml, const std::string& element,
+                             const std::string& attr) {
+    auto p = xml.find("<" + element);
+    if (p == std::string::npos) return "";
+    auto gt = xml.find('>', p);
+    if (gt == std::string::npos) return "";
+    auto a = xml.find(attr + "=\"", p);
+    if (a == std::string::npos || a > gt) return "";
+    a += attr.size() + 2;
+    auto end = xml.find('"', a);
+    return end == std::string::npos ? "" : xml.substr(a, end - a);
+}
+
+std::string jobConfig(const JobState& job) {
     return
         "<tt:RecordingToken>" + std::string(REC) + "</tt:RecordingToken>"
-        "<tt:Mode>Idle</tt:Mode>"
-        "<tt:Priority>10</tt:Priority>"
+        "<tt:Mode>" + job.mode + "</tt:Mode>"
+        "<tt:Priority>" + job.priority + "</tt:Priority>"
         "<tt:Source>"
-          "<tt:SourceToken>"
-            "<tt:Token>" + std::string(SRC_PROFILE) + "</tt:Token>"
-            "<tt:Type>http://www.onvif.org/ver10/schema/Profile</tt:Type>"
+          "<tt:SourceToken Type=\"" + job.sourceType + "\">"
+            "<tt:Token>" + job.sourceToken + "</tt:Token>"
           "</tt:SourceToken>"
-          "<tt:AutoCreateReceiver>false</tt:AutoCreateReceiver>"
-          "<tt:Tracks>"
-            "<tt:SourceTag>VIDEO</tt:SourceTag>"
-            "<tt:Destination>VIDEO_0</tt:Destination>"
-          "</tt:Tracks>"
         "</tt:Source>";
 }
+
+JobState getJob() {
+    std::lock_guard<std::mutex> lock(g_jobMtx);
+    return g_job;
+}
+
+void setJob(const JobState& job) {
+    std::lock_guard<std::mutex> lock(g_jobMtx);
+    g_job = job;
+}
 } // namespace
+
+std::string RecordingService::recordingConfigXml() {
+    return getRecordingConfig();
+}
 
 std::string RecordingService::extractRelatesTo(const std::string& xml) {
     for (const char* tag : {"MessageID", "wsa:MessageID", "wsa5:MessageID"}) {
@@ -108,13 +139,26 @@ std::string RecordingService::extractRelatesTo(const std::string& xml) {
 
 std::string RecordingService::extractInnerTag(const std::string& xml,
                                               const std::string& tag) {
-    auto p = xml.find(tag + ">");
-    if (p == std::string::npos) return "";
-    auto gt = xml.find('>', p);
-    if (gt == std::string::npos) return "";
-    auto lt = xml.find('<', gt);
-    if (lt == std::string::npos) return "";
-    return xml.substr(gt + 1, lt - gt - 1);
+    size_t p = 0;
+    while ((p = xml.find(tag, p)) != std::string::npos) {
+        const auto after = p + tag.size();
+        if (after < xml.size() && xml[after] != '>' && xml[after] != ' ' &&
+            xml[after] != '\t' && xml[after] != '\r' && xml[after] != '\n') {
+            p = after;
+            continue;
+        }
+        const auto open = xml.rfind('<', p);
+        if (open == std::string::npos || (open + 1 < xml.size() && xml[open + 1] == '/')) {
+            p = after;
+            continue;
+        }
+        const auto gt = xml.find('>', after);
+        if (gt == std::string::npos) return "";
+        const auto lt = xml.find('<', gt + 1);
+        if (lt == std::string::npos) return "";
+        return xml.substr(gt + 1, lt - gt - 1);
+    }
+    return "";
 }
 
 std::string RecordingService::wrap(const std::string& action,
@@ -226,69 +270,106 @@ std::string RecordingService::handle(const std::string& req) {
     }
 
     if (has("GetRecordingJobConfiguration")) {
-        if (jobToken() != JOB)
+        const auto job = getJob();
+        if (jobToken() != JOB || !job.exists)
             return fault("ter:NoRecordingJob", "No recording job with the given token");
         return R("GetRecordingJobConfigurationResponse",
             "<trc:GetRecordingJobConfigurationResponse>"
-              "<trc:JobConfiguration>" + jobConfig() + "</trc:JobConfiguration>"
+              "<trc:JobConfiguration>" + jobConfig(job) + "</trc:JobConfiguration>"
             "</trc:GetRecordingJobConfigurationResponse>");
     }
 
-    if (has("SetRecordingJobConfiguration"))
+    if (has("SetRecordingJobConfiguration")) {
+        auto job = getJob();
+        if (jobToken() != JOB || !job.exists)
+            return fault("ter:NoRecordingJob", "No recording job with the given token");
+        auto mode = extractInnerTag(req, "Mode");
+        auto priority = extractInnerTag(req, "Priority");
+        auto sourceToken = extractInnerTag(req, "Token");
+        auto sourceType = extractAttribute(req, "SourceToken", "Type");
+        if (!mode.empty()) job.mode = mode;
+        if (!priority.empty()) job.priority = priority;
+        if (!sourceToken.empty()) job.sourceToken = sourceToken;
+        if (!sourceType.empty()) job.sourceType = sourceType;
+        setJob(job);
         return R("SetRecordingJobConfigurationResponse",
             "<trc:SetRecordingJobConfigurationResponse>"
-              "<trc:JobConfiguration>" + jobConfig() + "</trc:JobConfiguration>"
+              "<trc:JobConfiguration>" + jobConfig(job) + "</trc:JobConfiguration>"
             "</trc:SetRecordingJobConfigurationResponse>");
+    }
 
     if (has("GetRecordingJobState")) {
-        if (jobToken() != JOB)
+        const auto job = getJob();
+        if (jobToken() != JOB || !job.exists)
             return fault("ter:NoRecordingJob", "No recording job with the given token");
         return R("GetRecordingJobStateResponse",
             "<trc:GetRecordingJobStateResponse>"
               "<trc:State>"
                 "<tt:RecordingToken>" + std::string(REC) + "</tt:RecordingToken>"
-                "<tt:State>Idle</tt:State>"
+                "<tt:State>" + job.mode + "</tt:State>"
                 "<tt:Sources>"
-                  "<tt:SourceToken>"
-                    "<tt:Token>" + std::string(SRC_PROFILE) + "</tt:Token>"
-                    "<tt:Type>http://www.onvif.org/ver10/schema/Profile</tt:Type>"
+                  "<tt:SourceToken Type=\"" + job.sourceType + "\">"
+                    "<tt:Token>" + job.sourceToken + "</tt:Token>"
                   "</tt:SourceToken>"
-                  "<tt:State>Idle</tt:State>"
-                  "<tt:Tracks>"
-                    "<tt:Track>"
-                      "<tt:SourceTag>VIDEO</tt:SourceTag>"
-                      "<tt:Destination>VIDEO_0</tt:Destination>"
-                      "<tt:State>Idle</tt:State>"
-                    "</tt:Track>"
-                  "</tt:Tracks>"
+                  "<tt:State>" + job.mode + "</tt:State>"
                 "</tt:Sources>"
               "</trc:State>"
             "</trc:GetRecordingJobStateResponse>");
     }
 
-    if (has("SetRecordingJobMode"))
+    if (has("SetRecordingJobMode")) {
+        auto job = getJob();
+        if (jobToken() != JOB || !job.exists)
+            return fault("ter:NoRecordingJob", "No recording job with the given token");
+        auto mode = extractInnerTag(req, "Mode");
+        if (!mode.empty()) job.mode = mode;
+        setJob(job);
+        MockSubscriptionManager::getInstance().fireRecordingJobState(JOB, job.mode);
         return R("SetRecordingJobModeResponse",
             "<trc:SetRecordingJobModeResponse/>");
+    }
 
-    if (has("CreateRecordingJob"))
+    if (has("CreateRecordingJob")) {
+        JobState job;
+        job.exists = true;
+        auto mode = extractInnerTag(req, "Mode");
+        auto priority = extractInnerTag(req, "Priority");
+        auto sourceToken = extractInnerTag(req, "Token");
+        auto sourceType = extractAttribute(req, "SourceToken", "Type");
+        if (!mode.empty()) job.mode = mode;
+        if (!priority.empty()) job.priority = priority;
+        if (!sourceToken.empty()) job.sourceToken = sourceToken;
+        if (!sourceType.empty()) job.sourceType = sourceType;
+        setJob(job);
+        MockSubscriptionManager::getInstance().fireRecordingJobState(JOB, job.mode);
         return R("CreateRecordingJobResponse",
             "<trc:CreateRecordingJobResponse>"
               "<trc:JobToken>" + std::string(JOB) + "</trc:JobToken>"
-              "<trc:JobConfiguration>" + jobConfig() + "</trc:JobConfiguration>"
+              "<trc:JobConfiguration>" + jobConfig(job) + "</trc:JobConfiguration>"
             "</trc:CreateRecordingJobResponse>");
+    }
 
-    if (has("DeleteRecordingJob"))
+    if (has("DeleteRecordingJob")) {
+        auto job = getJob();
+        if (jobToken() != JOB || !job.exists)
+            return fault("ter:NoRecordingJob", "No recording job with the given token");
+        job.exists = false;
+        setJob(job);
         return R("DeleteRecordingJobResponse",
             "<trc:DeleteRecordingJobResponse/>");
+    }
 
-    if (has("GetRecordingJobs"))
+    if (has("GetRecordingJobs")) {
+        const auto job = getJob();
         return R("GetRecordingJobsResponse",
-            "<trc:GetRecordingJobsResponse>"
-              "<trc:JobItem>"
-                "<tt:JobToken>" + std::string(JOB) + "</tt:JobToken>"
-                "<tt:JobConfiguration>" + jobConfig() + "</tt:JobConfiguration>"
-              "</trc:JobItem>"
+            "<trc:GetRecordingJobsResponse>" +
+              (job.exists ?
+                "<trc:JobItem>"
+                  "<tt:JobToken>" + std::string(JOB) + "</tt:JobToken>"
+                  "<tt:JobConfiguration>" + jobConfig(job) + "</tt:JobConfiguration>"
+                "</trc:JobItem>" : "") +
             "</trc:GetRecordingJobsResponse>");
+    }
 
     if (has("GetRecordings"))
         return R("GetRecordingsResponse",

@@ -134,12 +134,27 @@ Chỉ làm sau khi DTT qua DESCRIBE/SETUP:
 7. Restart đúng service bị ảnh hưởng bằng PID + `kill -9`; verify qua kết nối SSH mới.
 8. Chạy DTT full; cập nhật baseline và root-cause map trong file này.
 
-## 7. Trạng thái thực hiện
+## 7. Kết quả DTT sau Đợt 1 (`g2.xml`)
+
+- Baseline mới: **278/313 passed, 35 failed** (từ 267/313, 46 failed).
+- 12 lỗi cũ đã pass: EVENT-2-1-18/25; RECORDING-1-1-3, 3-1-11,
+  4-1-3/9/10/11/13/14; REPLAY-1-2-1, 4-1-1.
+- Hai EVENT connection-reset pass lại dù không sửa Event → xem là timing/state pollution,
+  tiếp tục theo dõi full run, không sửa mù.
+- Một lỗi mới lộ: SEARCH-2-1-17 — RecordingConfiguration có state nhưng Search vẫn
+  hardcode nội dung cũ; cần dùng chung data model/state giữa Recording và Search.
+- Ba Recording Job case đã qua Options nhưng lộ tầng tiếp: CreateRecordingJob phải echo
+  đúng cấu hình DTT gửi (Mode Active, Priority 1, SourceToken Type=Profile), không trả
+  job config hardcode Idle/10.
+- SEARCH-2-1-12 đã qua schema EndSearch; tầng tiếp yêu cầu
+  `Sender/InvalidArgVal/InvalidToken` khi dùng SearchToken sau EndSearch.
+
+## 8. Trạng thái thực hiện
 
 | Đợt | Trạng thái | Kết quả |
 |---|---|---|
 | Feature Definition | DONE | PASSED; Profile G SUPPORTED |
-| Đợt 1 — SOAP/state/fault | IMPLEMENTED — AWAITING DTT | Build-check + self-check 11/11; chưa có baseline DTT mới |
-| Đợt 2 — Events/Search | PENDING | — |
+| Đợt 1 — SOAP/state/fault | DONE — DTT VERIFIED | `g2.xml`: 278/313 pass, 35 fail. 12 lỗi cũ pass; 1 consistency case mới lộ → cải thiện ròng 11. |
+| Đợt 2 — Events/Search/Job state | IMPLEMENTED — AWAITING DTT | Build-check sạch + integration self-check 7/7; baseline trước sửa: 35 fail. |
 | Đợt 3 — Replay connectivity | PENDING | — |
 | Đợt 4 — Replay RTP | PENDING | — |

@@ -22,6 +22,9 @@ public:
     std::string name() const override { return "RecordingService"; }
     std::string handle(const std::string& rawRequest) override;
 
+    // Shared read-only view cho SearchService để GetRecordings/Search nhất quán.
+    static std::string recordingConfigXml();
+
 private:
     static std::string extractRelatesTo(const std::string& xml);
     static std::string extractInnerTag(const std::string& xml, const std::string& tag);

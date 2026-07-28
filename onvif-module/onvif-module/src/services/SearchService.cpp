@@ -4,6 +4,9 @@
 // (SearchState=Completed). 1 recording tĩnh Recording_0. Filter parse-cho-qua.
 
 #include "services/SearchService.h"
+#include "services/RecordingService.h"
+#include "utils/FaultBuilder.h"
+#include <mutex>
 #include <sstream>
 
 namespace {
@@ -11,25 +14,23 @@ const char* NS_SEARCH = "http://www.onvif.org/ver10/search/wsdl";
 const char* ACT = "http://www.onvif.org/ver10/search/wsdl/SearchPort/";
 
 const char* REC = "Recording_0";
-const char* SEARCH_TOKEN = "SearchSession_0";
+const char* RECORDING_SEARCH_TOKEN = "RecordingSearch_0";
+const char* EVENT_SEARCH_TOKEN = "EventSearch_0";
+std::mutex g_searchMtx;
+bool g_recordingSearchActive = false;
+bool g_recordingSearchNeedsAudio = false;
+bool g_eventSearchActive = false;
 // Khoảng thời gian recording tĩnh (dữ liệu giả để search trả superset).
 const char* T_FROM = "2026-07-01T00:00:00Z";
 const char* T_UNTIL = "2026-07-28T00:00:00Z";
 
 // RecordingInformation — dùng chung GetRecordingInformation & search results.
-std::string recordingInformation() {
-    return
-        "<tt:RecordingToken>" + std::string(REC) + "</tt:RecordingToken>"
-        "<tt:Source>"
-          "<tt:SourceId>http://localhost/sourceId</tt:SourceId>"
-          "<tt:Name>MockCam-4K</tt:Name>"
-          "<tt:Location>MockSite</tt:Location>"
-          "<tt:Description>On-board recording</tt:Description>"
-          "<tt:Address>http://localhost/recording</tt:Address>"
-        "</tt:Source>"
+std::string recordingInformation(bool includeAudio = false) {
+    std::string out =
+        "<tt:RecordingToken>" + std::string(REC) + "</tt:RecordingToken>" +
+        RecordingService::recordingConfigXml() +
         "<tt:EarliestRecording>" + std::string(T_FROM) + "</tt:EarliestRecording>"
         "<tt:LatestRecording>" + std::string(T_UNTIL) + "</tt:LatestRecording>"
-        "<tt:Content>Mock on-board recording</tt:Content>"
         "<tt:Track>"
           "<tt:TrackToken>VIDEO_0</tt:TrackToken>"
           "<tt:TrackType>Video</tt:TrackType>"
@@ -43,8 +44,17 @@ std::string recordingInformation() {
           "<tt:Description>Metadata track</tt:Description>"
           "<tt:DataFrom>" + std::string(T_FROM) + "</tt:DataFrom>"
           "<tt:DataTo>" + std::string(T_UNTIL) + "</tt:DataTo>"
-        "</tt:Track>"
-        "<tt:RecordingStatus>Stopped</tt:RecordingStatus>";
+        "</tt:Track>";
+    if (includeAudio)
+        out +=
+          "<tt:Track>"
+            "<tt:TrackToken>AUDIO_0</tt:TrackToken>"
+            "<tt:TrackType>Audio</tt:TrackType>"
+            "<tt:Description>Synthetic search audio track</tt:Description>"
+            "<tt:DataFrom>" + std::string(T_FROM) + "</tt:DataFrom>"
+            "<tt:DataTo>" + std::string(T_UNTIL) + "</tt:DataTo>"
+          "</tt:Track>";
+    return out + "<tt:RecordingStatus>Stopped</tt:RecordingStatus>";
 }
 } // namespace
 
@@ -84,6 +94,8 @@ std::string SearchService::wrap(const std::string& action,
        << " xmlns:wsa=\"http://www.w3.org/2005/08/addressing\""
        << " xmlns:tse=\"" << NS_SEARCH << "\""
        << " xmlns:tt=\"http://www.onvif.org/ver10/schema\""
+       << " xmlns:wsnt=\"http://docs.oasis-open.org/wsn/b-2\""
+       << " xmlns:tns1=\"http://www.onvif.org/ver10/topics\""
        << " xmlns:ter=\"http://www.onvif.org/ver10/error\">"
        << "<SOAP-ENV:Header>"
        << "<wsa:Action>" << action << "</wsa:Action>";
@@ -151,41 +163,87 @@ std::string SearchService::handle(const std::string& req) {
               "</tse:MediaAttributes>"
             "</tse:GetMediaAttributesResponse>");
 
-    if (has("FindRecordings"))
+    if (has("FindRecordings")) {
+        std::lock_guard<std::mutex> lock(g_searchMtx);
+        g_recordingSearchActive = true;
+        g_recordingSearchNeedsAudio = req.find("TrackType = \"Audio\"") != std::string::npos;
         return R("FindRecordingsResponse",
             "<tse:FindRecordingsResponse>"
-              "<tse:SearchToken>" + std::string(SEARCH_TOKEN) + "</tse:SearchToken>"
+              "<tse:SearchToken>" + std::string(RECORDING_SEARCH_TOKEN) + "</tse:SearchToken>"
             "</tse:FindRecordingsResponse>");
+    }
 
-    if (has("GetRecordingSearchResults"))
+    if (has("GetRecordingSearchResults")) {
+        const auto token = extractInnerTag(req, "SearchToken");
+        std::lock_guard<std::mutex> lock(g_searchMtx);
+        if (token != RECORDING_SEARCH_TOKEN || !g_recordingSearchActive)
+            return FaultBuilder::sender("ter:InvalidArgVal", "ter:InvalidToken",
+                                        "Invalid search token");
         return R("GetRecordingSearchResultsResponse",
             "<tse:GetRecordingSearchResultsResponse>"
               "<tse:ResultList>"
                 "<tt:SearchState>Completed</tt:SearchState>"
-                "<tt:RecordingInformation>" + recordingInformation() +
+                "<tt:RecordingInformation>" + recordingInformation(g_recordingSearchNeedsAudio) +
                 "</tt:RecordingInformation>"
               "</tse:ResultList>"
             "</tse:GetRecordingSearchResultsResponse>");
+    }
 
-    if (has("FindEvents"))
+    if (has("FindEvents")) {
+        std::lock_guard<std::mutex> lock(g_searchMtx);
+        g_eventSearchActive = true;
         return R("FindEventsResponse",
             "<tse:FindEventsResponse>"
-              "<tse:SearchToken>" + std::string(SEARCH_TOKEN) + "</tse:SearchToken>"
+              "<tse:SearchToken>" + std::string(EVENT_SEARCH_TOKEN) + "</tse:SearchToken>"
             "</tse:FindEventsResponse>");
+    }
 
-    if (has("GetEventSearchResults"))
+    if (has("GetEventSearchResults")) {
+        const auto token = extractInnerTag(req, "SearchToken");
+        std::lock_guard<std::mutex> lock(g_searchMtx);
+        if (token != EVENT_SEARCH_TOKEN || !g_eventSearchActive)
+            return FaultBuilder::sender("ter:InvalidArgVal", "ter:InvalidToken",
+                                        "Invalid search token");
         return R("GetEventSearchResultsResponse",
             "<tse:GetEventSearchResultsResponse>"
               "<tse:ResultList>"
                 "<tt:SearchState>Completed</tt:SearchState>"
+                "<tt:Result>"
+                  "<tt:RecordingToken>" + std::string(REC) + "</tt:RecordingToken>"
+                  "<tt:TrackToken>META_0</tt:TrackToken>"
+                  "<tt:Time>2026-07-15T12:00:00Z</tt:Time>"
+                  "<tt:Event>"
+                    "<wsnt:Topic Dialect=\"http://www.onvif.org/ver10/tev/topicExpression/ConcreteSet\">"
+                      "tns1:RecordingHistory/Track/State"
+                    "</wsnt:Topic>"
+                    "<wsnt:Message>"
+                      "<tt:Message UtcTime=\"2026-07-15T12:00:00Z\" PropertyOperation=\"Changed\">"
+                        "<tt:Source>"
+                          "<tt:SimpleItem Name=\"RecordingToken\" Value=\"Recording_0\"/>"
+                          "<tt:SimpleItem Name=\"Track\" Value=\"META_0\"/>"
+                        "</tt:Source>"
+                        "<tt:Data><tt:SimpleItem Name=\"IsDataPresent\" Value=\"true\"/></tt:Data>"
+                      "</tt:Message>"
+                    "</wsnt:Message>"
+                  "</tt:Event>"
+                  "<tt:StartStateEvent>false</tt:StartStateEvent>"
+                "</tt:Result>"
               "</tse:ResultList>"
             "</tse:GetEventSearchResultsResponse>");
+    }
 
-    if (has("EndSearch"))
+    if (has("EndSearch")) {
+        const auto token = extractInnerTag(req, "SearchToken");
+        std::lock_guard<std::mutex> lock(g_searchMtx);
+        if (token == RECORDING_SEARCH_TOKEN) g_recordingSearchActive = false;
+        else if (token == EVENT_SEARCH_TOKEN) g_eventSearchActive = false;
+        else return FaultBuilder::sender("ter:InvalidArgVal", "ter:InvalidToken",
+                                         "Invalid search token");
         return R("EndSearchResponse",
             "<tse:EndSearchResponse>"
               "<tse:Endpoint>" + std::string(T_UNTIL) + "</tse:Endpoint>"
             "</tse:EndSearchResponse>");
+    }
 
     return "";  // op không nhận diện → OnvifServer fallback fault.
 }

@@ -349,23 +349,28 @@ std::string MockSubscriptionManager::handleGetEventProperties(const std::string&
           "<tns1:RecordingConfig>"
             "<JobState wstop:topic=\"true\">"
               "<tt:MessageDescription IsProperty=\"true\">"
-                "<tt:Source><tt:SimpleItemDescription Name=\"RecordingJobToken\" Type=\"tt:ReferenceToken\"/></tt:Source>"
+                "<tt:Source><tt:SimpleItemDescription Name=\"RecordingJobToken\" Type=\"tt:RecordingJobReference\"/></tt:Source>"
                 "<tt:Data><tt:SimpleItemDescription Name=\"State\" Type=\"xs:string\"/></tt:Data>"
               "</tt:MessageDescription>"
             "</JobState>"
             "<RecordingConfiguration wstop:topic=\"true\">"
-              "<tt:MessageDescription IsProperty=\"true\">"
+              "<tt:MessageDescription IsProperty=\"false\">"
                 "<tt:Source><tt:SimpleItemDescription Name=\"RecordingToken\" Type=\"tt:ReferenceToken\"/></tt:Source>"
               "</tt:MessageDescription>"
             "</RecordingConfiguration>"
             "<TrackConfiguration wstop:topic=\"true\">"
-              "<tt:MessageDescription IsProperty=\"true\">"
+              "<tt:MessageDescription IsProperty=\"false\">"
                 "<tt:Source>"
                   "<tt:SimpleItemDescription Name=\"RecordingToken\" Type=\"tt:ReferenceToken\"/>"
                   "<tt:SimpleItemDescription Name=\"TrackToken\" Type=\"tt:ReferenceToken\"/>"
                 "</tt:Source>"
               "</tt:MessageDescription>"
             "</TrackConfiguration>"
+            "<RecordingJobConfiguration wstop:topic=\"true\">"
+              "<tt:MessageDescription IsProperty=\"false\">"
+                "<tt:Source><tt:SimpleItemDescription Name=\"RecordingJobToken\" Type=\"tt:RecordingJobReference\"/></tt:Source>"
+              "</tt:MessageDescription>"
+            "</RecordingJobConfiguration>"
           "</tns1:RecordingConfig>"
           "<tns1:RecordingHistory>"
             "<Recording>"
@@ -542,6 +547,32 @@ void MockSubscriptionManager::fireConfigurationChanged(const std::string& token,
           << "<tt:SimpleItem Name=\"Token\" Value=\"" << token << "\"/>"
           << "<tt:SimpleItem Name=\"Type\" Value=\"" << type << "\"/>"
           << "</tt:Source>"
+          << "</tt:Message></wsnt:Message>"
+          << "</wsnt:NotificationMessage>";
+        kv.second.pending.push_back(m.str());
+    }
+}
+
+void MockSubscriptionManager::fireRecordingJobState(const std::string& jobToken,
+                                                     const std::string& state) {
+    std::lock_guard<std::mutex> lk(mtx_);
+    const std::string now = getXmlUtcTime(0);
+    for (auto& kv : subscriptions_) {
+        const std::string& f = kv.second.topicFilter;
+        const bool match = f.empty() || f.find("JobState") != std::string::npos ||
+                           f.find("RecordingConfig//.") != std::string::npos ||
+                           f.find("RecordingConfig//*") != std::string::npos;
+        if (!match) continue;
+        const std::string topic = echoTopic(f, "JobState", "tns1:RecordingConfig/JobState");
+        std::ostringstream m;
+        m << "<wsnt:NotificationMessage>"
+          << "<wsnt:Topic Dialect=\"" << TOPIC_DIALECT << "\">" << topic << "</wsnt:Topic>"
+          << "<wsnt:Message><tt:Message UtcTime=\"" << now
+          << "\" PropertyOperation=\"Changed\">"
+          << "<tt:Source><tt:SimpleItem Name=\"RecordingJobToken\" Value=\""
+          << jobToken << "\"/></tt:Source>"
+          << "<tt:Data><tt:SimpleItem Name=\"State\" Value=\"" << state
+          << "\"/></tt:Data>"
           << "</tt:Message></wsnt:Message>"
           << "</wsnt:NotificationMessage>";
         kv.second.pending.push_back(m.str());
