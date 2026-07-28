@@ -119,24 +119,17 @@ std::string RecordingService::handle(const std::string& req) {
               "<trc:Capabilities DynamicRecordings=\"false\" DynamicTracks=\"false\" "
                "DeleteData=\"false\" Encoding=\"H264\" MaxRate=\"20000\" "
                "MaxTotalRate=\"20000\" MaxRecordings=\"1\" MaxRecordingJobs=\"1\" "
-               "Options=\"false\"/>"
+               "Options=\"true\"/>"
             "</trc:GetServiceCapabilitiesResponse>");
 
     if (has("GetRecordingOptions"))
         return R("GetRecordingOptionsResponse",
             "<trc:GetRecordingOptionsResponse>"
-              "<trc:Options>"
-                "<tt:Job>"
-                  "<tt:Spare>1</tt:Spare>"
-                  "<tt:CompatibleSources>" + std::string(SRC_PROFILE) + "</tt:CompatibleSources>"
-                "</tt:Job>"
-                "<tt:Track>"
-                  "<tt:SpareTotal>0</tt:SpareTotal>"
-                  "<tt:SpareVideo>0</tt:SpareVideo>"
-                  "<tt:SpareAudio>0</tt:SpareAudio>"
-                  "<tt:SpareMetadata>0</tt:SpareMetadata>"
-                "</tt:Track>"
-              "</trc:Options>"
+              "<trc:JobOptions Spare=\"1\" CompatibleSources=\"" +
+                  std::string(SRC_PROFILE) + "\"/>"
+              // DynamicTracks=false: báo không còn slot track động.
+              "<trc:TrackOptions SpareTotal=\"0\" SpareVideo=\"0\" "
+                                "SpareAudio=\"0\" SpareMetadata=\"0\"/>"
             "</trc:GetRecordingOptionsResponse>");
 
     if (has("GetRecordingConfiguration"))
