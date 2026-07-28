@@ -155,6 +155,6 @@ Chỉ làm sau khi DTT qua DESCRIBE/SETUP:
 |---|---|---|
 | Feature Definition | DONE | PASSED; Profile G SUPPORTED |
 | Đợt 1 — SOAP/state/fault | DONE — DTT VERIFIED | `g2.xml`: 278/313 pass, 35 fail. 12 lỗi cũ pass; 1 consistency case mới lộ → cải thiện ròng 11. |
-| Đợt 2 — Events/Search/Job state | IMPLEMENTED — AWAITING DTT | Build-check sạch + integration self-check 7/7; baseline trước sửa: 35 fail. |
+| Đợt 2 — Events/Search/Job state | REGRESSED IN g3; RECOVERY READY | `g3.xml`: 269/322 pass, 53 fail, Feature Definition FAILED. Recovery build-check sạch + 9/9: bỏ synthetic Audio/PTZ inference, valid RecordingInformation projection, scoped Job token parser, exact event schema, synthetic JobState. Chờ deploy/DTT. |
 | Đợt 3 — Replay connectivity | PENDING | — |
 | Đợt 4 — Replay RTP | PENDING | — |

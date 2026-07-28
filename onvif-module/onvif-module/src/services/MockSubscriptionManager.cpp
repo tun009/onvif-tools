@@ -355,20 +355,23 @@ std::string MockSubscriptionManager::handleGetEventProperties(const std::string&
             "</JobState>"
             "<RecordingConfiguration wstop:topic=\"true\">"
               "<tt:MessageDescription IsProperty=\"false\">"
-                "<tt:Source><tt:SimpleItemDescription Name=\"RecordingToken\" Type=\"tt:ReferenceToken\"/></tt:Source>"
+                "<tt:Source><tt:SimpleItemDescription Name=\"RecordingToken\" Type=\"tt:RecordingReference\"/></tt:Source>"
+                "<tt:Data><tt:ElementItemDescription Name=\"Configuration\" Type=\"tt:RecordingConfiguration\"/></tt:Data>"
               "</tt:MessageDescription>"
             "</RecordingConfiguration>"
             "<TrackConfiguration wstop:topic=\"true\">"
               "<tt:MessageDescription IsProperty=\"false\">"
                 "<tt:Source>"
-                  "<tt:SimpleItemDescription Name=\"RecordingToken\" Type=\"tt:ReferenceToken\"/>"
-                  "<tt:SimpleItemDescription Name=\"TrackToken\" Type=\"tt:ReferenceToken\"/>"
+                  "<tt:SimpleItemDescription Name=\"RecordingToken\" Type=\"tt:RecordingReference\"/>"
+                  "<tt:SimpleItemDescription Name=\"TrackToken\" Type=\"tt:TrackReference\"/>"
                 "</tt:Source>"
+                "<tt:Data><tt:ElementItemDescription Name=\"Configuration\" Type=\"tt:TrackConfiguration\"/></tt:Data>"
               "</tt:MessageDescription>"
             "</TrackConfiguration>"
             "<RecordingJobConfiguration wstop:topic=\"true\">"
               "<tt:MessageDescription IsProperty=\"false\">"
                 "<tt:Source><tt:SimpleItemDescription Name=\"RecordingJobToken\" Type=\"tt:RecordingJobReference\"/></tt:Source>"
+                "<tt:Data><tt:ElementItemDescription Name=\"Configuration\" Type=\"tt:RecordingJobConfiguration\"/></tt:Data>"
               "</tt:MessageDescription>"
             "</RecordingJobConfiguration>"
           "</tns1:RecordingConfig>"
@@ -636,6 +639,9 @@ std::string MockSubscriptionManager::handlePullMessages(const std::string& subId
                               filter.find("ProfileChanged") != std::string::npos;
     bool emitConfigurationChanged = wantAll || subtreeMedia ||
                                     filter.find("ConfigurationChanged") != std::string::npos;
+    bool emitJobState = filter.find("JobState") != std::string::npos ||
+                        filter.find("RecordingConfig//.") != std::string::npos ||
+                        filter.find("RecordingConfig//*") != std::string::npos;
 
     // Topic path dạng canonical ONVIF: CHỈ prefix ở segment gốc
     // (`tns1:VideoSource/MotionAlarm`), KHÔNG prefix mọi segment. DTT khớp topic
@@ -682,6 +688,21 @@ std::string MockSubscriptionManager::handlePullMessages(const std::string& subId
     for (const auto& p : pending) {
         if (emitted >= msgLimit) break;
         body << p; ++emitted;
+    }
+    if (emitted < msgLimit && emitJobState) {
+        const std::string topic = echoTopic(filter, "JobState",
+                                            "tns1:RecordingConfig/JobState");
+        body << "<wsnt:NotificationMessage>"
+             << "<wsnt:Topic Dialect=\"" << TOPIC_DIALECT << "\">"
+             << topic << "</wsnt:Topic>"
+             << "<wsnt:Message><tt:Message UtcTime=\"" << now
+             << "\" PropertyOperation=\"Initialized\">"
+             << "<tt:Source><tt:SimpleItem Name=\"RecordingJobToken\" Value=\"Job_0\"/>"
+             << "</tt:Source>"
+             << "<tt:Data><tt:SimpleItem Name=\"State\" Value=\"Idle\"/></tt:Data>"
+             << "</tt:Message></wsnt:Message>"
+             << "</wsnt:NotificationMessage>";
+        ++emitted;
     }
     if (emitted < msgLimit && !matched.empty()) {
         size_t start = pullNo % matched.size();

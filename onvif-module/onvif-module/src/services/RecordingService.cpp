@@ -84,6 +84,18 @@ struct JobState {
 std::mutex g_jobMtx;
 JobState g_job;
 
+std::string extractElementBlock(const std::string& xml, const std::string& element) {
+    for (const auto& prefix : {std::string("tt:"), std::string()}) {
+        const auto name = prefix + element;
+        auto p = xml.find("<" + name);
+        if (p == std::string::npos) continue;
+        auto end = xml.find("</" + name + ">", p);
+        if (end == std::string::npos) continue;
+        return xml.substr(p, end + name.size() + 3 - p);
+    }
+    return "";
+}
+
 std::string extractAttribute(const std::string& xml, const std::string& element,
                              const std::string& attr) {
     auto p = xml.find("<" + element);
@@ -285,8 +297,9 @@ std::string RecordingService::handle(const std::string& req) {
             return fault("ter:NoRecordingJob", "No recording job with the given token");
         auto mode = extractInnerTag(req, "Mode");
         auto priority = extractInnerTag(req, "Priority");
-        auto sourceToken = extractInnerTag(req, "Token");
-        auto sourceType = extractAttribute(req, "SourceToken", "Type");
+        const auto sourceBlock = extractElementBlock(req, "SourceToken");
+        auto sourceToken = extractInnerTag(sourceBlock, "Token");
+        auto sourceType = extractAttribute(sourceBlock, "SourceToken", "Type");
         if (!mode.empty()) job.mode = mode;
         if (!priority.empty()) job.priority = priority;
         if (!sourceToken.empty()) job.sourceToken = sourceToken;
@@ -334,8 +347,9 @@ std::string RecordingService::handle(const std::string& req) {
         job.exists = true;
         auto mode = extractInnerTag(req, "Mode");
         auto priority = extractInnerTag(req, "Priority");
-        auto sourceToken = extractInnerTag(req, "Token");
-        auto sourceType = extractAttribute(req, "SourceToken", "Type");
+        const auto sourceBlock = extractElementBlock(req, "SourceToken");
+        auto sourceToken = extractInnerTag(sourceBlock, "Token");
+        auto sourceType = extractAttribute(sourceBlock, "SourceToken", "Type");
         if (!mode.empty()) job.mode = mode;
         if (!priority.empty()) job.priority = priority;
         if (!sourceToken.empty()) job.sourceToken = sourceToken;

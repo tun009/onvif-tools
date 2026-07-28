@@ -18,19 +18,44 @@ const char* RECORDING_SEARCH_TOKEN = "RecordingSearch_0";
 const char* EVENT_SEARCH_TOKEN = "EventSearch_0";
 std::mutex g_searchMtx;
 bool g_recordingSearchActive = false;
-bool g_recordingSearchNeedsAudio = false;
 bool g_eventSearchActive = false;
 // Khoảng thời gian recording tĩnh (dữ liệu giả để search trả superset).
 const char* T_FROM = "2026-07-01T00:00:00Z";
 const char* T_UNTIL = "2026-07-28T00:00:00Z";
 
-// RecordingInformation — dùng chung GetRecordingInformation & search results.
-std::string recordingInformation(bool includeAudio = false) {
-    std::string out =
+std::string elementBlock(const std::string& xml, const std::string& tag) {
+    for (const auto& prefix : {std::string("tt:"), std::string()}) {
+        const auto name = prefix + tag;
+        auto p = xml.find("<" + name);
+        if (p == std::string::npos) continue;
+        auto gt = xml.find('>', p);
+        if (gt == std::string::npos) continue;
+        auto end = xml.find("</" + name + ">", gt);
+        if (end == std::string::npos) continue;
+        end += name.size() + 3;
+        auto block = xml.substr(p, end - p);
+        if (prefix.empty()) {
+            block.replace(1, tag.size(), "tt:" + tag);
+            auto close = block.rfind("</" + tag + ">");
+            if (close != std::string::npos) block.replace(close + 2, tag.size(), "tt:" + tag);
+        }
+        return block;
+    }
+    return "";
+}
+
+// RecordingInformation chỉ dùng Source + Content từ RecordingConfiguration.
+// MaximumRetentionTime KHÔNG thuộc schema RecordingInformation (g3 regression).
+std::string recordingInformation() {
+    const auto cfg = RecordingService::recordingConfigXml();
+    const auto source = elementBlock(cfg, "Source");
+    const auto content = elementBlock(cfg, "Content");
+    return
         "<tt:RecordingToken>" + std::string(REC) + "</tt:RecordingToken>" +
-        RecordingService::recordingConfigXml() +
+        source +
         "<tt:EarliestRecording>" + std::string(T_FROM) + "</tt:EarliestRecording>"
-        "<tt:LatestRecording>" + std::string(T_UNTIL) + "</tt:LatestRecording>"
+        "<tt:LatestRecording>" + std::string(T_UNTIL) + "</tt:LatestRecording>" +
+        content +
         "<tt:Track>"
           "<tt:TrackToken>VIDEO_0</tt:TrackToken>"
           "<tt:TrackType>Video</tt:TrackType>"
@@ -44,17 +69,8 @@ std::string recordingInformation(bool includeAudio = false) {
           "<tt:Description>Metadata track</tt:Description>"
           "<tt:DataFrom>" + std::string(T_FROM) + "</tt:DataFrom>"
           "<tt:DataTo>" + std::string(T_UNTIL) + "</tt:DataTo>"
-        "</tt:Track>";
-    if (includeAudio)
-        out +=
-          "<tt:Track>"
-            "<tt:TrackToken>AUDIO_0</tt:TrackToken>"
-            "<tt:TrackType>Audio</tt:TrackType>"
-            "<tt:Description>Synthetic search audio track</tt:Description>"
-            "<tt:DataFrom>" + std::string(T_FROM) + "</tt:DataFrom>"
-            "<tt:DataTo>" + std::string(T_UNTIL) + "</tt:DataTo>"
-          "</tt:Track>";
-    return out + "<tt:RecordingStatus>Stopped</tt:RecordingStatus>";
+        "</tt:Track>"
+        "<tt:RecordingStatus>Stopped</tt:RecordingStatus>";
 }
 } // namespace
 
@@ -166,7 +182,6 @@ std::string SearchService::handle(const std::string& req) {
     if (has("FindRecordings")) {
         std::lock_guard<std::mutex> lock(g_searchMtx);
         g_recordingSearchActive = true;
-        g_recordingSearchNeedsAudio = req.find("TrackType = \"Audio\"") != std::string::npos;
         return R("FindRecordingsResponse",
             "<tse:FindRecordingsResponse>"
               "<tse:SearchToken>" + std::string(RECORDING_SEARCH_TOKEN) + "</tse:SearchToken>"
@@ -183,7 +198,7 @@ std::string SearchService::handle(const std::string& req) {
             "<tse:GetRecordingSearchResultsResponse>"
               "<tse:ResultList>"
                 "<tt:SearchState>Completed</tt:SearchState>"
-                "<tt:RecordingInformation>" + recordingInformation(g_recordingSearchNeedsAudio) +
+                "<tt:RecordingInformation>" + recordingInformation() +
                 "</tt:RecordingInformation>"
               "</tse:ResultList>"
             "</tse:GetRecordingSearchResultsResponse>");
