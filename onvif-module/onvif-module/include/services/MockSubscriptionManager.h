@@ -45,6 +45,9 @@ public:
     //   tns1:Media/ConfigurationChanged: Source Token=<cfg token> + Type=<type>
     void fireProfileChanged(const std::string& token);
     void fireConfigurationChanged(const std::string& token, const std::string& type);
+    void fireRecordingConfigChanged(const std::string& topicName,
+                                    const std::string& sourceXml,
+                                    const std::string& configurationXml);
     void fireRecordingJobState(const std::string& jobToken, const std::string& state);
 
 private:

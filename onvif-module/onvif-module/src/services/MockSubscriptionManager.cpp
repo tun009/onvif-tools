@@ -350,7 +350,10 @@ std::string MockSubscriptionManager::handleGetEventProperties(const std::string&
             "<JobState wstop:topic=\"true\">"
               "<tt:MessageDescription IsProperty=\"true\">"
                 "<tt:Source><tt:SimpleItemDescription Name=\"RecordingJobToken\" Type=\"tt:RecordingJobReference\"/></tt:Source>"
-                "<tt:Data><tt:SimpleItemDescription Name=\"State\" Type=\"xs:string\"/></tt:Data>"
+                "<tt:Data>"
+                  "<tt:SimpleItemDescription Name=\"State\" Type=\"xs:string\"/>"
+                  "<tt:ElementItemDescription Name=\"Information\" Type=\"tt:RecordingJobStateInformation\"/>"
+                "</tt:Data>"
               "</tt:MessageDescription>"
             "</JobState>"
             "<RecordingConfiguration wstop:topic=\"true\">"
@@ -556,6 +559,33 @@ void MockSubscriptionManager::fireConfigurationChanged(const std::string& token,
     }
 }
 
+void MockSubscriptionManager::fireRecordingConfigChanged(
+    const std::string& topicName, const std::string& sourceXml,
+    const std::string& configurationXml) {
+    std::lock_guard<std::mutex> lk(mtx_);
+    const std::string now = getXmlUtcTime(0);
+    for (auto& kv : subscriptions_) {
+        const std::string& f = kv.second.topicFilter;
+        const bool match = f.empty() || f.find(topicName) != std::string::npos ||
+                           f.find("RecordingConfig//.") != std::string::npos ||
+                           f.find("RecordingConfig//*") != std::string::npos;
+        if (!match) continue;
+        const std::string topic = echoTopic(
+            f, topicName, "tns1:RecordingConfig/" + topicName);
+        std::ostringstream m;
+        m << "<wsnt:NotificationMessage>"
+          << "<wsnt:Topic Dialect=\"" << TOPIC_DIALECT << "\">" << topic << "</wsnt:Topic>"
+          << "<wsnt:Message><tt:Message UtcTime=\"" << now << "\">"
+          << "<tt:Source>" << sourceXml << "</tt:Source>"
+          << "<tt:Data><tt:ElementItem Name=\"Configuration\">"
+          << configurationXml
+          << "</tt:ElementItem></tt:Data>"
+          << "</tt:Message></wsnt:Message>"
+          << "</wsnt:NotificationMessage>";
+        kv.second.pending.push_back(m.str());
+    }
+}
+
 void MockSubscriptionManager::fireRecordingJobState(const std::string& jobToken,
                                                      const std::string& state) {
     std::lock_guard<std::mutex> lk(mtx_);
@@ -574,8 +604,19 @@ void MockSubscriptionManager::fireRecordingJobState(const std::string& jobToken,
           << "\" PropertyOperation=\"Changed\">"
           << "<tt:Source><tt:SimpleItem Name=\"RecordingJobToken\" Value=\""
           << jobToken << "\"/></tt:Source>"
-          << "<tt:Data><tt:SimpleItem Name=\"State\" Value=\"" << state
-          << "\"/></tt:Data>"
+          << "<tt:Data>"
+          << "<tt:SimpleItem Name=\"State\" Value=\"" << state << "\"/>"
+          << "<tt:ElementItem Name=\"Information\">"
+          << "<tt:RecordingJobStateInformation>"
+          << "<tt:RecordingToken>Recording_0</tt:RecordingToken>"
+          << "<tt:State>" << state << "</tt:State>"
+          << "<tt:Sources>"
+          << "<tt:SourceToken Type=\"http://www.onvif.org/ver10/schema/Profile\">"
+          << "<tt:Token>profile_main</tt:Token></tt:SourceToken>"
+          << "<tt:State>" << state << "</tt:State><tt:Tracks/>"
+          << "</tt:Sources>"
+          << "</tt:RecordingJobStateInformation>"
+          << "</tt:ElementItem></tt:Data>"
           << "</tt:Message></wsnt:Message>"
           << "</wsnt:NotificationMessage>";
         kv.second.pending.push_back(m.str());
@@ -689,7 +730,9 @@ std::string MockSubscriptionManager::handlePullMessages(const std::string& subId
         if (emitted >= msgLimit) break;
         body << p; ++emitted;
     }
-    if (emitted < msgLimit && emitJobState) {
+    // Property event khởi tạo chỉ thuộc pull đầu tiên. Phát lại ở mọi pull sẽ
+    // che event Changed vừa enqueue (RECORDING-5-1-19).
+    if (emitted < msgLimit && emitJobState && pullNo == 0) {
         const std::string topic = echoTopic(filter, "JobState",
                                             "tns1:RecordingConfig/JobState");
         body << "<wsnt:NotificationMessage>"
@@ -699,7 +742,19 @@ std::string MockSubscriptionManager::handlePullMessages(const std::string& subId
              << "\" PropertyOperation=\"Initialized\">"
              << "<tt:Source><tt:SimpleItem Name=\"RecordingJobToken\" Value=\"Job_0\"/>"
              << "</tt:Source>"
-             << "<tt:Data><tt:SimpleItem Name=\"State\" Value=\"Idle\"/></tt:Data>"
+             << "<tt:Data>"
+             << "<tt:SimpleItem Name=\"State\" Value=\"Idle\"/>"
+             << "<tt:ElementItem Name=\"Information\">"
+             << "<tt:RecordingJobStateInformation>"
+             << "<tt:RecordingToken>Recording_0</tt:RecordingToken>"
+             << "<tt:State>Idle</tt:State>"
+             << "<tt:Sources>"
+             << "<tt:SourceToken Type=\"http://www.onvif.org/ver10/schema/Profile\">"
+             << "<tt:Token>profile_main</tt:Token></tt:SourceToken>"
+             << "<tt:State>Idle</tt:State><tt:Tracks/>"
+             << "</tt:Sources>"
+             << "</tt:RecordingJobStateInformation>"
+             << "</tt:ElementItem></tt:Data>"
              << "</tt:Message></wsnt:Message>"
              << "</wsnt:NotificationMessage>";
         ++emitted;

@@ -34,6 +34,12 @@ std::string defaultRecordingConfig() {
 
 std::mutex g_configMtx;
 std::string g_recordingConfig = defaultRecordingConfig();
+std::string g_videoTrackConfig =
+    "<tt:TrackType>Video</tt:TrackType>"
+    "<tt:Description>Video track</tt:Description>";
+std::string g_metadataTrackConfig =
+    "<tt:TrackType>Metadata</tt:TrackType>"
+    "<tt:Description>Metadata track</tt:Description>";
 
 std::string getRecordingConfig() {
     std::lock_guard<std::mutex> lock(g_configMtx);
@@ -43,6 +49,16 @@ std::string getRecordingConfig() {
 void setRecordingConfig(const std::string& config) {
     std::lock_guard<std::mutex> lock(g_configMtx);
     g_recordingConfig = config;
+}
+
+std::string getTrackConfig(const std::string& token) {
+    std::lock_guard<std::mutex> lock(g_configMtx);
+    return token == "META_0" ? g_metadataTrackConfig : g_videoTrackConfig;
+}
+
+void setTrackConfig(const std::string& token, const std::string& config) {
+    std::lock_guard<std::mutex> lock(g_configMtx);
+    (token == "META_0" ? g_metadataTrackConfig : g_videoTrackConfig) = config;
 }
 
 std::string extractElementContent(const std::string& xml, const std::string& tag) {
@@ -151,20 +167,24 @@ std::string RecordingService::extractRelatesTo(const std::string& xml) {
 
 std::string RecordingService::extractInnerTag(const std::string& xml,
                                               const std::string& tag) {
-    size_t p = 0;
-    while ((p = xml.find(tag, p)) != std::string::npos) {
-        const auto after = p + tag.size();
-        if (after < xml.size() && xml[after] != '>' && xml[after] != ' ' &&
-            xml[after] != '\t' && xml[after] != '\r' && xml[after] != '\n') {
-            p = after;
+    size_t open = 0;
+    while ((open = xml.find('<', open)) != std::string::npos) {
+        const size_t nameStart = open + 1;
+        if (nameStart >= xml.size() || xml[nameStart] == '/' ||
+            xml[nameStart] == '!' || xml[nameStart] == '?') {
+            ++open;
             continue;
         }
-        const auto open = xml.rfind('<', p);
-        if (open == std::string::npos || (open + 1 < xml.size() && xml[open + 1] == '/')) {
-            p = after;
+        const auto nameEnd = xml.find_first_of(" >\t\r\n", nameStart);
+        if (nameEnd == std::string::npos) return "";
+        const auto colon = xml.rfind(':', nameEnd);
+        const size_t localStart =
+            (colon != std::string::npos && colon >= nameStart) ? colon + 1 : nameStart;
+        if (xml.compare(localStart, nameEnd - localStart, tag) != 0) {
+            open = nameEnd;
             continue;
         }
-        const auto gt = xml.find('>', after);
+        const auto gt = xml.find('>', nameEnd);
         if (gt == std::string::npos) return "";
         const auto lt = xml.find('<', gt + 1);
         if (lt == std::string::npos) return "";
@@ -248,7 +268,13 @@ std::string RecordingService::handle(const std::string& req) {
         if (recordingToken() != REC)
             return fault("ter:NoRecording", "No recording with the given token");
         auto config = extractElementContent(req, "RecordingConfiguration");
-        if (!config.empty()) setRecordingConfig(config);
+        if (!config.empty()) {
+            setRecordingConfig(config);
+            MockSubscriptionManager::getInstance().fireRecordingConfigChanged(
+                "RecordingConfiguration",
+                "<tt:SimpleItem Name=\"RecordingToken\" Value=\"Recording_0\"/>",
+                "<tt:RecordingConfiguration>" + config + "</tt:RecordingConfiguration>");
+        }
         return R("SetRecordingConfigurationResponse",
             "<trc:SetRecordingConfigurationResponse/>");
     }
@@ -259,14 +285,9 @@ std::string RecordingService::handle(const std::string& req) {
         const auto trackToken = extractInnerTag(req, "TrackToken");
         if (trackToken != "VIDEO_0" && trackToken != "META_0")
             return fault("ter:NoTrack", "No track with the given token");
-        const bool metadata = trackToken == "META_0";
         return R("GetTrackConfigurationResponse",
             "<trc:GetTrackConfigurationResponse>"
-              "<trc:TrackConfiguration>"
-                "<tt:TrackType>" + std::string(metadata ? "Metadata" : "Video") +
-                "</tt:TrackType>"
-                "<tt:Description>" + std::string(metadata ? "Metadata track" : "Video track") +
-                "</tt:Description>"
+              "<trc:TrackConfiguration>" + getTrackConfig(trackToken) +
               "</trc:TrackConfiguration>"
             "</trc:GetTrackConfigurationResponse>");
     }
@@ -277,6 +298,15 @@ std::string RecordingService::handle(const std::string& req) {
         const auto trackToken = extractInnerTag(req, "TrackToken");
         if (trackToken != "VIDEO_0" && trackToken != "META_0")
             return fault("ter:NoTrack", "No track with the given token");
+        const auto config = extractElementContent(req, "TrackConfiguration");
+        if (!config.empty()) {
+            setTrackConfig(trackToken, config);
+            MockSubscriptionManager::getInstance().fireRecordingConfigChanged(
+                "TrackConfiguration",
+                "<tt:SimpleItem Name=\"RecordingToken\" Value=\"Recording_0\"/>"
+                "<tt:SimpleItem Name=\"TrackToken\" Value=\"" + trackToken + "\"/>",
+                "<tt:TrackConfiguration>" + config + "</tt:TrackConfiguration>");
+        }
         return R("SetTrackConfigurationResponse",
             "<trc:SetTrackConfigurationResponse/>");
     }
@@ -305,6 +335,11 @@ std::string RecordingService::handle(const std::string& req) {
         if (!sourceToken.empty()) job.sourceToken = sourceToken;
         if (!sourceType.empty()) job.sourceType = sourceType;
         setJob(job);
+        MockSubscriptionManager::getInstance().fireRecordingConfigChanged(
+            "RecordingJobConfiguration",
+            "<tt:SimpleItem Name=\"RecordingJobToken\" Value=\"Job_0\"/>",
+            "<tt:RecordingJobConfiguration>" + jobConfig(job) +
+            "</tt:RecordingJobConfiguration>");
         return R("SetRecordingJobConfigurationResponse",
             "<trc:SetRecordingJobConfigurationResponse>"
               "<trc:JobConfiguration>" + jobConfig(job) + "</trc:JobConfiguration>"
