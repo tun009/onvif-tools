@@ -8,6 +8,9 @@
 #include "services/Media2MetadataService.h"
 #include "services/EventSubscriptionService.h"
 #include "services/AnalyticsService.h"
+#include "services/RecordingService.h"
+#include "services/SearchService.h"
+#include "services/ReplayService.h"
 #include "core/ServiceRegistry.h"
 #include "utils/FaultBuilder.h"
 #include "soapH.h"
@@ -251,6 +254,11 @@ OnvifServer::OnvifServer(const ServiceConfig& cfg, std::shared_ptr<ICameraBacken
         cfg_.deviceIp, cfg_.httpPort));
     // Profile M (M1): Analytics service — GetSupportedMetadata, analytics modules.
     registry_.registerService(std::make_unique<AnalyticsService>());
+    // Profile G skeleton: Recording/Search/Replay — GetServiceCapabilities để DTT
+    // nhận diện Profile G và mở test case con.
+    registry_.registerService(std::make_unique<RecordingService>());
+    registry_.registerService(std::make_unique<SearchService>());
+    registry_.registerService(std::make_unique<ReplayService>());
 }
 
 OnvifServer::~OnvifServer() {

@@ -349,6 +349,9 @@ int DeviceService::GetServices(
            << " xmlns:timg=\"http://www.onvif.org/ver20/imaging/wsdl\""
            << " xmlns:tmd=\"http://www.onvif.org/ver10/deviceIO/wsdl\""
            << " xmlns:tan=\"http://www.onvif.org/ver20/analytics/wsdl\""
+           << " xmlns:trc=\"http://www.onvif.org/ver10/recording/wsdl\""
+           << " xmlns:tse=\"http://www.onvif.org/ver10/search/wsdl\""
+           << " xmlns:trp=\"http://www.onvif.org/ver10/replay/wsdl\""
            << ">"
            << "<SOAP-ENV:Body><tds:GetServicesResponse>";
 
@@ -438,6 +441,28 @@ int DeviceService::GetServices(
         svc("http://www.onvif.org/ver20/analytics/wsdl", "/onvif/analytics",
             21, 12, anCaps);
 
+        // Recording Control (Profile G) — non-dynamic, 1 recording dựng sẵn, H264.
+        std::string recCaps =
+            "<trc:Capabilities DynamicRecordings=\"false\" DynamicTracks=\"false\" "
+             "DeleteData=\"false\" Encoding=\"H264\" MaxRate=\"20000\" "
+             "MaxTotalRate=\"20000\" MaxRecordings=\"1\" MaxRecordingJobs=\"1\" "
+             "Options=\"false\"/>";
+        svc("http://www.onvif.org/ver10/recording/wsdl", "/onvif/recording",
+            21, 12, recCaps);
+
+        // Recording Search (Profile G).
+        std::string seaCaps =
+            "<tse:Capabilities MetadataSearch=\"false\" GeneralStartEvents=\"true\"/>";
+        svc("http://www.onvif.org/ver10/search/wsdl", "/onvif/search",
+            21, 12, seaCaps);
+
+        // Replay Control (Profile G) — bỏ reverse playback.
+        std::string repCaps =
+            "<trp:Capabilities ReversePlayback=\"false\" "
+             "SessionTimeoutRange=\"0 4294967295\" RTP_RTSP_TCP=\"true\"/>";
+        svc("http://www.onvif.org/ver10/replay/wsdl", "/onvif/replay",
+            21, 12, repCaps);
+
         os << "</tds:GetServicesResponse></SOAP-ENV:Body></SOAP-ENV:Envelope>";
         std::string xml = os.str();
         soap->http_content = "application/soap+xml; charset=utf-8";
@@ -466,6 +491,9 @@ int DeviceService::GetServices(
     add("http://www.onvif.org/ver20/imaging/wsdl", "/onvif/imaging",        21, 12); // Imaging (Profile T)
     add("http://www.onvif.org/ver10/deviceIO/wsdl", "/onvif/deviceIO",       21, 12); // DeviceIO (Profile T §7.10.3)
     add("http://www.onvif.org/ver20/analytics/wsdl", "/onvif/analytics",     21, 12); // Analytics (Profile M)
+    add("http://www.onvif.org/ver10/recording/wsdl", "/onvif/recording",     21, 12); // Recording (Profile G)
+    add("http://www.onvif.org/ver10/search/wsdl",    "/onvif/search",        21, 12); // Search (Profile G)
+    add("http://www.onvif.org/ver10/replay/wsdl",    "/onvif/replay",        21, 12); // Replay (Profile G)
 
     return SOAP_OK;
 }

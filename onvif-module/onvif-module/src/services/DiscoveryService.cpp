@@ -122,7 +122,8 @@ std::string DiscoveryService::scopesLine() const {
             "onvif://www.onvif.org/hardware/JetsonOrinNX-8GB",
             "onvif://www.onvif.org/Profile/Streaming",   // Profile S — declared cùng Profile T
             "onvif://www.onvif.org/Profile/T",
-            "onvif://www.onvif.org/Profile/M"            // Profile M (Metadata & Analytics)
+            "onvif://www.onvif.org/Profile/M",           // Profile M (Metadata & Analytics)
+            "onvif://www.onvif.org/Profile/G"            // Profile G (Recording/Search/Replay)
         };
     }
     std::string out;
