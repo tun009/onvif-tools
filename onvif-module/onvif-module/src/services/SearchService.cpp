@@ -19,6 +19,7 @@ const char* EVENT_SEARCH_TOKEN = "EventSearch_0";
 std::mutex g_searchMtx;
 bool g_recordingSearchActive = false;
 bool g_eventSearchActive = false;
+int g_eventMaxMatches = 0;
 // Khoảng thời gian recording tĩnh (dữ liệu giả để search trả superset).
 const char* T_FROM = "2026-07-01T00:00:00Z";
 const char* T_UNTIL = "2026-07-28T00:00:00Z";
@@ -207,6 +208,11 @@ std::string SearchService::handle(const std::string& req) {
     if (has("FindEvents")) {
         std::lock_guard<std::mutex> lock(g_searchMtx);
         g_eventSearchActive = true;
+        g_eventMaxMatches = 0;
+        const auto maxMatches = extractInnerTag(req, "MaxMatches");
+        if (!maxMatches.empty()) {
+            try { g_eventMaxMatches = std::stoi(maxMatches); } catch (...) {}
+        }
         return R("FindEventsResponse",
             "<tse:FindEventsResponse>"
               "<tse:SearchToken>" + std::string(EVENT_SEARCH_TOKEN) + "</tse:SearchToken>"
@@ -219,66 +225,69 @@ std::string SearchService::handle(const std::string& req) {
         if (token != EVENT_SEARCH_TOKEN || !g_eventSearchActive)
             return FaultBuilder::sender("ter:InvalidArgVal", "ter:InvalidToken",
                                         "Invalid search token");
+        const std::string recordingStart =
+            "<tt:Result>"
+              "<tt:RecordingToken>" + std::string(REC) + "</tt:RecordingToken>"
+              "<tt:TrackToken>META_0</tt:TrackToken>"
+              "<tt:Time>2026-07-01T00:00:00Z</tt:Time>"
+              "<tt:Event>"
+                "<wsnt:Topic Dialect=\"http://www.onvif.org/ver10/tev/topicExpression/ConcreteSet\">"
+                  "tns1:RecordingHistory/Recording/State"
+                "</wsnt:Topic>"
+                "<wsnt:Message>"
+                  "<tt:Message UtcTime=\"2026-07-01T00:00:00Z\" PropertyOperation=\"Changed\">"
+                    "<tt:Source><tt:SimpleItem Name=\"RecordingToken\" Value=\"Recording_0\"/></tt:Source>"
+                    "<tt:Data><tt:SimpleItem Name=\"IsRecording\" Value=\"true\"/></tt:Data>"
+                  "</tt:Message>"
+                "</wsnt:Message>"
+              "</tt:Event>"
+              "<tt:StartStateEvent>false</tt:StartStateEvent>"
+            "</tt:Result>";
+        const std::string recordingStop =
+            "<tt:Result>"
+              "<tt:RecordingToken>" + std::string(REC) + "</tt:RecordingToken>"
+              "<tt:TrackToken>META_0</tt:TrackToken>"
+              "<tt:Time>2026-07-28T00:00:00Z</tt:Time>"
+              "<tt:Event>"
+                "<wsnt:Topic Dialect=\"http://www.onvif.org/ver10/tev/topicExpression/ConcreteSet\">"
+                  "tns1:RecordingHistory/Recording/State"
+                "</wsnt:Topic>"
+                "<wsnt:Message>"
+                  "<tt:Message UtcTime=\"2026-07-28T00:00:00Z\" PropertyOperation=\"Changed\">"
+                    "<tt:Source><tt:SimpleItem Name=\"RecordingToken\" Value=\"Recording_0\"/></tt:Source>"
+                    "<tt:Data><tt:SimpleItem Name=\"IsRecording\" Value=\"false\"/></tt:Data>"
+                  "</tt:Message>"
+                "</wsnt:Message>"
+              "</tt:Event>"
+              "<tt:StartStateEvent>false</tt:StartStateEvent>"
+            "</tt:Result>";
+        const std::string trackState =
+            "<tt:Result>"
+              "<tt:RecordingToken>" + std::string(REC) + "</tt:RecordingToken>"
+              "<tt:TrackToken>META_0</tt:TrackToken>"
+              "<tt:Time>2026-07-15T12:00:00Z</tt:Time>"
+              "<tt:Event>"
+                "<wsnt:Topic Dialect=\"http://www.onvif.org/ver10/tev/topicExpression/ConcreteSet\">"
+                  "tns1:RecordingHistory/Track/State"
+                "</wsnt:Topic>"
+                "<wsnt:Message>"
+                  "<tt:Message UtcTime=\"2026-07-15T12:00:00Z\" PropertyOperation=\"Changed\">"
+                    "<tt:Source>"
+                      "<tt:SimpleItem Name=\"RecordingToken\" Value=\"Recording_0\"/>"
+                      "<tt:SimpleItem Name=\"Track\" Value=\"META_0\"/>"
+                    "</tt:Source>"
+                    "<tt:Data><tt:SimpleItem Name=\"IsDataPresent\" Value=\"true\"/></tt:Data>"
+                  "</tt:Message>"
+                "</wsnt:Message>"
+              "</tt:Event>"
+              "<tt:StartStateEvent>false</tt:StartStateEvent>"
+            "</tt:Result>";
+        const std::string eventResults = g_eventMaxMatches == 1
+            ? trackState : recordingStart + recordingStop + trackState;
         return R("GetEventSearchResultsResponse",
             "<tse:GetEventSearchResultsResponse>"
               "<tse:ResultList>"
-                "<tt:SearchState>Completed</tt:SearchState>"
-                "<tt:Result>"
-                  "<tt:RecordingToken>" + std::string(REC) + "</tt:RecordingToken>"
-                  "<tt:Time>2026-07-01T00:00:00Z</tt:Time>"
-                  "<tt:Event>"
-                    "<wsnt:Topic Dialect=\"http://www.onvif.org/ver10/tev/topicExpression/ConcreteSet\">"
-                      "tns1:RecordingHistory/Recording/State"
-                    "</wsnt:Topic>"
-                    "<wsnt:Message>"
-                      "<tt:Message UtcTime=\"2026-07-01T00:00:00Z\" PropertyOperation=\"Initialized\">"
-                        "<tt:Source>"
-                          "<tt:SimpleItem Name=\"RecordingToken\" Value=\"Recording_0\"/>"
-                        "</tt:Source>"
-                        "<tt:Data><tt:SimpleItem Name=\"IsRecording\" Value=\"true\"/></tt:Data>"
-                      "</tt:Message>"
-                    "</wsnt:Message>"
-                  "</tt:Event>"
-                  "<tt:StartStateEvent>true</tt:StartStateEvent>"
-                "</tt:Result>"
-                "<tt:Result>"
-                  "<tt:RecordingToken>" + std::string(REC) + "</tt:RecordingToken>"
-                  "<tt:Time>2026-07-28T00:00:00Z</tt:Time>"
-                  "<tt:Event>"
-                    "<wsnt:Topic Dialect=\"http://www.onvif.org/ver10/tev/topicExpression/ConcreteSet\">"
-                      "tns1:RecordingHistory/Recording/State"
-                    "</wsnt:Topic>"
-                    "<wsnt:Message>"
-                      "<tt:Message UtcTime=\"2026-07-28T00:00:00Z\" PropertyOperation=\"Changed\">"
-                        "<tt:Source>"
-                          "<tt:SimpleItem Name=\"RecordingToken\" Value=\"Recording_0\"/>"
-                        "</tt:Source>"
-                        "<tt:Data><tt:SimpleItem Name=\"IsRecording\" Value=\"false\"/></tt:Data>"
-                      "</tt:Message>"
-                    "</wsnt:Message>"
-                  "</tt:Event>"
-                  "<tt:StartStateEvent>false</tt:StartStateEvent>"
-                "</tt:Result>"
-                "<tt:Result>"
-                  "<tt:RecordingToken>" + std::string(REC) + "</tt:RecordingToken>"
-                  "<tt:TrackToken>META_0</tt:TrackToken>"
-                  "<tt:Time>2026-07-15T12:00:00Z</tt:Time>"
-                  "<tt:Event>"
-                    "<wsnt:Topic Dialect=\"http://www.onvif.org/ver10/tev/topicExpression/ConcreteSet\">"
-                      "tns1:RecordingHistory/Track/State"
-                    "</wsnt:Topic>"
-                    "<wsnt:Message>"
-                      "<tt:Message UtcTime=\"2026-07-15T12:00:00Z\" PropertyOperation=\"Changed\">"
-                        "<tt:Source>"
-                          "<tt:SimpleItem Name=\"RecordingToken\" Value=\"Recording_0\"/>"
-                          "<tt:SimpleItem Name=\"Track\" Value=\"META_0\"/>"
-                        "</tt:Source>"
-                        "<tt:Data><tt:SimpleItem Name=\"IsDataPresent\" Value=\"true\"/></tt:Data>"
-                      "</tt:Message>"
-                    "</wsnt:Message>"
-                  "</tt:Event>"
-                  "<tt:StartStateEvent>false</tt:StartStateEvent>"
-                "</tt:Result>"
+                "<tt:SearchState>Completed</tt:SearchState>" + eventResults +
               "</tse:ResultList>"
             "</tse:GetEventSearchResultsResponse>");
     }

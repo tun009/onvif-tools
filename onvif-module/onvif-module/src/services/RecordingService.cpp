@@ -360,6 +360,7 @@ std::string RecordingService::handle(const std::string& req) {
                     "<tt:Token>" + job.sourceToken + "</tt:Token>"
                   "</tt:SourceToken>"
                   "<tt:State>" + job.mode + "</tt:State>"
+                  "<tt:Tracks/>"
                 "</tt:Sources>"
               "</trc:State>"
             "</trc:GetRecordingJobStateResponse>");
