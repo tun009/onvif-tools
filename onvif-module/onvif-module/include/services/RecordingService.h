@@ -4,10 +4,14 @@
 // String-based service (IOnvifService), pattern giống AnalyticsService.
 // pathPrefix "/onvif/recording". Register 1 dòng trong OnvifServer.
 //
-// SKELETON (define-features): mới chỉ GetServiceCapabilities để DTT nhận diện
-// Profile G. GetRecordings/CreateRecordingJob... làm ở bước sau.
-// Scope đã chốt: non-dynamic (DynamicRecordings/Tracks=false), 1 recording dựng sẵn.
-// ponytail: skeleton — chỉ caps tĩnh; add recording ops khi DTT lộ test case con.
+// SCOPE (user chốt 2026-07-22): non-dynamic (DynamicRecordings/Tracks=false),
+// 1 recording dựng sẵn (Recording_0) gồm 1 video track (VIDEO_0) + 1 metadata
+// track (META_0), 1 recording job (Job_0), KHÔNG audio. Source = profile_main.
+// Toàn bộ data model TĨNH → hardcode XML, KHÔNG cần backend/IPC.
+//
+// ponytail: stub-features — trả response schema-hợp-lệ cho mọi op §9.1 mandatory
+// để DTT Feature Definition đánh dấu Profile G SUPPORTED. Ngữ nghĩa động (job
+// thật, retention, apply config...) làm ở bước sau khi DTT lộ test case con.
 
 #include "core/IOnvifService.h"
 #include <string>
@@ -19,7 +23,6 @@ public:
     std::string handle(const std::string& rawRequest) override;
 
 private:
-    std::string handleGetServiceCapabilities();
     static std::string extractRelatesTo(const std::string& xml);
     static std::string wrap(const std::string& action,
                             const std::string& relatesTo,

@@ -4,9 +4,11 @@
 // String-based service (IOnvifService), pattern giống AnalyticsService.
 // pathPrefix "/onvif/replay". Register 1 dòng trong OnvifServer.
 //
-// SKELETON (define-features): mới chỉ GetServiceCapabilities để DTT nhận diện
-// Profile G và mở cây test case con. GetReplayUri làm ở bước sau.
-// ponytail: skeleton — chỉ caps tĩnh; add GetReplayUri khi DTT lộ test case con.
+// STUB-FEATURES: GetServiceCapabilities + GetReplayUri (URI RTSP tĩnh) +
+// Get/SetReplayConfiguration. Đủ để DTT Feature Definition đánh dấu Profile G.
+// ReversePlayback=false (scope bỏ reverse). Streaming thật (RTP header extension
+// 0xABAC, Range/onvif-replay) là Phase sau — xem memory project_profile_g_replay.
+// ponytail: stub — URI tĩnh; RTSP replay pipeline làm ở Phase streaming.
 
 #include "core/IOnvifService.h"
 #include <string>
@@ -18,7 +20,6 @@ public:
     std::string handle(const std::string& rawRequest) override;
 
 private:
-    std::string handleGetServiceCapabilities();
     static std::string extractRelatesTo(const std::string& xml);
     static std::string wrap(const std::string& action,
                             const std::string& relatesTo,
