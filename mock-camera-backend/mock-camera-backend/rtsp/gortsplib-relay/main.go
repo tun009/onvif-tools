@@ -49,7 +49,13 @@ func (h *handler) auth(c *gortsplib.ServerConn, req *base.Request) bool {
  if verified { return true }
  return false
 }
-func (h *handler) get(p string) *pathStream { return h.paths[strings.Trim(p, "/")] }
+func (h *handler) get(p string) *pathStream {
+	p = strings.Trim(p, "/")
+	if p == "replay" {
+		p = "main"
+	}
+	return h.paths[p]
+}
 
 func (h *handler) OnDescribe(c *gortsplib.ServerHandlerOnDescribeCtx) (*base.Response, *gortsplib.ServerStream, error) {
  if !h.auth(c.Conn, c.Request) { return unauthorized(), nil, liberrors.ErrServerAuth{} }

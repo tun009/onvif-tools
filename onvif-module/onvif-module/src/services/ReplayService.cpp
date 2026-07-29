@@ -12,10 +12,25 @@ namespace {
 const char* NS_REPLAY = "http://www.onvif.org/ver10/replay/wsdl";
 const char* ACT = "http://www.onvif.org/ver10/replay/wsdl/ReplayPort/";
 
-// URI replay tĩnh — endpoint /replay trên relay 8555 (chưa dựng pipeline; Phase
-// streaming sẽ hiện thực). ponytail: host tĩnh 127.0.0.1 — thay bằng deviceIp
-// thật khi làm RTSP replay endpoint.
-const char* REPLAY_URI = "rtsp://127.0.0.1:8555/replay";
+// Replay endpoint dùng relay gortsplib 8555. Host lấy từ HTTP request để URI
+// reachable từ DTT, không trả loopback của DUT.
+std::string requestHost(const std::string& req) {
+    for (const char* key : {"\r\nHost:", "\nHost:"}) {
+        auto p = req.find(key);
+        if (p == std::string::npos) continue;
+        p += std::char_traits<char>::length(key);
+        p = req.find_first_not_of(" \t", p);
+        if (p == std::string::npos) return "";
+        auto e = req.find_first_of(":\r\n", p);
+        if (e == std::string::npos) return "";
+        const auto host = req.substr(p, e - p);
+        if (!host.empty() && host.find_first_not_of(
+                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-") ==
+                std::string::npos)
+            return host;
+    }
+    return "";
+}
 
 std::mutex g_replayConfigMtx;
 std::string g_sessionTimeout = "PT60S";
@@ -107,9 +122,12 @@ std::string ReplayService::handle(const std::string& req) {
         if (extractInnerTag(req, "RecordingToken") != "Recording_0")
             return FaultBuilder::sender("ter:InvalidArgVal", "ter:NoRecording",
                                         "No recording with the given token");
+        const auto host = requestHost(req);
+        if (host.empty())
+            return FaultBuilder::receiver("ter:Action", "Replay endpoint unavailable");
         return R("GetReplayUriResponse",
             "<trp:GetReplayUriResponse>"
-              "<trp:Uri>" + std::string(REPLAY_URI) + "</trp:Uri>"
+              "<trp:Uri>rtsp://" + host + ":8555/replay</trp:Uri>"
             "</trp:GetReplayUriResponse>");
     }
 
