@@ -22,7 +22,7 @@ import (
 )
 
 type pathStream struct { mu sync.RWMutex; stream *gortsplib.ServerStream; metadataStarted atomic.Bool }
-type replayState struct { mu sync.Mutex; cseq byte; start time.Time; base, last map[uint8]uint32 }
+type replayState struct { mu sync.Mutex; cseq byte; start, end time.Time; immediate bool; base, last map[uint8]uint32; discontinuity map[uint8]bool }
 type handler struct { paths map[string]*pathStream; replay replayState }
 
 const (
@@ -72,44 +72,64 @@ func ntpTimestamp(t time.Time) uint64 {
  return seconds<<32 | fraction
 }
 
-func parseClockRange(req *base.Request) time.Time {
- for name, values := range req.Header {
-  if !strings.EqualFold(name, "Range") || len(values) == 0 { continue }
-  value := strings.TrimSpace(values[0])
-  if !strings.HasPrefix(strings.ToLower(value), "clock=") { return time.Time{} }
-  start := strings.SplitN(value[len("clock="):], "-", 2)[0]
-  for _, layout := range []string{"20060102T150405.999999999Z", "20060102T150405Z"} {
-   if t, err := time.Parse(layout, start); err == nil { return t.UTC() }
-  }
+func parseClock(value string) time.Time {
+ for _, layout := range []string{"20060102T150405.999999999Z", "20060102T150405Z"} {
+  if t, err := time.Parse(layout, value); err == nil { return t.UTC() }
  }
  return time.Time{}
 }
 
-func (r *replayState) play(req *base.Request) {
- start := parseClockRange(req); if start.IsZero() { start = time.Now().UTC() }
- r.mu.Lock(); defer r.mu.Unlock()
- r.cseq = byte(requestCSeq(req)); r.start = start
- r.base = make(map[uint8]uint32); r.last = make(map[uint8]uint32)
+func parseClockRange(req *base.Request) (time.Time, time.Time) {
+ for name, values := range req.Header {
+  if !strings.EqualFold(name, "Range") || len(values) == 0 { continue }
+  value := strings.TrimSpace(values[0])
+  if !strings.HasPrefix(strings.ToLower(value), "clock=") { return time.Time{}, time.Time{} }
+  points := strings.SplitN(value[len("clock="):], "-", 2)
+  start := parseClock(points[0]); var end time.Time
+  if len(points) == 2 && points[1] != "" { end = parseClock(points[1]) }
+  return start, end
+ }
+ return time.Time{}, time.Time{}
 }
 
-func (r *replayState) packet(pkt *rtp.Packet) *rtp.Packet {
+func hasHeaderValue(req *base.Request, header, value string) bool {
+ for name, values := range req.Header {
+  if strings.EqualFold(name, header) && len(values) > 0 { return strings.EqualFold(strings.TrimSpace(values[0]), value) }
+ }
+ return false
+}
+
+func (r *replayState) play(req *base.Request) {
+ start, end := parseClockRange(req); if start.IsZero() { start = time.Now().UTC() }
  r.mu.Lock(); defer r.mu.Unlock()
- if r.start.IsZero() { return pkt }
+ r.cseq = byte(requestCSeq(req)); r.start = start; r.end = end
+ r.immediate = hasHeaderValue(req, "Immediate", "yes")
+ r.base = make(map[uint8]uint32); r.last = make(map[uint8]uint32); r.discontinuity = make(map[uint8]bool)
+}
+
+func (r *replayState) packet(pkt *rtp.Packet) (*rtp.Packet, bool) {
+ r.mu.Lock(); defer r.mu.Unlock()
+ if r.start.IsZero() { return pkt, true }
  base, ok := r.base[pkt.PayloadType]
- if !ok { base = pkt.Timestamp; r.base[pkt.PayloadType] = base }
+ if !ok {
+  base = pkt.Timestamp; r.base[pkt.PayloadType] = base
+  r.discontinuity[pkt.PayloadType] = r.immediate
+ }
  delta := pkt.Timestamp - base
  if last, exists := r.last[pkt.PayloadType]; exists && delta < last { delta = last }
  r.last[pkt.PayloadType] = delta
- clockRate := uint64(90000)
- ntp := r.start.Add(time.Duration(uint64(delta) * uint64(time.Second) / clockRate))
+ ntp := r.start.Add(time.Duration(uint64(delta) * uint64(time.Second) / 90000))
+ if !r.end.IsZero() && ntp.After(r.end) { return nil, false }
  out := *pkt; out.Header = pkt.Header
  out.Header.CSRC = append([]uint32(nil), pkt.Header.CSRC...)
  out.Header.ClearExtensions()
  ext := make([]byte, 12)
- binary.BigEndian.PutUint64(ext[:8], ntpTimestamp(ntp)); ext[9] = r.cseq
+ binary.BigEndian.PutUint64(ext[:8], ntpTimestamp(ntp))
+ if r.discontinuity[pkt.PayloadType] { ext[8] = 0x20; r.discontinuity[pkt.PayloadType] = false }
+ ext[9] = r.cseq
  out.Header.Extension = true; out.Header.ExtensionProfile = replayExtensionProfile
  if err := out.Header.SetExtension(0, ext); err != nil { panic(err) }
- return &out
+ return &out, true
 }
 
 func (h *handler) OnDescribe(c *gortsplib.ServerHandlerOnDescribeCtx) (*base.Response, *gortsplib.ServerStream, error) {
@@ -244,7 +264,10 @@ func relayOnce(server *gortsplib.Server, h *handler, ps *pathStream, path, src s
 			return
 		}
 		write := func(out *rtp.Packet) {
-			if path == "replay" { out = h.replay.packet(out) }
+			if path == "replay" {
+				var send bool
+				out, send = h.replay.packet(out); if !send { return }
+			}
 			// A slow DTT client can temporarily fill gortsplib's per-session queue.
 			if err := st.WritePacketRTP(target, out); err != nil {
 				var queueFull liberrors.ErrServerWriteQueueFull
