@@ -15,6 +15,7 @@ import (
 	"github.com/bluenviron/gortsplib/v5/pkg/base"
 	"github.com/bluenviron/gortsplib/v5/pkg/description"
 	"github.com/bluenviron/gortsplib/v5/pkg/format"
+	"github.com/bluenviron/gortsplib/v5/pkg/format/rtph264"
 	"github.com/bluenviron/gortsplib/v5/pkg/headers"
 	"github.com/bluenviron/gortsplib/v5/pkg/liberrors"
 	"github.com/pion/rtp"
@@ -168,7 +169,6 @@ func relayPath(server *gortsplib.Server, h *handler, path string) {
 func relayOnce(server *gortsplib.Server, h *handler, ps *pathStream, path, src string) error {
 	u, err := base.ParseURL(src); if err != nil { return err }
 	c := &gortsplib.Client{Scheme: u.Scheme, Host: u.Host, Protocol: ptrProtocolTCP(), ReadTimeout: 10*time.Second, WriteTimeout: 10*time.Second}
-	if path == "replay" { c.MaxPacketSize = 1456 }
 	if err = c.Start(); err != nil { return err }; defer c.Close()
 	desc, _, err := c.Describe(u); if err != nil { return err }
 	if err = c.SetupAll(desc.BaseURL, desc.Medias); err != nil { return err }
@@ -180,6 +180,19 @@ func relayOnce(server *gortsplib.Server, h *handler, ps *pathStream, path, src s
 	st := setStream(server, ps, desc); log.Printf("relay ready path=%s from=%s", path, src)
 	if metadataTrack != nil { startMetadata(server, ps, metadataTrack, path) }
 	var unknownMediaCount uint64
+	var replayDecoder *rtph264.Decoder
+	var replayEncoder *rtph264.Encoder
+	if path == "replay" {
+		for _, media := range desc.Medias {
+			for _, f := range media.Formats {
+				if h264f, ok := f.(*format.H264); ok {
+					replayDecoder, err = h264f.CreateDecoder(); if err != nil { return err }
+					replayEncoder, err = h264f.CreateEncoder(); if err != nil { return err }
+					replayEncoder.PayloadMaxSize = 1434 // 1472 minus RTP header and 0xABAC extension.
+				}
+			}
+		}
+	}
 	formatSummary := func(media *description.Media) string {
 		if media == nil { return "<nil>" }
 		parts := make([]string, 0, len(media.Formats))
@@ -230,18 +243,25 @@ func relayOnce(server *gortsplib.Server, h *handler, ps *pathStream, path, src s
 			log.Printf("relay write %s: unsupported payload type %d", path, pkt.PayloadType)
 			return
 		}
-		// Replay validation requires ONVIF's profile-specific RTP extension. Keep
-		// it on the isolated replay stream so real-time /main packets stay intact.
-		if path == "replay" { pkt = h.replay.packet(pkt) }
-		// A slow DTT client can temporarily fill gortsplib's per-session queue.
-		// Drop that packet and keep the upstream relay alive; returning from the
-		// callback quickly is important when several DTT sessions are active.
-		if err := st.WritePacketRTP(target, pkt); err != nil {
-			var queueFull liberrors.ErrServerWriteQueueFull
-			if !errors.As(err, &queueFull) {
-				log.Printf("relay write %s: %v", path, err)
+		write := func(out *rtp.Packet) {
+			if path == "replay" { out = h.replay.packet(out) }
+			// A slow DTT client can temporarily fill gortsplib's per-session queue.
+			if err := st.WritePacketRTP(target, out); err != nil {
+				var queueFull liberrors.ErrServerWriteQueueFull
+				if !errors.As(err, &queueFull) { log.Printf("relay write %s: %v", path, err) }
 			}
 		}
+		if path == "replay" && media.Type == description.MediaTypeVideo && replayDecoder != nil {
+			au, err := replayDecoder.Decode(pkt)
+			if err != nil {
+				if !errors.Is(err, rtph264.ErrMorePacketsNeeded) && !errors.Is(err, rtph264.ErrNonStartingPacketAndNoPrevious) { log.Printf("replay decode: %v", err) }
+				return
+			}
+			packets, err := replayEncoder.Encode(au); if err != nil { log.Printf("replay encode: %v", err); return }
+			for _, out := range packets { out.Timestamp = pkt.Timestamp; write(out) }
+			return
+		}
+		write(pkt)
 	})
 	if _, err = c.Play(nil); err != nil { return err }; return c.Wait()
 }
