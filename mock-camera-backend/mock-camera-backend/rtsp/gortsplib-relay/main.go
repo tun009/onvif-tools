@@ -28,6 +28,9 @@ const (
 	relayWriteQueueSize = 65536
 	replayExtensionProfile = 0xABAC
 	ntpEpochOffset = 2208988800
+	// Upstream RTP can already fill 1472 bytes. Replay adds a 16-byte extension;
+	// allow that over TCP and accept IPv4 fragmentation for legacy UDP playback.
+	replayMaxPacketSize = 1500
 	// DTT waits only a few seconds for frames after SetVideoEncoderConfiguration.
 	// MediaMTX restarts the publisher during that operation, so an 8s backoff
 	// can outlive the test window and produce a false zero-frame failure.
@@ -273,6 +276,6 @@ func main() {
 	// DTT consumes the 4K stream over RTSP/TCP. The gortsplib default queue
 	// (256 packets) is too small for a short client-side scheduling stall and
 	// causes the server to close the session with "write queue is full".
-	h := &handler{paths: paths}; srv := &gortsplib.Server{RTSPAddress: ":8555", UDPRTPAddress: ":8050", UDPRTCPAddress: ":8051", MulticastIPRange: "239.10.0.0/16", MulticastRTPPort: 10000, MulticastRTCPPort: 10001, Handler: h, WriteQueueSize: relayWriteQueueSize, ReadTimeout: 10*time.Second, WriteTimeout: 10*time.Second, IdleTimeout: 60*time.Second}; if err := srv.Start(); err != nil { log.Fatalf("server start: %v", err) }
+	h := &handler{paths: paths}; srv := &gortsplib.Server{RTSPAddress: ":8555", UDPRTPAddress: ":8050", UDPRTCPAddress: ":8051", MulticastIPRange: "239.10.0.0/16", MulticastRTPPort: 10000, MulticastRTCPPort: 10001, Handler: h, WriteQueueSize: relayWriteQueueSize, MaxPacketSize: replayMaxPacketSize, ReadTimeout: 10*time.Second, WriteTimeout: 10*time.Second, IdleTimeout: 60*time.Second}; if err := srv.Start(); err != nil { log.Fatalf("server start: %v", err) }
 	startMetadata(srv, paths["metadata"], metadataMedia(), "metadata"); for _, p := range []string{"main", "replay", "jpeg", "sub1", "sub2"} { go relayPath(srv, h, p) }; log.Printf("RTSP tunnel relay listening on :8555"); if err := srv.Wait(); err != nil { log.Fatal(err) }
 }
