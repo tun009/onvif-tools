@@ -20,6 +20,9 @@ std::mutex g_searchMtx;
 bool g_recordingSearchActive = false;
 bool g_eventSearchActive = false;
 int g_eventMaxMatches = 0;
+std::string g_eventStartPoint;
+std::string g_eventEndPoint;
+bool g_eventIncludeStartState = false;
 // Khoảng thời gian recording tĩnh (dữ liệu giả để search trả superset).
 const char* T_FROM = "2026-07-01T00:00:00Z";
 const char* T_UNTIL = "2026-07-28T00:00:00Z";
@@ -209,6 +212,9 @@ std::string SearchService::handle(const std::string& req) {
         std::lock_guard<std::mutex> lock(g_searchMtx);
         g_eventSearchActive = true;
         g_eventMaxMatches = 0;
+        g_eventStartPoint = extractInnerTag(req, "StartPoint");
+        g_eventEndPoint = extractInnerTag(req, "EndPoint");
+        g_eventIncludeStartState = extractInnerTag(req, "IncludeStartState") == "true";
         const auto maxMatches = extractInnerTag(req, "MaxMatches");
         if (!maxMatches.empty()) {
             try { g_eventMaxMatches = std::stoi(maxMatches); } catch (...) {}
@@ -345,10 +351,60 @@ std::string SearchService::handle(const std::string& req) {
               "</tt:Event>"
               "<tt:StartStateEvent>false</tt:StartStateEvent>"
             "</tt:Result>";
-        const std::string eventResults = g_eventMaxMatches == 1
-            ? trackState
-            : recordingStart + videoTrackStart + trackState + recordingStop +
-              videoTrackStop + metadataTrackStop;
+        const bool backward = !g_eventStartPoint.empty() && !g_eventEndPoint.empty() &&
+                              g_eventStartPoint > g_eventEndPoint;
+        const std::string forwardEvents =
+            recordingStart + videoTrackStart + trackState + recordingStop +
+            videoTrackStop + metadataTrackStop;
+        const std::string backwardEvents =
+            metadataTrackStop + videoTrackStop + recordingStop + trackState +
+            videoTrackStart + recordingStart;
+        auto virtualEvents = [&](const std::string& time) {
+            const bool present = time >= T_FROM && time <= T_UNTIL;
+            const std::string state = present ? "true" : "false";
+            auto result = [&](const std::string& topic, const std::string& track,
+                              const std::string& dataName) {
+                const std::string trackSource = track.empty() ? "" :
+                    "<tt:SimpleItem Name=\"Track\" Value=\"" + track + "\"/>";
+                const std::string trackToken = track.empty() ? "META_0" : track;
+                return
+                    "<tt:Result>"
+                      "<tt:RecordingToken>" + std::string(REC) + "</tt:RecordingToken>"
+                      "<tt:TrackToken>" + trackToken + "</tt:TrackToken>"
+                      "<tt:Time>" + time + "</tt:Time>"
+                      "<tt:Event>"
+                        "<wsnt:Topic Dialect=\"http://www.onvif.org/ver10/tev/topicExpression/ConcreteSet\">" +
+                          topic +
+                        "</wsnt:Topic>"
+                        "<wsnt:Message>"
+                          "<tt:Message UtcTime=\"" + time + "\" PropertyOperation=\"Initialized\">"
+                            "<tt:Source>"
+                              "<tt:SimpleItem Name=\"RecordingToken\" Value=\"Recording_0\"/>" +
+                              trackSource +
+                            "</tt:Source>"
+                            "<tt:Data><tt:SimpleItem Name=\"" + dataName +
+                              "\" Value=\"" + state + "\"/></tt:Data>"
+                          "</tt:Message>"
+                        "</wsnt:Message>"
+                      "</tt:Event>"
+                      "<tt:StartStateEvent>true</tt:StartStateEvent>"
+                    "</tt:Result>";
+            };
+            return result("tns1:RecordingHistory/Recording/State", "", "IsRecording") +
+                   result("tns1:RecordingHistory/Track/State", "VIDEO_0", "IsDataPresent") +
+                   result("tns1:RecordingHistory/Track/State", "META_0", "IsDataPresent");
+        };
+        std::string eventResults;
+        if (g_eventMaxMatches == 1) {
+            eventResults = trackState;
+        } else if (backward) {
+            eventResults = (g_eventIncludeStartState ? virtualEvents(g_eventStartPoint) : "") +
+                           backwardEvents +
+                           (g_eventIncludeStartState ? virtualEvents(g_eventEndPoint) : "");
+        } else {
+            eventResults = (g_eventIncludeStartState ? virtualEvents(g_eventStartPoint) : "") +
+                           forwardEvents;
+        }
         return R("GetEventSearchResultsResponse",
             "<tse:GetEventSearchResultsResponse>"
               "<tse:ResultList>"
