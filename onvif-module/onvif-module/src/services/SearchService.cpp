@@ -18,6 +18,7 @@ const char* RECORDING_SEARCH_TOKEN = "RecordingSearch_0";
 const char* EVENT_SEARCH_TOKEN = "EventSearch_0";
 std::mutex g_searchMtx;
 bool g_recordingSearchActive = false;
+bool g_recordingSearchMatches = true;
 bool g_eventSearchActive = false;
 int g_eventMaxMatches = 0;
 std::string g_eventStartPoint;
@@ -186,6 +187,14 @@ std::string SearchService::handle(const std::string& req) {
     if (has("FindRecordings")) {
         std::lock_guard<std::mutex> lock(g_searchMtx);
         g_recordingSearchActive = true;
+        const auto filter = extractInnerTag(req, "RecordingInformationFilter");
+        // Recording_0 has Video + Metadata only. XPath filters requiring Audio
+        // are valid but match no recordings; returning the unfiltered recording
+        // violates Recording Search filtering semantics.
+        g_recordingSearchMatches = filter.find("TrackType = &quot;Audio&quot;") ==
+                                   std::string::npos &&
+                                   filter.find("TrackType = \"Audio\"") ==
+                                   std::string::npos;
         return R("FindRecordingsResponse",
             "<tse:FindRecordingsResponse>"
               "<tse:SearchToken>" + std::string(RECORDING_SEARCH_TOKEN) + "</tse:SearchToken>"
@@ -198,12 +207,14 @@ std::string SearchService::handle(const std::string& req) {
         if (token != RECORDING_SEARCH_TOKEN || !g_recordingSearchActive)
             return FaultBuilder::sender("ter:InvalidArgVal", "ter:InvalidToken",
                                         "Invalid search token");
+        const auto result = g_recordingSearchMatches
+            ? "<tt:RecordingInformation>" + recordingInformation() +
+              "</tt:RecordingInformation>"
+            : std::string();
         return R("GetRecordingSearchResultsResponse",
             "<tse:GetRecordingSearchResultsResponse>"
               "<tse:ResultList>"
-                "<tt:SearchState>Completed</tt:SearchState>"
-                "<tt:RecordingInformation>" + recordingInformation() +
-                "</tt:RecordingInformation>"
+                "<tt:SearchState>Completed</tt:SearchState>" + result +
               "</tse:ResultList>"
             "</tse:GetRecordingSearchResultsResponse>");
     }
