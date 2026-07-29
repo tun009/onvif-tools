@@ -1,9 +1,11 @@
 package main
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,10 +21,13 @@ import (
 )
 
 type pathStream struct { mu sync.RWMutex; stream *gortsplib.ServerStream; metadataStarted atomic.Bool }
-type handler struct { paths map[string]*pathStream }
+type replayState struct { mu sync.Mutex; cseq byte; start time.Time; base, last map[uint8]uint32 }
+type handler struct { paths map[string]*pathStream; replay replayState }
 
 const (
 	relayWriteQueueSize = 65536
+	replayExtensionProfile = 0xABAC
+	ntpEpochOffset = 2208988800
 	// DTT waits only a few seconds for frames after SetVideoEncoderConfiguration.
 	// MediaMTX restarts the publisher during that operation, so an 8s backoff
 	// can outlive the test window and produce a false zero-frame failure.
@@ -49,12 +54,61 @@ func (h *handler) auth(c *gortsplib.ServerConn, req *base.Request) bool {
  if verified { return true }
  return false
 }
-func (h *handler) get(p string) *pathStream {
-	p = strings.Trim(p, "/")
-	if p == "replay" {
-		p = "main"
-	}
-	return h.paths[p]
+func (h *handler) get(p string) *pathStream { return h.paths[strings.Trim(p, "/")] }
+
+func requestCSeq(req *base.Request) uint32 {
+ for name, values := range req.Header {
+  if strings.EqualFold(name, "CSeq") && len(values) > 0 {
+   n, err := strconv.ParseUint(strings.TrimSpace(values[0]), 10, 32); if err == nil { return uint32(n) }
+  }
+ }
+ return 0
+}
+
+func ntpTimestamp(t time.Time) uint64 {
+ seconds := uint64(t.Unix() + ntpEpochOffset)
+ fraction := uint64(t.Nanosecond()) * (uint64(1) << 32) / 1_000_000_000
+ return seconds<<32 | fraction
+}
+
+func parseClockRange(req *base.Request) time.Time {
+ for name, values := range req.Header {
+  if !strings.EqualFold(name, "Range") || len(values) == 0 { continue }
+  value := strings.TrimSpace(values[0])
+  if !strings.HasPrefix(strings.ToLower(value), "clock=") { return time.Time{} }
+  start := strings.SplitN(value[len("clock="):], "-", 2)[0]
+  for _, layout := range []string{"20060102T150405.999999999Z", "20060102T150405Z"} {
+   if t, err := time.Parse(layout, start); err == nil { return t.UTC() }
+  }
+ }
+ return time.Time{}
+}
+
+func (r *replayState) play(req *base.Request) {
+ start := parseClockRange(req); if start.IsZero() { start = time.Now().UTC() }
+ r.mu.Lock(); defer r.mu.Unlock()
+ r.cseq = byte(requestCSeq(req)); r.start = start
+ r.base = make(map[uint8]uint32); r.last = make(map[uint8]uint32)
+}
+
+func (r *replayState) packet(pkt *rtp.Packet) *rtp.Packet {
+ r.mu.Lock(); defer r.mu.Unlock()
+ if r.start.IsZero() { return pkt }
+ base, ok := r.base[pkt.PayloadType]
+ if !ok { base = pkt.Timestamp; r.base[pkt.PayloadType] = base }
+ delta := pkt.Timestamp - base
+ if last, exists := r.last[pkt.PayloadType]; exists && delta < last { delta = last }
+ r.last[pkt.PayloadType] = delta
+ clockRate := uint64(90000)
+ ntp := r.start.Add(time.Duration(uint64(delta) * uint64(time.Second) / clockRate))
+ out := *pkt; out.Header = pkt.Header
+ out.Header.CSRC = append([]uint32(nil), pkt.Header.CSRC...)
+ out.Header.ClearExtensions()
+ ext := make([]byte, 12)
+ binary.BigEndian.PutUint64(ext[:8], ntpTimestamp(ntp)); ext[9] = r.cseq
+ out.Header.Extension = true; out.Header.ExtensionProfile = replayExtensionProfile
+ if err := out.Header.SetExtension(0, ext); err != nil { panic(err) }
+ return &out
 }
 
 func (h *handler) OnDescribe(c *gortsplib.ServerHandlerOnDescribeCtx) (*base.Response, *gortsplib.ServerStream, error) {
@@ -73,7 +127,9 @@ func (h *handler) OnSetup(c *gortsplib.ServerHandlerOnSetupCtx) (*base.Response,
 }
 func (h *handler) OnPlay(c *gortsplib.ServerHandlerOnPlayCtx) (*base.Response, error) {
  if !h.auth(c.Conn, c.Request) { return unauthorized(), liberrors.ErrServerAuth{} }
- log.Printf("PLAY path=%s", strings.Trim(c.Path, "/")); return ok(), nil
+ path := strings.Trim(c.Path, "/")
+ if path == "replay" { h.replay.play(c.Request) }
+ log.Printf("PLAY path=%s", path); return ok(), nil
 }
 func (h *handler) OnGetParameter(*gortsplib.ServerHandlerOnGetParameterCtx) (*base.Response, error) { return ok(), nil }
 func (h *handler) OnSetParameter(*gortsplib.ServerHandlerOnSetParameterCtx) (*base.Response, error) { return ok(), nil }
@@ -92,11 +148,14 @@ func setStream(server *gortsplib.Server, ps *pathStream, desc *description.Sessi
 	ps.stream = st; return st
 }
 
-func relayPath(server *gortsplib.Server, ps *pathStream, path string) {
-	src := "rtsp://127.0.0.1:8554/" + path
+func relayPath(server *gortsplib.Server, h *handler, path string) {
+	ps := h.paths[path]
+	srcPath := path
+	if path == "replay" { srcPath = "main" }
+	src := "rtsp://127.0.0.1:8554/" + srcPath
 	delay := time.Second
 	for {
-		if err := relayOnce(server, ps, path, src); err != nil {
+		if err := relayOnce(server, h, ps, path, src); err != nil {
 			log.Printf("relay %s: %v; reconnecting in %s", path, err, delay)
 			time.Sleep(delay)
 			if delay < maxReconnectDelay { delay *= 2; if delay > maxReconnectDelay { delay = maxReconnectDelay } }
@@ -106,14 +165,14 @@ func relayPath(server *gortsplib.Server, ps *pathStream, path string) {
 	}
 }
 
-func relayOnce(server *gortsplib.Server, ps *pathStream, path, src string) error {
+func relayOnce(server *gortsplib.Server, h *handler, ps *pathStream, path, src string) error {
 	u, err := base.ParseURL(src); if err != nil { return err }
 	c := &gortsplib.Client{Scheme: u.Scheme, Host: u.Host, Protocol: ptrProtocolTCP(), ReadTimeout: 10*time.Second, WriteTimeout: 10*time.Second}
 	if err = c.Start(); err != nil { return err }; defer c.Close()
 	desc, _, err := c.Describe(u); if err != nil { return err }
 	if err = c.SetupAll(desc.BaseURL, desc.Medias); err != nil { return err }
 	var metadataTrack *description.Media
-	if path == "main" {
+	if path == "main" || path == "replay" {
 		metadataTrack = metadataMedia()
 		desc.Medias = append(desc.Medias, metadataTrack)
 	}
@@ -170,6 +229,9 @@ func relayOnce(server *gortsplib.Server, ps *pathStream, path, src string) error
 			log.Printf("relay write %s: unsupported payload type %d", path, pkt.PayloadType)
 			return
 		}
+		// Replay validation requires ONVIF's profile-specific RTP extension. Keep
+		// it on the isolated replay stream so real-time /main packets stay intact.
+		if path == "replay" { pkt = h.replay.packet(pkt) }
 		// A slow DTT client can temporarily fill gortsplib's per-session queue.
 		// Drop that packet and keep the upstream relay alive; returning from the
 		// callback quickly is important when several DTT sessions are active.
@@ -207,10 +269,10 @@ func startMetadata(server *gortsplib.Server, ps *pathStream, media *description.
 }
 
 func main() {
-	paths := map[string]*pathStream{"main": {}, "jpeg": {}, "sub1": {}, "sub2": {}, "metadata": {}}
+	paths := map[string]*pathStream{"main": {}, "replay": {}, "jpeg": {}, "sub1": {}, "sub2": {}, "metadata": {}}
 	// DTT consumes the 4K stream over RTSP/TCP. The gortsplib default queue
 	// (256 packets) is too small for a short client-side scheduling stall and
 	// causes the server to close the session with "write queue is full".
 	h := &handler{paths: paths}; srv := &gortsplib.Server{RTSPAddress: ":8555", UDPRTPAddress: ":8050", UDPRTCPAddress: ":8051", MulticastIPRange: "239.10.0.0/16", MulticastRTPPort: 10000, MulticastRTCPPort: 10001, Handler: h, WriteQueueSize: relayWriteQueueSize, ReadTimeout: 10*time.Second, WriteTimeout: 10*time.Second, IdleTimeout: 60*time.Second}; if err := srv.Start(); err != nil { log.Fatalf("server start: %v", err) }
-	startMetadata(srv, paths["metadata"], metadataMedia(), "metadata"); for _, p := range []string{"main", "jpeg", "sub1", "sub2"} { go relayPath(srv, paths[p], p) }; log.Printf("RTSP tunnel relay listening on :8555"); if err := srv.Wait(); err != nil { log.Fatal(err) }
+	startMetadata(srv, paths["metadata"], metadataMedia(), "metadata"); for _, p := range []string{"main", "replay", "jpeg", "sub1", "sub2"} { go relayPath(srv, h, p) }; log.Printf("RTSP tunnel relay listening on :8555"); if err := srv.Wait(); err != nil { log.Fatal(err) }
 }
