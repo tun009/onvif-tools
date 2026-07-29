@@ -187,14 +187,13 @@ std::string SearchService::handle(const std::string& req) {
     if (has("FindRecordings")) {
         std::lock_guard<std::mutex> lock(g_searchMtx);
         g_recordingSearchActive = true;
-        const auto filter = extractInnerTag(req, "RecordingInformationFilter");
         // Recording_0 has Video + Metadata only. XPath filters requiring Audio
         // are valid but match no recordings; returning the unfiltered recording
-        // violates Recording Search filtering semantics.
-        g_recordingSearchMatches = filter.find("TrackType = &quot;Audio&quot;") ==
-                                   std::string::npos &&
-                                   filter.find("TrackType = \"Audio\"") ==
-                                   std::string::npos;
+        // violates Recording Search filtering semantics. Inspect this operation's
+        // raw XML since RecordingInformationFilter carries an xmlns attribute.
+        g_recordingSearchMatches =
+            req.find("TrackType = &quot;Audio&quot;") == std::string::npos &&
+            req.find("TrackType = \"Audio\"") == std::string::npos;
         return R("FindRecordingsResponse",
             "<tse:FindRecordingsResponse>"
               "<tse:SearchToken>" + std::string(RECORDING_SEARCH_TOKEN) + "</tse:SearchToken>"
