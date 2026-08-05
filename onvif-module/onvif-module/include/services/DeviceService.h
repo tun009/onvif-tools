@@ -122,7 +122,7 @@ private:
             "onvif://www.onvif.org/Profile/Streaming",   // Profile S (Media1 legacy) — declared cùng Profile T
             "onvif://www.onvif.org/Profile/T",
             "onvif://www.onvif.org/Profile/M",           // Profile M (Metadata & Analytics)
-            "onvif://www.onvif.org/Profile/G"            // Profile G (Recording/Search/Replay)
+            "onvif://www.onvif.org/Profilae/G"            // Profile G (Recording/Search/Replay)
         };
     };
     static std::mutex sysMtx_;
