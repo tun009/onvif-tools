@@ -145,9 +145,9 @@ int DeviceService::GetDeviceInformation(
     } catch (const std::exception& e) {
         std::cerr << "[DeviceService] Error getting device info from backend: " << e.what() << std::endl;
         info.manufacturer = "Erabyte Inc.";
-        info.model = "ALG2-B803";
+        info.model = "ALN2-08";
         info.firmwareVersion = "3.4.0";
-        info.serialNumber = "1908120176009";
+        info.serialNumber = "19030102741000";
         info.hardwareId = "V5.0";
     }
 
