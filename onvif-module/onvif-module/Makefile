@@ -10,7 +10,10 @@ BUILD_DIR := build
 # ── Target 1: ipc-test (no gSOAP needed - for early testing) ─────────────
 IPC_BIN  := onvif-ipc-test
 IPC_SRCS := $(SRC_DIR)/main.cpp \
-            $(SRC_DIR)/backend/BackendConnector.cpp
+            $(SRC_DIR)/backend/BackendConnector.cpp \
+            $(SRC_DIR)/backend/AlvisBackendFacade.cpp \
+            $(SRC_DIR)/backend/HttpMgmtClient.cpp \
+            $(SRC_DIR)/config/RuntimeConfig.cpp
 IPC_OBJS := $(patsubst %.cpp, $(BUILD_DIR)/%.o, $(IPC_SRCS))
 
 # ── Target 2: full ONVIF server (requires: make gen first) ───────────────

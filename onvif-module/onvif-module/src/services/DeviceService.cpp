@@ -144,11 +144,11 @@ int DeviceService::GetDeviceInformation(
         info = backend_->getDeviceInfo();
     } catch (const std::exception& e) {
         std::cerr << "[DeviceService] Error getting device info from backend: " << e.what() << std::endl;
-        info.manufacturer = "Erabyte Inc.";
-        info.model = "ALN2-08";
-        info.firmwareVersion = "3.4.0";
-        info.serialNumber = "19030102741000";
-        info.hardwareId = "V5.0";
+        return soap_receiver_fault_subcode(
+            this->soap,
+            "\"http://www.onvif.org/ver10/error\":Action",
+            "Device information backend unavailable",
+            e.what());
     }
 
     tds__GetDeviceInformationResponse.Manufacturer = info.manufacturer;
@@ -715,7 +715,9 @@ int DeviceService::GetServiceCapabilities(
         auto systemLogging = new bool(false);
         caps->System->SystemLogging = systemLogging;
         auto firmwareUpgrade = new bool(false);
-        caps->System->FirmwareUpgrade = firmwareUpgrade;
+        // `tds__SystemCapabilities` in current gSOAP/ONVIF schemas names
+        // this optional capability HttpFirmwareUpgrade (not FirmwareUpgrade).
+        caps->System->HttpFirmwareUpgrade = firmwareUpgrade;
     }
 
     tds__GetServiceCapabilitiesResponse.Capabilities = caps;

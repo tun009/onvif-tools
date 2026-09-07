@@ -1,0 +1,639 @@
+# Kế hoạch tích hợp ONVIF Server với Camera-alvis
+
+> Trạng thái: Accepted / Living document  
+> Cập nhật gần nhất: 2026-09-04  
+> Backend MGMT được đối chiếu: `D:\Elcom\NewVersion\frontend\MGMT\src\backend`
+
+## 1. Mục tiêu
+
+Thay `mock-camera-backend` bằng backend Camera-alvis thật theo từng capability, đồng thời giữ nguyên conformance Profile S, T, M và G của `onvif-module`.
+
+Kết quả cuối:
+
+```text
+onvif-module = MGMT-02, process/repo độc lập
+mock backend = test fixture/conformance baseline
+real backend = adapter tới MGMT, DVR, VPU, Core, HAL và BUS
+```
+
+MGMT hiện tổ chức theo domain và dùng SQLite cục bộ (`mgmt.db`). Bảng
+`users` phân biệt `type = 'web'` và `type = 'onvif'`; password được mã hóa
+bởi `PasswordCrypto` với key do MGMT sở hữu. `onvif-module` không được mở
+trực tiếp file SQLite hoặc đọc bảng `crypto_keys`. Mọi xác thực ONVIF phải đi
+qua contract nội bộ do MGMT cung cấp.
+
+## 2. Definition of Done chung
+
+Một capability chỉ hoàn thành migration khi:
+
+- Không còn lấy dữ liệu mock trong production mode.
+- Getter phản ánh state thật; setter thực sự apply xuống service/hardware thật.
+- Không hardcode IP, port, token hoặc identity.
+- Có timeout, reconnect và error mapping sang SOAP Fault.
+- Capability được advertise đúng với khả năng runtime.
+- Mock regression không bị phá.
+- DTT test liên quan pass.
+- Test được với ít nhất một VMS thật.
+- Restart dependency không làm onvif-server crash hoặc trả state giả.
+- `02-INTEGRATION_MATRIX.md` được cập nhật kèm evidence.
+
+## 3. Phase 0 — Đóng băng conformance baseline
+
+### Công việc
+
+- Gắn tag/commit baseline đã pass S/T/M/G.
+- Lưu DTT reports theo profile.
+- Lưu SOAP request/response mẫu.
+- Lưu RTSP SDP, metadata XML và replay packet mẫu.
+- Lập danh sách test bắt buộc chạy lại cho từng service.
+- Xác minh mock mode vẫn chạy độc lập.
+
+### Gate
+
+- Có baseline tái lập được.
+- Tất cả test hiện đang pass vẫn pass trước khi nối real backend.
+
+## 4. Phase 1 — Backend facade và runtime configuration
+
+### Công việc
+
+- Giữ `ICameraBackend` làm compatibility facade trong giai đoạn đầu.
+- Tách dần thành các interface domain:
+  - `IDeviceBackend`
+  - `IMediaBackend`
+  - `IImagingBackend`
+  - `IPtzBackend`
+  - `IAnalyticsBackend`
+  - `IEventBackend`
+  - `IRecordingBackend`
+  - `ISearchBackend`
+  - `IReplayBackend`
+  - `IIdentityBackend`
+- Tạo `AlvisBackendFacade` để compose các adapter thật/mock.
+- Thêm `mock`, `hybrid`, `production` mode.
+- Thêm config cho MGMT, DVR, BUS và timeout; không hardcode port 8086.
+- Endpoint MGMT mặc định hiện có thể là port 8086, nhưng đây chỉ là runtime
+  configuration, không phải contract compile-time.
+- Giữ `onvif.conf` làm cấu hình bootstrap của process `onvif-module`, tối thiểu
+  gồm MGMT endpoint, timeout/retry, ONVIF listen port và RTSP port dự phòng.
+  Process cần biết listen port trước khi có thể mở SOAP listener, vì vậy không
+  được phụ thuộc tuyệt đối vào việc MGMT đã sẵn sàng tại thời điểm khởi động.
+- Không cho `onvif-module` đọc trực tiếp `mgmt_network_config.json`. File này là
+  persistence detail thuộc MGMT; ONVIF chỉ truy cập state qua
+  `IMgmtBackend`/internal REST, Unix socket hoặc IPC contract có version.
+- Phân biệt rõ:
+  - `listen_port`: cổng process bind nội bộ.
+  - `public_port`: cổng VMS/NVR thực sự truy cập và phải xuất hiện trong XAddr,
+    service URI và response ONVIF.
+  Hai giá trị có thể khác nhau khi có reverse proxy.
+- Chuẩn hóa backend error và SOAP Fault mapping.
+- Thêm health/reconnect/logging cho từng dependency.
+
+### Gate
+
+- Có thể chọn real/mock độc lập theo capability.
+- onvif-server khởi động khi dependency chưa sẵn sàng và tự reconnect.
+- Port bootstrap đủ để ONVIF listener khởi động; khi MGMT khả dụng, adapter đối
+  chiếu desired state với runtime state và báo mismatch thay vì âm thầm công bố
+  port không thực sự lắng nghe.
+- Production mode không fallback mock.
+
+### Tiến độ triển khai — Task 01 (2026-09-04)
+
+**Trạng thái:** `REAL_IN_PROGRESS` — source skeleton đã được tạo; chưa có
+evidence build hoặc runtime test trên Linux target.
+
+Task này dựng nền để các operation ONVIF không còn phụ thuộc trực tiếp vào
+`BackendConnector`/mock backend. Nó chưa migration Network, Discovery,
+Authentication hoặc bất kỳ setter nào sang MGMT.
+
+#### Đã thực hiện trong `onvif-module/onvif-module`
+
+| Thành phần | File | Nội dung |
+|---|---|---|
+| Runtime configuration | `include/config/RuntimeConfig.h`, `src/config/RuntimeConfig.cpp` | Thay parser phẳng bằng parser có section; đọc `[server]`, `[auth]`, `[backend]`, `[capabilities]`, `[startup]`, `[discovery]`; hỗ trợ `mock`, `hybrid`, `production`. |
+| Runtime config mẫu | `config/onvif.conf` | Cấu hình vertical slice: HTTP 8001, `hybrid`, `device=real`, MGMT 8086, mock optional, startup smoke test và Discovery đều tắt. |
+| MGMT contract | `include/backend/IMgmtClient.h` | Tạo ranh giới client độc lập cho MGMT; không mở SQLite/`mgmt_network_config.json` trực tiếp. |
+| MGMT HTTP client | `include/backend/HttpMgmtClient.h`, `src/backend/HttpMgmtClient.cpp` | Có HTTP GET tối giản, timeout, parse endpoint `http://host:port` và implementation đầu tiên cho `GET /mgmt/v1/Config/DeviceInformation`. |
+| Facade | `include/backend/AlvisBackendFacade.h`, `src/backend/AlvisBackendFacade.cpp` | `ICameraBackend` compatibility facade. `device=real` gọi `IMgmtClient::getDeviceInformation`; các operation khác vẫn explicit mock hoặc throw nếu mock bị tắt. |
+| Bootstrap | `src/main.cpp` | Main tạo mock connector chỉ khi capability còn dùng mock, tạo `HttpMgmtClient` + `AlvisBackendFacade`, rồi truyền facade vào `OnvifServer`. |
+| Safe parallel discovery switch | `include/OnvifServer.h`, `src/OnvifServer.cpp`, `config/onvif.conf` | `discovery.enable=false` ngăn tạo/chạy `DiscoveryService`, do đó tiến trình mới không bind/join WS-Discovery UDP multicast 3702; HTTP/SOAP listener vẫn chạy độc lập. |
+| Vertical-slice startup | `src/main.cpp` | `startup.run_smoke_tests=false` bỏ chuỗi test DateTime/Media/PTZ/Imaging khi khởi động; `backend.mock_required=false` cho phép server tiếp tục nếu mock Unix socket không tồn tại. |
+| Request failure boundary | `src/OnvifServer.cpp`, `src/services/DeviceService.cpp` | Exception do operation còn route mock nhưng mock vắng mặt được chặn ở từng request và trả SOAP Receiver fault. `GetDeviceInformation` không còn fallback sang identity giả khi MGMT lỗi. |
+| Build | `Makefile` | Bổ sung các source Task 01 vào `ipc-test`; target `full` tự nhận source mới qua `find src`. |
+
+#### Hành vi routing hiện tại
+
+```text
+mode=mock
+    Mọi operation → BackendConnector/mock như baseline.
+
+mode=hybrid, device=real
+    GetDeviceInformation → HttpMgmtClient → MGMT Config/DeviceInformation.
+    Các capability còn lại → mock theo cấu hình; nếu mock không khả dụng và
+    mock_required=false thì request tương ứng trả SOAP fault, process vẫn chạy.
+
+mode=production
+    Không có mock backend nếu tất cả capability được cấu hình real.
+    Operation chưa có adapter thật → lỗi rõ ràng; không fallback mock.
+```
+
+#### Contract MGMT đã đối chiếu
+
+```text
+GET {mgmt_base_url}/mgmt/v1/Config/DeviceInformation
+```
+
+Response cần có `result = 1` và object `GetDeviceInformationResponse` với
+`Manufacturer`, `Model`, `FirmwareVersion`, `SerialNumber`, `HardwareId`.
+Đây là contract tạm thời của Task 01; trước khi production cần bổ sung
+internal authentication, schema/version header, retry/reconnect policy và
+mapping HTTP/backend error → SOAP Fault.
+
+#### Chưa làm / không được hiểu là đã hoàn thành
+
+- Chưa có `MgmtIdentityAdapter` hoặc ONVIF authentication thật.
+- Chưa có adapter Network/Discovery persistent; `GetNetworkProtocols` vẫn chưa
+  đọc runtime config/MGMT và `GetDiscoveryMode` vẫn memory-only trong module.
+- `discovery.enable` mới chỉ là bootstrap process switch để test song song an
+  toàn. Nó không thay thế SOAP `GetDiscoveryMode`/`SetDiscoveryMode`, không ghi
+  MGMT và không đại diện cho desired state lâu dài.
+- Chưa gọi hay đọc trực tiếp `mgmt_network_config.json`.
+- Chưa apply `SetNetworkProtocols` hoặc restart/reload listener/MediaMTX.
+- Chưa có HTTPS, retry loop/background reconnect, metrics hoặc health endpoint.
+- Phần vertical-slice startup mới chỉ được static/syntax-check ở local, chưa
+  full build/runtime test trên camera. Mọi agent tiếp theo phải ghi evidence
+  vào `02-INTEGRATION_MATRIX.md`.
+
+#### Handoff bắt buộc cho agent tiếp theo
+
+1. Build source Task 01/vertical slice trên Linux target.
+2. Chạy config mẫu với HTTP 8001, `device=real`, mock optional và Discovery
+   disabled; không dừng/restart ONVIF cũ.
+3. Xác nhận process mới không sở hữu UDP 3702 và có listener TCP 8001.
+4. Gọi SOAP `GetDeviceInformation`, đối chiếu đủ 5 field với response MGMT 8086.
+5. Tắt/tạm ngắt MGMT và xác nhận request trả SOAP fault, không trả identity giả
+   và không làm process ONVIF dừng.
+6. Sau đó triển khai `IIdentityBackend`/`MgmtIdentityAdapter` theo Phase 2.
+7. Chỉ sau Authentication mới nối Network/Discovery persistent theo Phase 3.
+
+#### Build evidence trên camera (2026-09-07)
+
+Đã build thành công source ONVIF baseline hiện có trên camera `alvisv4`
+(`Ubuntu 20.04.6`, `aarch64`) tại:
+
+```text
+/home/alvis/tungdt/onvif/onvif-tools/onvif-module/onvif-module
+```
+
+Evidence cuối build:
+
+```text
+[LINK] onvif-server
+[DONE] onvif-server
+exit code: 0
+```
+
+Để build được trên camera, đã cài package `gsoap` và `libgsoap-dev`, đồng thời
+đã sửa hai tương thích gSOAP 2.8.91 trong source:
+
+- `DeviceService.cpp`: dùng `tds__SystemCapabilities::HttpFirmwareUpgrade`
+  thay cho field cũ `FirmwareUpgrade`.
+- `scripts/gen_gsoap.sh`: sau khi copy stock `struct_timeval.c`, đổi
+  `SOAP_TYPE_xsd__dateTime` thành symbol generated
+  `SOAP_TYPE_xsd__dateTime_`.
+
+`soapcpp2` vẫn in warning/semantic diagnostic về `wsa.h`/`wsa5.h`, và generated
+source có warning formatting/indentation; tuy nhiên `make full` đã link thành
+công. Các warning này phải được giữ trong build evidence và kiểm tra lại khi
+nâng version gSOAP/WSDL.
+
+**Ranh giới quan trọng:** build pass này xác nhận baseline source đã copy trên
+camera, không phải evidence rằng Task 01 facade/MGMT client đã được sync hoặc
+build trên camera. Task 01 vẫn là `REAL_IN_PROGRESS` cho đến khi source branch
+chứa `RuntimeConfig`, `HttpMgmtClient` và `AlvisBackendFacade` được build/test.
+
+#### Safe parallel startup switch (2026-09-07)
+
+Đã nối cấu hình `discovery.enable` theo luồng:
+
+```text
+config/onvif.conf
+    -> RuntimeConfig::discoveryEnabled
+    -> OnvifServer(..., discoveryEnabled)
+    -> chỉ tạo/start DiscoveryService khi true
+```
+
+Config mẫu hiện đặt `false` để khi chạy ONVIF mới song song với ONVIF cũ, tiến
+trình mới không mở WS-Discovery UDP 3702. HTTP/SOAP listener không bị tắt và có
+thể dùng port riêng (dự kiến 8001) để gọi trực tiếp
+`/onvif/device_service`.
+
+Khi khởi động, cần thấy hai log sau để xác nhận config đã được áp dụng:
+
+```text
+WS-Discovery: disabled
+[OnvifServer] WS-Discovery disabled by configuration; UDP 3702 will not be opened
+```
+
+Đây chỉ là source/static verification; thay đổi chưa được build hoặc runtime
+test trên camera trong task này. Không được đánh dấu `REAL_VERIFIED` cho đến
+khi kiểm tra process mới không sở hữu UDP 3702 và SOAP endpoint port riêng trả
+response thành công.
+
+#### Device-information vertical-slice startup (2026-09-07)
+
+Config mẫu được chuẩn bị để chạy song song an toàn:
+
+```ini
+[server]
+device_ip = 192.168.8.127
+http_port = 8001
+rtsp_port = 8554
+
+[backend]
+mode = hybrid
+mock_required = false
+mgmt_base_url = http://127.0.0.1:8086
+
+[capabilities]
+device = real
+
+[startup]
+run_smoke_tests = false
+
+[discovery]
+enable = false
+```
+
+`mock_required=false` không biến các capability mock thành dữ liệu thật. Nó chỉ
+cho phép tiến trình khởi động khi mock Unix socket vắng mặt. Request đi vào
+capability chưa migrate phải trả SOAP fault. Riêng `GetDeviceInformation`, lỗi
+MGMT cũng trả Receiver fault; source không còn trả bộ Manufacturer/Model/
+Firmware/Serial/HardwareId hardcode để che lỗi integration.
+
+## 5. Phase 2 — Identity, Authentication và Authorization foundation
+
+### Mục tiêu
+
+Thiết lập authentication thật trước khi chuyển các operation cần quyền như
+`GetDeviceInformation`, Imaging, Media và Recording sang backend thật.
+
+SOAP và RTSP dùng chung ONVIF account store, nhưng account ONVIF tách mục
+đích khỏi Web account bằng `users.type = 'onvif'`. Web login/token và ONVIF
+WS-Security/Digest dùng chung repository/credential core nhưng là hai protocol
+authentication service riêng.
+
+### Nguồn thật
+
+- MGMT `domains/user`: `UserRepository`, `UserService`, `PasswordCrypto`.
+- SQLite `mgmt.db`: bảng `users`, `crypto_keys`, do MGMT sở hữu độc quyền.
+- `onvif-module`: parse security header, ONVIF operation/access-class mapping
+  và SOAP Fault behavior.
+- DVR/RTSP service: áp dụng kết quả xác thực từ cùng nguồn ONVIF credential.
+
+### Ranh giới bắt buộc
+
+```text
+VMS / ONVIF client
+        │ SOAP WSSE hoặc HTTP Digest
+        ▼
+onvif-module
+        │ internal REST hoặc Unix socket (runtime-configured)
+        ▼
+MGMT OnvifAuthenticationService
+        │ UserRepository.find(username, Onvif)
+        ▼
+SQLite mgmt.db
+```
+
+- Không cho `onvif-module` mở trực tiếp `mgmt.db`.
+- Không trả plaintext password hoặc encryption key qua API/IPC.
+- Không dùng Web JWT/session làm credential của ONVIF client.
+- Internal authentication giữa `onvif-module` và MGMT/DVR dùng service
+  credential riêng, không dùng account VMS.
+
+### Công việc MGMT
+
+- Tạo credential core dùng chung cho Web và ONVIF trên
+  `UserRepository`/`PasswordCrypto`.
+- Tạo `OnvifAuthenticationService`, tách khỏi Web authentication service.
+- Định nghĩa internal contract xác minh WS-Security UsernameToken
+  PasswordDigest: Username, Nonce, Created và PasswordDigest.
+- Định nghĩa internal contract xác minh HTTP/RTSP Digest: username, realm,
+  method, URI, nonce, qop, nc, cnonce, algorithm và response.
+- MGMT tự giải mã credential trong memory phạm vi ngắn để verify proof; không
+  trả password cho caller và không ghi credential/digest/key vào log.
+- Bổ sung account state và security state tối thiểu: `enabled`,
+  `failed_attempts`, `locked_until`, `last_login_at`, `password_changed_at`.
+- Bổ sung audit, rate limit, lockout và password policy.
+- Thêm SQLite schema migration có version (`PRAGMA user_version`). Không dựa
+  vào `CREATE TABLE IF NOT EXISTS` để nâng cấp database đã tồn tại.
+- Khi schema thay đổi, cập nhật đồng thời embedded schema trong repository và
+  `db/schema.sql`.
+- Tắt `MockAuthApiController` bằng runtime/build configuration; production
+  không được đăng ký controller chấp nhận mọi username/password.
+
+### Công việc onvif-module
+
+- Tạo `IIdentityBackend`/`MgmtIdentityAdapter`; service handler không gọi
+  HTTP/SQLite trực tiếp.
+- Ưu tiên WS-Security UsernameToken PasswordDigest để giữ behavior gSOAP đã
+  pass và tương thích baseline legacy.
+- Kiểm tra Timestamp và cache `(username, nonce, created)` để chống replay.
+- Sau đó nối HTTP Digest cho SOAP và dùng cùng credential source cho RTSP
+  live/replay.
+- Chuẩn hóa `AuthenticatedPrincipal` gồm user id, username, type và role.
+- Map operation → access class → role; authentication và authorization là hai
+  bước tách biệt.
+- Map thiếu/sai credential sang HTTP 401 hoặc ONVIF `ter:NotAuthorized` đúng
+  security mechanism đang dùng.
+
+### Gate
+
+- ONVIF user được tạo/sửa/xóa persistent trong SQLite với `type = 'onvif'`.
+- Web user cùng username không tự động trở thành ONVIF user.
+- `GetDeviceInformation` thành công bằng WSSE PasswordDigest thật.
+- Sai username/password, Timestamp hết hạn và replay Nonce đều bị từ chối.
+- Role được áp đúng theo ONVIF access class; Viewer không gọi được
+  `WRITE_SYSTEM`, Administrator gọi được operation được phép.
+- SOAP, RTSP live và RTSP replay dùng chung nguồn ONVIF credential.
+- Không có plaintext password/key trong API response hoặc log.
+- Mock authentication không tồn tại trong production runtime.
+- Có unit test digest/replay/RBAC, integration test MGMT↔onvif-module và DTT
+  security regression evidence.
+
+## 6. Phase 3 — Device, Network, DateTime và Discovery
+
+### Nguồn thật
+
+MGMT-01, mặc định qua internal REST trên endpoint cấu hình runtime.
+
+### Ownership và persistence của Network/Discovery
+
+MGMT là chủ sở hữu desired state của network protocol, Discovery Mode và
+scopes. Trong implementation MGMT hiện tại, các dữ liệu này chưa nằm trong
+SQLite `mgmt.db` mà được `JsonNetworkRepository` lưu tại
+`./mgmt_network_config.json`, tương đối với working directory của process
+`mgmt`.
+
+Ví dụ khi chạy host build từ thư mục `src/backend/build-host`, file thực tế là:
+
+```text
+D:\Elcom\NewVersion\frontend\MGMT\src\backend\build-host\mgmt_network_config.json
+```
+
+Khi deploy systemd với `WorkingDirectory=/media/sonnt1/mgmt-be/bin`, vị trí dự
+kiến là:
+
+```text
+/media/sonnt1/mgmt-be/bin/mgmt_network_config.json
+```
+
+File hiện đảm nhiệm các chức năng:
+
+- Persist `network_protocols`: Enabled, Name và Port cho HTTP, HTTPS, RTSP và
+  ONVIF theo model quản trị nội bộ của sản phẩm.
+- Persist `discovery`: `enabled` và `discovery_mode`.
+- Persist network interfaces, hostname, IP filter, SNMP, scopes và audit log
+  của các thay đổi network do cùng repository quản lý.
+- Khôi phục desired state sau khi MGMT restart. Nếu section chưa tồn tại, MGMT
+  trả default từ source; response default không chứng minh file đã tồn tại.
+
+Đây là file private của MGMT, không phải shared configuration contract giữa
+hai repo. Ở giai đoạn tích hợp sau, developer/AI agent phải đọc và đối chiếu:
+
+```text
+MGMT src/backend/src/main.cpp
+MGMT src/backend/src/domains/network/json_network_repository.cpp
+MGMT src/backend/src/domains/network/network_protocol_api_controller.cpp
+MGMT src/backend/src/domains/network/network_discovery_api_controller.cpp
+MGMT src/backend/src/domains/network/linux_net_protocol_service.cpp
+MGMT src/backend/src/domains/network/linux_net_discovery_service.cpp
+runtime mgmt_network_config.json tại working directory thật
+```
+
+Mục đích của bước đối chiếu này là xác định ba trạng thái riêng biệt:
+
+```text
+configured state  Giá trị MGMT đã persist.
+applied state     Giá trị đã apply xuống daemon/process thật.
+advertised state  Giá trị ONVIF trả cho VMS qua SOAP/WS-Discovery/URI.
+```
+
+Ba trạng thái phải nhất quán trước khi đánh dấu capability là `REAL_VERIFIED`.
+MGMT hiện mới persist protocol và log thay đổi; `LinuxNetProtocolService` chưa
+thực sự đổi listener/restart service. Vì vậy không được coi
+`SetNetworkProtocols` là production-complete chỉ vì JSON đã được ghi.
+
+### Runtime configuration contract
+
+- Giai đoạn đầu: `onvif-module` đọc `http_port` và `rtsp_port` từ `onvif.conf`
+  để bootstrap listener và URI. `GetNetworkProtocols` phải dùng chính runtime
+  config đã load, không dùng default hardcode trong `DeviceService`.
+- Giai đoạn sau: MGMT tiếp tục sở hữu desired state; supervisor/MGMT adapter
+  phân phối hoặc sinh runtime config và thực hiện reload/restart service.
+- `onvif-module` không mở trực tiếp `mgmt_network_config.json`, không phụ thuộc
+  đường dẫn build/deploy và không parse schema JSON private của MGMT.
+- REST API MGMT có thể giữ protocol `ONVIF` như khái niệm quản trị sản phẩm,
+  nhưng SOAP ONVIF `GetNetworkProtocols` chỉ công bố HTTP, HTTPS và RTSP.
+- Khi module được truy cập trực tiếp, ánh xạ MGMT `ONVIF.Port` thành SOAP
+  `HTTP.Port`; ánh xạ MGMT `RTSP.Port` thành SOAP `RTSP.Port`.
+- Khi có reverse proxy, SOAP HTTP port và mọi XAddr phải dùng `public_port`,
+  không dùng cổng bind nội bộ.
+- `SetNetworkProtocols` phải hỗ trợ partial update, validate collision/range,
+  persist desired state, apply/restart đúng owner và chỉ báo thành công khi có
+  kết quả apply rõ ràng. Không được ghi đè các protocol không có trong request.
+
+### Operation ưu tiên
+
+- `GetDeviceInformation`
+- `GetSystemDateAndTime`, `SetSystemDateAndTime`
+- `GetNetworkInterfaces`, `SetNetworkInterfaces`
+- `GetHostname`, `SetHostname`
+- `GetDNS`, `SetDNS`
+- `GetNTP`, `SetNTP`
+- `GetNetworkProtocols`, `SetNetworkProtocols`
+- `GetScopes`, `SetScopes`, `AddScopes`, `RemoveScopes`
+- `GetDiscoveryMode`, `SetDiscoveryMode`
+- `SystemReboot`
+- `SetSystemFactoryDefault`
+
+### Lưu ý
+
+- Tạo canonical DTO, không expose trực tiếp JSON MGMT trong SOAP service.
+- Map năm field chuẩn của `GetDeviceInformation`: Manufacturer, Model, FirmwareVersion, SerialNumber, HardwareId.
+- Xử lý việc đổi IP mà không làm response treo hoặc giữ endpoint cũ.
+- Scope chỉ công bố profile thực sự hỗ trợ.
+- `GetNetworkProtocols` phản ánh public/runtime endpoint thật, không chỉ phản
+  ánh JSON desired state.
+- `GetDiscoveryMode` đọc persistent state từ MGMT. `SetDiscoveryMode` persist
+  qua MGMT rồi điều khiển `DiscoveryService` trong `onvif-module`.
+- Khi `Discoverable`, module trả lời WS-Discovery Probe/Resolve và công bố XAddr
+  đúng public endpoint. Khi `NonDiscoverable`, module không trả lời
+  Probe/Resolve.
+- Sau restart, `onvif-module` phải phục hồi Discovery Mode từ MGMT; khi MGMT
+  tạm unavailable, dùng last-known-good/bootstrap state có đánh dấu degraded,
+  không âm thầm thay bằng mock state.
+- `onvif-module` là owner của ONVIF WS-Discovery runtime. Không chạy thêm daemon
+  `wsdd` độc lập cho cùng device identity/XAddr vì có thể tạo response trùng và
+  state không nhất quán.
+
+### Gate
+
+- Device/Discovery tests của S/T/M/G pass.
+- SOAP `GetNetworkProtocols`, WS-Discovery XAddr, ONVIF listener và RTSP URI
+  khớp các port runtime/public thực tế.
+- `SetNetworkProtocols` đã persist và apply; restart service vẫn giữ đúng port.
+- `GetDiscoveryMode` giữ đúng state qua restart; `NonDiscoverable` không trả lời
+  Probe/Resolve.
+- Không có hai WS-Discovery responder công bố cùng một thiết bị.
+- Không còn device identity/network mock trong hybrid-real mode.
+
+## 7. Phase 4 — Media, profile và RTSP live
+
+### Nguồn thật
+
+DVR media/profile/encoder/RTSP service.
+
+### Operation ưu tiên
+
+- Media1/Media2 `GetProfiles`
+- `GetVideoSources`
+- `GetVideoSourceConfigurations`
+- `GetVideoEncoderConfigurations`
+- `GetVideoEncoderConfigurationOptions`
+- `SetVideoEncoderConfiguration`
+- `GetStreamUri`
+- `GetSnapshotUri`
+- Metadata configuration/profile operations cần cho Profile M.
+
+### Công việc nền
+
+- Chốt token registry dùng chung.
+- Chốt public host/port/path của RTSP URI.
+- Map codec/resolution/framerate/bitrate/profile từ runtime thật.
+- Đảm bảo SDP khớp với response ONVIF.
+- Không truyền video qua onvif-server; onvif-server chỉ trả URI/control.
+
+### Gate
+
+- VMS/VLC mở được RTSP thật.
+- Profile S/T media tests pass.
+- Thay encoder config phản ánh đúng ở runtime.
+
+## 8. Phase 5 — Imaging, lens và PTZ
+
+### Nguồn thật
+
+- Imaging: MGMT Imaging API + HAL/ISP.
+- PTZ/zoom/focus: BUS control IPC + HAL.
+
+### Công việc
+
+- Map ImagingSettings và ImagingOptions đúng range/default/step của HAL.
+- Chỉ advertise control thực sự hỗ trợ.
+- Tách optical zoom/focus khỏi external pan/tilt.
+- Chuẩn hóa coordinate/range PTZ.
+- Kiểm tra behavior khi không có active lens hoặc HAL unavailable.
+
+### Gate
+
+- Get/Set imaging dùng state thật.
+- PTZ command đến hardware thật.
+- Imaging/PTZ test không regression.
+
+## 9. Phase 6 — Profile M analytics metadata và event
+
+### Nguồn thật
+
+- Detection/tracking/metadata: VPU.
+- Rule/alarm/event: Core.
+- Transport nội bộ: BUS event.
+
+### Công việc
+
+- Định nghĩa canonical `Detection` với UtcTime, ObjectId, BoundingBox, Class, Confidence và các extension Vehicle/LPR/Face/Body/GeoLocation.
+- Định nghĩa canonical `AlarmEvent` với Topic, PropertyOperation, Source, Key và Data.
+- Đồng bộ timestamp metadata với video.
+- Map `Application`/`app_id` vào Source/Data hoặc vendor namespace; không coi là field ONVIF bắt buộc.
+- Cập nhật `GetSupportedMetadata`, `GetSupportedAnalyticsModules`, rules và event properties theo runtime thật.
+- Cấp metadata track qua RTP/RTSP.
+- Cấp event qua PullPoint; MQTT chỉ advertise nếu thực sự hỗ trợ.
+
+### Gate
+
+- Metadata XML valid schema.
+- ObjectId ổn định và bounding box đúng hệ tọa độ.
+- Topic phát ra tồn tại trong `GetEventProperties`.
+- Profile M tests pass với dữ liệu thật.
+
+## 10. Phase 7 — Profile G Recording, Search và Replay
+
+### Nguồn thật
+
+- Recording/track/job/index/replay: DVR.
+- Historical event/metadata index: DVR + Core.
+
+### Công việc
+
+- Thay `Recording_0`, `Job_0`, `VIDEO_0`, `META_0` mock bằng registry thật.
+- Nối Recording Control.
+- Nối Search token lifecycle, forward/backward, time range và track filter.
+- Nối Event Search.
+- Nối `GetReplayUri` tới DVR playback server.
+- Hỗ trợ RTSP Range clock và timestamp replay.
+- Không truyền replay payload qua onvif-server.
+
+### Gate
+
+- Recording/Search/Replay token nhất quán.
+- VMS phát lại đúng UTC range.
+- Profile G pass với archive thật.
+
+## 11. Phase 8 — Production hardening và loại mock khỏi runtime
+
+### Công việc
+
+- Tắt mock capability trong production config.
+- Không package mock server/fake stream vào firmware production.
+- Thiết lập systemd restart/dependency/readiness.
+- Metrics theo operation, latency, error và reconnect.
+- Queue limit/backpressure cho metadata/event.
+- Soak test nhiều VMS/client.
+- Kiểm thử upgrade/rollback và contract version compatibility.
+
+### Gate
+
+- Không còn response giả trong production.
+- Restart MGMT/DVR/VPU/Core/HAL độc lập không làm onvif-server mất khả năng phục hồi.
+- Full S/T/M/G regression pass trên backend thật.
+
+## 12. Thứ tự triển khai đề xuất
+
+```text
+Baseline
+  → Backend facade/config/error mapping
+  → Identity/Authentication/RBAC
+  → Device/Discovery
+  → Media/RTSP
+  → Imaging/PTZ
+  → Profile M Metadata/Event
+  → Profile G Recording/Search/Replay
+  → Production hardening
+```
+
+Không cần đợi toàn bộ backend hoàn thiện. Mỗi capability có thể chuyển sang `real` khi service sở hữu nó đạt acceptance gate; các capability còn lại tiếp tục chạy mock trong hybrid mode.
+
+## 13. Quy trình cập nhật tài liệu
+
+Sau mỗi capability migration:
+
+1. Cập nhật trạng thái trong `02-INTEGRATION_MATRIX.md`.
+2. Ghi endpoint/IPC contract và owner.
+3. Ghi commit backend và onvif-module đã test.
+4. Ghi DTT case/report và VMS đã kiểm tra.
+5. Ghi limitation hoặc behavior chưa tương thích.
+6. Không đánh dấu `REAL_VERIFIED` nếu mới chỉ compile hoặc smoke test.
+
+Ma trận trạng thái được duy trì tại `02-INTEGRATION_MATRIX.md`.

@@ -8,7 +8,9 @@
 
 class OnvifServer {
 public:
-    OnvifServer(const ServiceConfig& cfg, std::shared_ptr<ICameraBackend> backend);
+    OnvifServer(const ServiceConfig& cfg,
+                std::shared_ptr<ICameraBackend> backend,
+                bool discoveryEnabled = true);
     ~OnvifServer();
 
     bool start();
@@ -22,6 +24,7 @@ private:
     std::atomic<bool> running_{false};
     std::thread serverThread_;
     int masterSocket_ = -1;
+    bool discoveryEnabled_ = true;
 
     std::unique_ptr<DiscoveryService> discovery_;
 

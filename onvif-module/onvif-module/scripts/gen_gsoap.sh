@@ -152,6 +152,15 @@ if [ ! -f "$EXT_DIR/custom/struct_timeval.cpp" ] && [ ! -f "$EXT_DIR/custom/stru
     done
 fi
 
+# ONVIF's current schema maps xsd:dateTime to the generated C++ wrapper
+# `xsd__dateTime_`. Ubuntu gSOAP 2.8.91's stock struct_timeval serializer
+# still refers to the older `SOAP_TYPE_xsd__dateTime` identifier, which makes
+# the generated project fail to compile. The serializer is copied fresh above,
+# so normalize it before compiling it with the generated sources.
+if [ -f "$EXT_DIR/custom/struct_timeval.c" ]; then
+    sed -i 's/SOAP_TYPE_xsd__dateTime/SOAP_TYPE_xsd__dateTime_/g' "$EXT_DIR/custom/struct_timeval.c"
+fi
+
 # Ensure imports exist in external/gsoap/import/
 mkdir -p "$EXT_DIR/import"
 if [ ! -f "$EXT_DIR/import/wsse.h" ]; then

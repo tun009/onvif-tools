@@ -242,8 +242,12 @@ static void ensureFullBody(struct soap* soap) {
 }
 #endif
 
-OnvifServer::OnvifServer(const ServiceConfig& cfg, std::shared_ptr<ICameraBackend> backend)
-    : cfg_(cfg), backend_(std::move(backend)) {
+OnvifServer::OnvifServer(const ServiceConfig& cfg,
+                         std::shared_ptr<ICameraBackend> backend,
+                         bool discoveryEnabled)
+    : cfg_(cfg),
+      backend_(std::move(backend)),
+      discoveryEnabled_(discoveryEnabled) {
     // ── Đăng ký service string-based vào registry (Phase 2+3 refactor) ──
     // Thêm service mới: chỉ registerService() ở đây, KHÔNG sửa listenLoop.
     registry_.registerService(std::make_unique<DeviceIOService>());
@@ -270,11 +274,16 @@ bool OnvifServer::start() {
     running_ = true;
     serverThread_ = std::thread(&OnvifServer::listenLoop, this);
 
-    // Khởi động WS-Discovery (UDP multicast 3702)
-    discovery_ = std::make_unique<DiscoveryService>(cfg_);
-    if (!discovery_->start()) {
-        std::cerr << "[OnvifServer] WS-Discovery không khởi động được "
-                     "(kiểm tra quyền bind UDP 3702)\n";
+    if (discoveryEnabled_) {
+        // Khởi động WS-Discovery (UDP multicast 3702).
+        discovery_ = std::make_unique<DiscoveryService>(cfg_);
+        if (!discovery_->start()) {
+            std::cerr << "[OnvifServer] WS-Discovery không khởi động được "
+                         "(kiểm tra quyền bind UDP 3702)\n";
+        }
+    } else {
+        std::cout << "[OnvifServer] WS-Discovery disabled by configuration; "
+                     "UDP 3702 will not be opened\n";
     }
     return true;
 }
@@ -548,38 +557,48 @@ void OnvifServer::listenLoop() {
             // vẫn đọc bình thường. Chỉ tác động request lớn bị cắt.
             ensureFullBody(soap);
 #endif
-            bool handledByRegistry = false;
-            for (IOnvifService* svc : registry_.matching(path)) {
-                std::string resp = svc->handle(g_current_headers);
-                if (!resp.empty()) {
-                    soap->error = SOAP_OK;
-                    soap_response(soap, SOAP_OK);
-                    soap_send_raw(soap, resp.c_str(), resp.size());
-                    soap_end_send(soap);
-                    soap_destroy(soap);
-                    soap_end(soap);
-                    handledByRegistry = true;
-                    break;
+            try {
+                bool handledByRegistry = false;
+                for (IOnvifService* svc : registry_.matching(path)) {
+                    std::string resp = svc->handle(g_current_headers);
+                    if (!resp.empty()) {
+                        soap->error = SOAP_OK;
+                        soap_response(soap, SOAP_OK);
+                        soap_send_raw(soap, resp.c_str(), resp.size());
+                        soap_end_send(soap);
+                        soap_destroy(soap);
+                        soap_end(soap);
+                        handledByRegistry = true;
+                        break;
+                    }
                 }
-            }
-            if (handledByRegistry) continue;
+                if (handledByRegistry) continue;
 
-            if (path.find("/onvif/media") != std::string::npos) {
-                // Media1 (legacy) đã xử lý bởi registry (MediaLegacyService) ở trên.
-                // Tới đây chắc chắn là Media2 (ver20) → gSOAP dispatcher.
-                serveResult = media2Svc.dispatch();
-                soap->error = media2Svc.soap->error;
-                soap->fault = media2Svc.soap->fault;
-            } else if (path.find("/onvif/imaging") != std::string::npos) {
-                // Yêu cầu đến ImagingService
-                serveResult = imagingSvc.dispatch();
-                soap->error = imagingSvc.soap->error;
-                soap->fault = imagingSvc.soap->fault;
-            } else {
-                // Mặc định: DeviceService (/onvif/device hoặc /onvif/device_service)
-                serveResult = deviceSvc.dispatch();
-                soap->error = deviceSvc.soap->error;
-                soap->fault = deviceSvc.soap->fault;
+                if (path.find("/onvif/media") != std::string::npos) {
+                    // Media1 (legacy) đã xử lý bởi registry (MediaLegacyService) ở trên.
+                    // Tới đây chắc chắn là Media2 (ver20) → gSOAP dispatcher.
+                    serveResult = media2Svc.dispatch();
+                    soap->error = media2Svc.soap->error;
+                    soap->fault = media2Svc.soap->fault;
+                } else if (path.find("/onvif/imaging") != std::string::npos) {
+                    // Yêu cầu đến ImagingService
+                    serveResult = imagingSvc.dispatch();
+                    soap->error = imagingSvc.soap->error;
+                    soap->fault = imagingSvc.soap->fault;
+                } else {
+                    // Mặc định: DeviceService (/onvif/device hoặc /onvif/device_service)
+                    serveResult = deviceSvc.dispatch();
+                    soap->error = deviceSvc.soap->error;
+                    soap->fault = deviceSvc.soap->fault;
+                }
+            } catch (const std::exception& e) {
+                std::cerr << "[OnvifServer] Backend operation unavailable: "
+                          << e.what() << std::endl;
+                serveResult = soap_receiver_fault_subcode(
+                    soap,
+                    "\"http://www.onvif.org/ver10/error\":ActionNotSupported",
+                    "Operation backend is not available",
+                    e.what());
             }
         } else {
             serveResult = soap->error;

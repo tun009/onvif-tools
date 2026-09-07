@@ -1,4 +1,7 @@
 #include "backend/BackendConnector.h"
+#include "backend/AlvisBackendFacade.h"
+#include "backend/HttpMgmtClient.h"
+#include "config/RuntimeConfig.h"
 #include "OnvifServer.h"
 
 // gSOAP namespace table — required when compiled with -DWITH_NONAMESPACES.
@@ -11,49 +14,12 @@
 #include <thread>
 #include <chrono>
 #include <cstdio>
-#include <cstring>
 
 static std::atomic<bool> g_running{true};
 
 void signalHandler(int sig) {
     printf("\n[main] signal %d\n", sig);
     g_running = false;
-}
-
-// ── Config parser (simple) ────────────────────────────────────────────────
-struct Config {
-    std::string deviceIp    = "192.168.1.100";
-    int         httpPort    = 8080;
-    int         rtspPort    = 8554;
-    std::string username    = "admin";
-    std::string password    = "admin123";
-    std::string ctrlSocket  = "/tmp/mock-camera.sock";
-    std::string evtSocket   = "/tmp/mock-camera-evt.sock";
-    std::string deviceUuid  = "12345678-1234-1234-1234-123456789abc";
-};
-
-Config loadConfig(const std::string& path) {
-    Config cfg;
-    FILE* f = fopen(path.c_str(), "r");
-    if (!f) {
-        printf("[WARN] Config not found: %s, using defaults\n", path.c_str());
-        return cfg;
-    }
-    char line[256];
-    while (fgets(line, sizeof(line), f)) {
-        char key[128], val[128];
-        if (sscanf(line, " %127[^= ] = %127[^\n]", key, val) != 2) continue;
-        if (!strcmp(key, "device_ip"))    cfg.deviceIp   = val;
-        if (!strcmp(key, "http_port"))    cfg.httpPort   = atoi(val);
-        if (!strcmp(key, "rtsp_port"))    cfg.rtspPort   = atoi(val);
-        if (!strcmp(key, "username"))     cfg.username   = val;
-        if (!strcmp(key, "password"))     cfg.password   = val;
-        if (!strcmp(key, "ctrl_socket"))  cfg.ctrlSocket = val;
-        if (!strcmp(key, "evt_socket"))   cfg.evtSocket  = val;
-        if (!strcmp(key, "device_uuid"))  cfg.deviceUuid = val;
-    }
-    fclose(f);
-    return cfg;
 }
 
 int main(int argc, char* argv[]) {
@@ -63,72 +29,91 @@ int main(int argc, char* argv[]) {
     signal(SIGINT,  signalHandler);
     signal(SIGTERM, signalHandler);
 
-    Config cfg = loadConfig(configPath);
+    RuntimeConfig cfg = loadRuntimeConfig(configPath);
 
     printf("==============================================\n");
     printf("  ONVIF Module\n");
     printf("  Device : %s:%d\n", cfg.deviceIp.c_str(), cfg.httpPort);
-    printf("  Backend: %s\n", cfg.ctrlSocket.c_str());
+    printf("  Backend mode: %s\n", toString(cfg.backendMode));
+    printf("  MGMT: %s\n", cfg.mgmtBaseUrl.c_str());
+    printf("  Startup smoke tests: %s\n", cfg.runSmokeTests ? "enabled" : "disabled");
+    printf("  WS-Discovery: %s\n", cfg.discoveryEnabled ? "enabled" : "disabled");
     printf("==============================================\n");
 
-    // ── Connect to mock backend ───────────────────────────────────
-    BackendConnector backend(cfg.ctrlSocket, cfg.evtSocket);
-
-    printf("[main] Connecting to mock backend...\n");
-    if (!backend.connect()) {
-        fprintf(stderr, "[main] Failed to connect to backend!\n");
-        fprintf(stderr, "  Make sure mock-camera-server is running:\n");
-        fprintf(stderr, "  cd ../mock-camera-backend && ./mock-camera-server\n");
-        return 1;
+    CameraBackendPtr mockBackend;
+    std::shared_ptr<BackendConnector> mockConnector;
+    if (cfg.requiresMockBackend()) {
+        printf("[main] Connecting to mock backend...\n");
+        mockConnector = std::make_shared<BackendConnector>(cfg.ctrlSocket, cfg.evtSocket);
+        if (!mockConnector->connect()) {
+            mockConnector.reset();
+            if (cfg.mockRequired) {
+                fprintf(stderr, "[main] Failed to connect to required mock backend!\n");
+                return 1;
+            }
+            fprintf(stderr,
+                    "[main] Mock backend unavailable; continuing because "
+                    "backend.mock_required=false. Mock-routed operations will return SOAP faults.\n");
+        } else {
+            mockBackend = mockConnector;
+        }
     }
 
-    // ── Smoke test: query backend ─────────────────────────────────
-    printf("[main] Backend connected. Running smoke test...\n\n");
+    auto mgmtClient = std::make_shared<HttpMgmtClient>(MgmtClientConfig{
+        cfg.mgmtBaseUrl, cfg.connectTimeoutMs, cfg.requestTimeoutMs});
+    auto backend = std::make_shared<AlvisBackendFacade>(
+        mockBackend, mgmtClient, cfg.backendMode, cfg.capabilities);
 
-    try {
-        // Test DeviceInfo
-        auto info = backend.getDeviceInfo();
-        printf("[TEST] GetDeviceInfo:\n");
-        printf("  Manufacturer : %s\n", info.manufacturer.c_str());
-        printf("  Model        : %s\n", info.model.c_str());
-        printf("  Firmware     : %s\n", info.firmwareVersion.c_str());
-        printf("  Serial       : %s\n", info.serialNumber.c_str());
+    // ── Optional startup smoke test ───────────────────────────────
+    if (cfg.runSmokeTests) {
+        printf("[main] Running startup smoke tests...\n\n");
+        try {
+            // Test DeviceInfo
+            auto info = backend->getDeviceInfo();
+            printf("[TEST] GetDeviceInfo:\n");
+            printf("  Manufacturer : %s\n", info.manufacturer.c_str());
+            printf("  Model        : %s\n", info.model.c_str());
+            printf("  Firmware     : %s\n", info.firmwareVersion.c_str());
+            printf("  Serial       : %s\n", info.serialNumber.c_str());
 
-        // Test DateTime
-        auto dt = backend.getSystemDateAndTime();
-        printf("[TEST] GetSystemDateAndTime:\n");
-        printf("  %d-%02d-%02d %02d:%02d:%02d UTC\n",
-               dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second);
+            // Test DateTime
+            auto dt = backend->getSystemDateAndTime();
+            printf("[TEST] GetSystemDateAndTime:\n");
+            printf("  %d-%02d-%02d %02d:%02d:%02d UTC\n",
+                   dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second);
 
-        // Test Profiles
-        auto profiles = backend.getProfiles();
-        printf("[TEST] GetProfiles: %zu profiles\n", profiles.size());
-        for (auto& p : profiles)
-            printf("  [%s] %s\n", p.token.c_str(), p.name.c_str());
+            // Test Profiles
+            auto profiles = backend->getProfiles();
+            printf("[TEST] GetProfiles: %zu profiles\n", profiles.size());
+            for (auto& p : profiles)
+                printf("  [%s] %s\n", p.token.c_str(), p.name.c_str());
 
-        // Test StreamUri
-        for (auto& p : profiles) {
-            auto uri = backend.getStreamUri(p.token, StreamProtocol::RTSP);
-            printf("[TEST] StreamUri [%s]: %s\n",
-                   p.token.c_str(), uri.uri.c_str());
+            // Test StreamUri
+            for (auto& p : profiles) {
+                auto uri = backend->getStreamUri(p.token, StreamProtocol::RTSP);
+                printf("[TEST] StreamUri [%s]: %s\n",
+                       p.token.c_str(), uri.uri.c_str());
+            }
+
+            // Test PTZ
+            auto ptzStatus = backend->getPtzStatus("profile_main");
+            printf("[TEST] PTZ Status: pan=%.2f tilt=%.2f zoom=%.2f\n",
+                   ptzStatus.position.pan,
+                   ptzStatus.position.tilt,
+                   ptzStatus.position.zoom);
+
+            // Test Imaging
+            auto imaging = backend->getImagingSettings("src_main");
+            printf("[TEST] ImagingSettings: brightness=%.1f contrast=%.1f\n",
+                   imaging.brightness, imaging.contrast);
+
+            printf("\n[TEST] All smoke tests PASSED\n");
+
+        } catch (const std::exception& e) {
+            fprintf(stderr, "[TEST] Exception: %s\n", e.what());
         }
-
-        // Test PTZ
-        auto ptzStatus = backend.getPtzStatus("profile_main");
-        printf("[TEST] PTZ Status: pan=%.2f tilt=%.2f zoom=%.2f\n",
-               ptzStatus.position.pan,
-               ptzStatus.position.tilt,
-               ptzStatus.position.zoom);
-
-        // Test Imaging
-        auto imaging = backend.getImagingSettings("src_main");
-        printf("[TEST] ImagingSettings: brightness=%.1f contrast=%.1f\n",
-               imaging.brightness, imaging.contrast);
-
-        printf("\n[TEST] All smoke tests PASSED\n");
-
-    } catch (const std::exception& e) {
-        fprintf(stderr, "[TEST] Exception: %s\n", e.what());
+    } else {
+        printf("[main] Startup smoke tests disabled by configuration.\n");
     }
 
     // ── Start ONVIF SOAP server ───────────────────────────────────
@@ -140,9 +125,7 @@ int main(int argc, char* argv[]) {
     svcCfg.username = cfg.username;
     svcCfg.password = cfg.password;
 
-    // Sử dụng no-op deleter vì backend nằm trên stack ở main
-    auto backendPtr = std::shared_ptr<ICameraBackend>(&backend, [](ICameraBackend*){});
-    OnvifServer server(svcCfg, backendPtr);
+    OnvifServer server(svcCfg, backend, cfg.discoveryEnabled);
     
     printf("[main] Starting ONVIF SOAP server...\n");
     if (server.start()) {
@@ -160,7 +143,7 @@ int main(int argc, char* argv[]) {
     printf("[main] Stopping ONVIF SOAP server...\n");
     server.stop();
 
-    backend.disconnect();
+    if (mockConnector) mockConnector->disconnect();
     printf("[main] Done.\n");
     return 0;
 }
