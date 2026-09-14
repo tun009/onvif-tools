@@ -317,7 +317,9 @@ SQLite mgmt.db
 
 - Tạo credential core dùng chung cho Web và ONVIF trên
   `UserRepository`/`PasswordCrypto`.
-- Tạo `OnvifAuthenticationService`, tách khỏi Web authentication service.
+- Mở rộng `UserService` hiện có với nghiệp vụ xác minh ONVIF, giữ HTTP adapter
+  mỏng trong `UserApiController`; không tạo service/controller song song khi
+  cùng thuộc domain user.
 - Định nghĩa internal contract xác minh WS-Security UsernameToken
   PasswordDigest: Username, Nonce, Created và PasswordDigest.
 - Định nghĩa internal contract xác minh HTTP/RTSP Digest: username, realm,
@@ -348,6 +350,30 @@ SQLite mgmt.db
   bước tách biệt.
 - Map thiếu/sai credential sang HTTP 401 hoặc ONVIF `ter:NotAuthorized` đúng
   security mechanism đang dùng.
+
+#### WSSE PasswordDigest vertical slice (2026-09-14)
+
+Đã nối source local theo luồng:
+
+```text
+SOAP UsernameToken PasswordDigest
+  -> WsSecurityHandler
+  -> IMgmtClient::verifyWssePasswordDigest
+  -> HttpMgmtClient POST /internal/v1/auth/onvif/wsse-password-digest
+  -> MGMT UserApiController -> UserService
+  -> users(type=onvif) + PasswordCrypto
+```
+
+- `mock` tiếp tục dùng credential tĩnh để giữ baseline conformance.
+- `hybrid` và `production` dùng MGMT cho WSSE PasswordDigest và không fallback
+  về `admin/admin123`.
+- `PasswordText` bị từ chối trong real mode vì MGMT chưa có contract tương ứng.
+- HTTP Digest trong real mode fail-closed; contract verify HTTP Digest là bước
+  tiếp theo, không được dùng password tĩnh làm đường vòng.
+- MGMT/network unavailable được coi là authentication failure; password,
+  encryption key và digest không được ghi log.
+- Đây mới là source implementation local; chưa có runtime/DTT evidence trên
+  camera nên trạng thái vẫn là `REAL_IN_PROGRESS`.
 
 ### Gate
 

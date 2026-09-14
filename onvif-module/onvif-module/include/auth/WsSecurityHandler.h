@@ -1,5 +1,8 @@
 #pragma once
+#include "backend/IMgmtClient.h"
+#include <memory>
 #include <string>
+#include <utility>
 
 struct soap;
 
@@ -8,6 +11,8 @@ public:
     WsSecurityHandler(const std::string& username,
                       const std::string& password)
         : username_(username), password_(password) {}
+    explicit WsSecurityHandler(std::shared_ptr<IMgmtClient> mgmtClient)
+        : mgmtClient_(std::move(mgmtClient)) {}
 
     // Xác thực WS-Security từ gSOAP soap context
     bool validate(struct soap* soap) const;
@@ -18,4 +23,5 @@ public:
 private:
     std::string username_;
     std::string password_;
+    std::shared_ptr<IMgmtClient> mgmtClient_;
 };

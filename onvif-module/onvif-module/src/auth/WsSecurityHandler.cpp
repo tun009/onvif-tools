@@ -6,6 +6,7 @@
 #include <openssl/buffer.h>
 #include <cstring>
 #include <iostream>
+#include <stdexcept>
 
 // Helper decode Base64
 static std::string base64Decode(const std::string& in) {
@@ -61,7 +62,7 @@ bool WsSecurityHandler::validate(struct soap* soap) const {
     }
 
     std::string clientUser = token->Username;
-    if (clientUser != username_) {
+    if (!mgmtClient_ && clientUser != username_) {
         std::cerr << "[WsSecurity] Auth failed: Username mismatch. Expected: " 
                   << username_ << ", Got: " << clientUser << std::endl;
         return false;
@@ -77,6 +78,10 @@ bool WsSecurityHandler::validate(struct soap* soap) const {
 
     // 1. Plaintext Password
     if (passwordType == "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordText" || passwordType.empty()) {
+        if (mgmtClient_) {
+            std::cerr << "[WsSecurity] PasswordText is not supported by MGMT authentication" << std::endl;
+            return false;
+        }
         if (clientPassword == password_) {
             return true;
         }
@@ -91,6 +96,19 @@ bool WsSecurityHandler::validate(struct soap* soap) const {
         if (!token->Nonce || !token->Nonce->__item || !token->wsu__Created) {
             std::cerr << "[WsSecurity] Digest fail: Nonce/Created missing" << std::endl;
             return false;
+        }
+        if (mgmtClient_) {
+            try {
+                const OnvifAuthenticationResult result =
+                    mgmtClient_->verifyWssePasswordDigest(WssePasswordDigest{
+                        clientUser, token->Nonce->__item, token->wsu__Created,
+                        clientPassword});
+                return result.authenticated;
+            } catch (const std::exception& e) {
+                std::cerr << "[WsSecurity] MGMT authentication unavailable: "
+                          << e.what() << std::endl;
+                return false;
+            }
         }
         std::string rawNonce = base64Decode(token->Nonce->__item);
         std::string createdTime = token->wsu__Created;

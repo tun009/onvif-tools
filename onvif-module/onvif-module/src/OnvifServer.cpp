@@ -244,10 +244,12 @@ static void ensureFullBody(struct soap* soap) {
 
 OnvifServer::OnvifServer(const ServiceConfig& cfg,
                          std::shared_ptr<ICameraBackend> backend,
-                         bool discoveryEnabled)
+                         bool discoveryEnabled,
+                         std::shared_ptr<IMgmtClient> authClient)
     : cfg_(cfg),
       backend_(std::move(backend)),
-      discoveryEnabled_(discoveryEnabled) {
+      discoveryEnabled_(discoveryEnabled),
+      authClient_(std::move(authClient)) {
     // ── Đăng ký service string-based vào registry (Phase 2+3 refactor) ──
     // Thêm service mới: chỉ registerService() ở đây, KHÔNG sửa listenLoop.
     registry_.registerService(std::make_unique<DeviceIOService>());
@@ -510,8 +512,10 @@ void OnvifServer::listenLoop() {
             // ter:NotAuthorized (không phải 401 hay OK). Validate WsSecurity
             // TRƯỚC khi dispatch, kể cả với GetDeviceInformation.
             if (hasWsSecurity) {
-                WsSecurityHandler wss(cfg_.username, cfg_.password);
-                if (!wss.validate(soap)) {
+                const bool authenticated = authClient_
+                    ? WsSecurityHandler(authClient_).validate(soap)
+                    : WsSecurityHandler(cfg_.username, cfg_.password).validate(soap);
+                if (!authenticated) {
                     std::string fault = FaultBuilder::notAuthorized();
                     soap->error = 400;
                     soap->http_content = "application/soap+xml; charset=utf-8";
@@ -528,7 +532,10 @@ void OnvifServer::listenLoop() {
                 DigestAuthHandler digestAuth(cfg_.username, cfg_.password);
                 std::string method = "POST";
 
-                if (!digestAuth.validate(g_current_headers, method)) {
+                // MGMT hiện mới có contract WSSE PasswordDigest. Ở real mode,
+                // không được fallback sang admin/password tĩnh để verify HTTP
+                // Digest; tiếp tục challenge và fail-closed cho đến Phase HTTP Digest.
+                if (authClient_ || !digestAuth.validate(g_current_headers, method)) {
                     static std::string challenge;
                     challenge = digestAuth.generateChallenge();
 

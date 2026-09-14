@@ -2,6 +2,7 @@
 #include "services/DeviceService.h"
 #include "services/DiscoveryService.h"
 #include "core/ServiceRegistry.h"
+#include "backend/IMgmtClient.h"
 #include <memory>
 #include <thread>
 #include <atomic>
@@ -10,7 +11,8 @@ class OnvifServer {
 public:
     OnvifServer(const ServiceConfig& cfg,
                 std::shared_ptr<ICameraBackend> backend,
-                bool discoveryEnabled = true);
+                bool discoveryEnabled = true,
+                std::shared_ptr<IMgmtClient> authClient = nullptr);
     ~OnvifServer();
 
     bool start();
@@ -25,6 +27,7 @@ private:
     std::thread serverThread_;
     int masterSocket_ = -1;
     bool discoveryEnabled_ = true;
+    std::shared_ptr<IMgmtClient> authClient_;
 
     std::unique_ptr<DiscoveryService> discovery_;
 

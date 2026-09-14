@@ -125,7 +125,11 @@ int main(int argc, char* argv[]) {
     svcCfg.username = cfg.username;
     svcCfg.password = cfg.password;
 
-    OnvifServer server(svcCfg, backend, cfg.discoveryEnabled);
+    // Mock giữ credential tĩnh để bảo toàn baseline. Hybrid/production dùng
+    // MGMT làm nguồn xác thực duy nhất; không fallback admin/admin123.
+    std::shared_ptr<IMgmtClient> authClient =
+        cfg.backendMode == BackendMode::Mock ? nullptr : mgmtClient;
+    OnvifServer server(svcCfg, backend, cfg.discoveryEnabled, authClient);
     
     printf("[main] Starting ONVIF SOAP server...\n");
     if (server.start()) {
