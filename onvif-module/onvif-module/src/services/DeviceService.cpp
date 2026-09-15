@@ -1,6 +1,7 @@
 #include "services/DeviceService.h"
 #include "services/DiscoveryService.h"
 #include "auth/WsSecurityHandler.h"
+#include "backend/IMgmtClient.h"
 #include <iostream>
 #include <ctime>
 #include <cstring>
@@ -55,6 +56,56 @@ static bool isValidHostname(const std::string& h) {
         if (!(std::isalnum((unsigned char)c) || c == '-' || c == '.'))
             return false;
     }
+    return true;
+}
+
+static bool isLeapYear(int year) {
+    return (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+}
+
+// Số ngày thật của tháng — ONVIF/MGMT chỉ check range 1-31 thô, không đủ để
+// chặn ngày không tồn tại (VD 30/02). Nếu lọt xuống MGMT, lệnh `timedatectl
+// set-time` sẽ fail và MGMT trả {"result":0} không kèm lý do, không thể phân
+// biệt với lỗi hệ thống thật — nên phải chặn ở đây trước khi gọi backend.
+static int daysInMonth(int year, int month) {
+    static const int kDays[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    if (month < 1 || month > 12) return 0;
+    if (month == 2 && isLeapYear(year)) return 29;
+    return kDays[month - 1];
+}
+
+// Ngược lại với công thức compose TimeZone ở GetSystemDateAndTime (chuỗi
+// "UTC" + dấu + giờ[:phút], dấu '-' ứng với offset dương). Đây là quy ước tự
+// định nghĩa của riêng service này (không phải mọi client POSIX TZ đều theo
+// đúng hình thức này), nhưng Get/Set trong cùng service phải nhất quán với
+// nhau để round-trip Get→Set hoạt động đúng.
+static bool parsePosixOffsetMinutes(const std::string& tz, int& outMinutes) {
+    if (tz.rfind("UTC", 0) != 0) return false;
+    const std::string rest = tz.substr(3);
+    if (rest.empty()) return false;
+    if (rest == "0") { outMinutes = 0; return true; }
+    const char sign = rest[0];
+    if (sign != '+' && sign != '-') return false;
+    const std::string numPart = rest.substr(1);
+    if (numPart.empty()) return false;
+    for (char c : numPart) {
+        if (c != ':' && !std::isdigit((unsigned char)c)) return false;
+    }
+    const auto colon = numPart.find(':');
+    int hours = 0, minutes = 0;
+    try {
+        if (colon == std::string::npos) {
+            hours = std::stoi(numPart);
+        } else {
+            hours = std::stoi(numPart.substr(0, colon));
+            minutes = std::stoi(numPart.substr(colon + 1));
+        }
+    } catch (...) {
+        return false;
+    }
+    if (hours < 0 || hours > 14 || minutes < 0 || minutes > 59) return false;
+    const int total = hours * 60 + minutes;
+    outMinutes = (sign == '-') ? total : -total;
     return true;
 }
 
@@ -1011,11 +1062,13 @@ int DeviceService::SetSystemDateAndTime(_tds__SetSystemDateAndTime* req,
                                  "ter:InvalidArgVal", nullptr,
                                  "Missing request");
     }
-    // Validate: nếu Manual, UTCDateTime bắt buộc.
-    if (req->DateTimeType == tt__SetDateTimeType::Manual && !req->UTCDateTime) {
+    const bool isManual = req->DateTimeType == tt__SetDateTimeType::Manual;
+    // Validate: nếu Manual, UTCDateTime (đủ cả Date lẫn Time) bắt buộc — thiếu
+    // một trong hai thì không đủ dữ liệu để gọi timedatectl set-time.
+    if (isManual && (!req->UTCDateTime || !req->UTCDateTime->Date || !req->UTCDateTime->Time)) {
         return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
                                  "ter:InvalidArgVal", "ter:MissingAttribute",
-                                 "UTCDateTime required for Manual");
+                                 "UTCDateTime (Date and Time) required for Manual");
     }
     // Validate timezone (nếu có): POSIX TZ tối thiểu cần có digit (offset) hoặc
     // dấu phẩy (rule). "INVALIDTIMEZONE" (toàn chữ) không hợp lệ.
@@ -1036,30 +1089,108 @@ int DeviceService::SetSystemDateAndTime(_tds__SetSystemDateAndTime* req,
                                      "Invalid POSIX TZ format");
         }
     }
-    // Validate date + time (nếu Manual)
-    if (req->DateTimeType == tt__SetDateTimeType::Manual && req->UTCDateTime) {
-        if (req->UTCDateTime->Date) {
-            auto* d = req->UTCDateTime->Date;
-            if (d->Month < 1 || d->Month > 12 || d->Day < 1 || d->Day > 31
-                || d->Year < 1970 || d->Year > 2099) {
-                return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
-                                         "ter:InvalidArgVal", "ter:InvalidDateTime",
-                                         "Invalid date");
-            }
+    // Validate date + time (nếu Manual): range thô trước, rồi số ngày thật
+    // của tháng/năm (chặn 30/02 v.v. trước khi tới MGMT).
+    if (isManual) {
+        auto* d = req->UTCDateTime->Date;
+        auto* t = req->UTCDateTime->Time;
+        if (d->Month < 1 || d->Month > 12 || d->Day < 1 || d->Day > 31
+            || d->Year < 1970 || d->Year > 2099) {
+            return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                     "ter:InvalidArgVal", "ter:InvalidDateTime",
+                                     "Invalid date");
         }
-        if (req->UTCDateTime->Time) {
-            auto* t = req->UTCDateTime->Time;
-            if (t->Hour < 0 || t->Hour > 23 || t->Minute < 0 || t->Minute > 59
-                || t->Second < 0 || t->Second > 60) {
-                return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
-                                         "ter:InvalidArgVal", "ter:InvalidDateTime",
-                                         "Invalid time");
-            }
+        if (d->Day > daysInMonth(d->Year, d->Month)) {
+            return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                     "ter:InvalidArgVal", "ter:InvalidDateTime",
+                                     "Day does not exist in given month");
+        }
+        if (t->Hour < 0 || t->Hour > 23 || t->Minute < 0 || t->Minute > 59
+            || t->Second < 0 || t->Second > 60) {
+            return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                     "ter:InvalidArgVal", "ter:InvalidDateTime",
+                                     "Invalid time");
         }
     }
-    std::lock_guard<std::mutex> lk(sysMtx_);
-    sys_.ntpEnabled = (req->DateTimeType == tt__SetDateTimeType::NTP);
-    // Không thực sự set system clock (mock).
+
+    // Đọc state hiện tại từ MGMT: (1) ONVIF SetSystemDateAndTime chỉ mang
+    // TimeZone dạng offset POSIX, không đủ để suy ra đúng tên IANA khi cần đổi
+    // sang một offset khác — nên chỉ chấp nhận khi offset khớp zone hiện có,
+    // còn lại giữ nguyên zone cũ; (2) khi DateTimeType=NTP, operation này của
+    // ONVIF không mang theo NTP host (đó là việc của SetNTP, hiện chưa làm) —
+    // phải lấy lại NTPServer đang cấu hình để không gửi thiếu xuống MGMT.
+    SystemDateTime current;
+    try {
+        current = backend_->getSystemDateAndTime();
+    } catch (const std::exception& e) {
+        std::cerr << "[DeviceService] SetSystemDateAndTime: cannot read current state: "
+                  << e.what() << std::endl;
+        return soap_receiver_fault_subcode(
+            this->soap, "\"http://www.onvif.org/ver10/error\":Action",
+            "DateTime backend unavailable", e.what());
+    }
+
+    SystemDateTime setReq;
+    setReq.dateTimeType = isManual ? "MANUAL" : "NTP";
+    setReq.timezone = current.timezone;
+
+    if (req->TimeZone) {
+        int requestedOffset = 0;
+        if (!parsePosixOffsetMinutes(req->TimeZone->TZ, requestedOffset)) {
+            return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                     "ter:InvalidArgVal", "ter:InvalidTimeZone",
+                                     "Unsupported TimeZone format");
+        }
+        const auto utcMinutes = civilMinutes(current.year, current.month, current.day,
+                                             current.hour, current.minute);
+        const auto localMinutes = civilMinutes(current.localYear, current.localMonth,
+                                               current.localDay, current.localHour,
+                                               current.localMinute);
+        const int currentOffset = static_cast<int>(localMinutes - utcMinutes);
+        if (requestedOffset != currentOffset) {
+            // Một offset POSIX có thể khớp nhiều IANA zone khác nhau — không
+            // có cách suy ngược an toàn ra đúng zone. Từ chối thay vì đoán.
+            return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                     "ter:InvalidArgVal", "ter:InvalidTimeZone",
+                                     "Device cannot map the requested UTC offset to a "
+                                     "specific timezone; keep the currently advertised "
+                                     "TimeZone or omit it");
+        }
+        // Offset khớp zone hiện có → không đổi gì, dùng nguyên current.timezone.
+    }
+
+    if (isManual) {
+        auto* d = req->UTCDateTime->Date;
+        auto* t = req->UTCDateTime->Time;
+        setReq.year = d->Year; setReq.month = d->Month; setReq.day = d->Day;
+        setReq.hour = t->Hour; setReq.minute = t->Minute; setReq.second = t->Second;
+    } else {
+        if (current.ntpMode.empty() ||
+            (current.ntpMode == "MANUAL" && current.ntpHost.empty())) {
+            return soap_receiver_fault_subcode(
+                this->soap, "\"http://www.onvif.org/ver10/error\":Action",
+                "NTP server is not configured",
+                "Configure an NTP server via MGMT before enabling NTP DateTimeType");
+        }
+        setReq.ntpMode = current.ntpMode;
+        setReq.ntpHost = current.ntpHost;
+    }
+
+    try {
+        backend_->setSystemDateAndTime(setReq);
+    } catch (const MgmtValidationError& e) {
+        std::cerr << "[DeviceService] SetSystemDateAndTime rejected by MGMT: "
+                  << e.what() << std::endl;
+        return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                 "ter:InvalidArgVal", nullptr, e.what());
+    } catch (const std::exception& e) {
+        std::cerr << "[DeviceService] SetSystemDateAndTime backend error: "
+                  << e.what() << std::endl;
+        return soap_receiver_fault_subcode(
+            this->soap, "\"http://www.onvif.org/ver10/error\":Action",
+            "SetSystemDateAndTime backend unavailable", e.what());
+    }
+
     return SOAP_OK;
 }
 

@@ -7,6 +7,7 @@ public:
     explicit HttpMgmtClient(MgmtClientConfig config);
     DeviceInfo getDeviceInformation() override;
     SystemDateTime getSystemDateAndTime() override;
+    void setSystemDateAndTime(const SystemDateTime& request) override;
     OnvifAuthenticationResult verifyWssePasswordDigest(
         const WssePasswordDigest& credential) override;
     OnvifAuthenticationResult verifyHttpDigest(

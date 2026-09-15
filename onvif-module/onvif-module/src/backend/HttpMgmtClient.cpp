@@ -152,6 +152,7 @@ SystemDateTime HttpMgmtClient::getSystemDateAndTime() {
     const std::string local = jsonObject(state, "LocalDateTime");
     const std::string localDate = jsonObject(local, "Date");
     const std::string localTime = jsonObject(local, "Time");
+    const std::string ntp = jsonObject(state, "NTPServer");
     if (state.empty() || zone.empty() || utcDate.empty() || utcTime.empty() ||
         localDate.empty() || localTime.empty())
         throw std::runtime_error("MGMT returned incomplete GetSystemDateAndTime payload");
@@ -172,6 +173,10 @@ SystemDateTime HttpMgmtClient::getSystemDateAndTime() {
     result.localHour = SimpleJson::getInt(localTime, "Hour");
     result.localMinute = SimpleJson::getInt(localTime, "Minute");
     result.localSecond = SimpleJson::getInt(localTime, "Second");
+    // NTPServer có thể rỗng (chưa từng cấu hình qua MGMT/Web) — không coi đây
+    // là payload không hợp lệ, chỉ đơn thuần là "NTP chưa sẵn sàng dùng".
+    result.ntpMode = SimpleJson::getString(ntp, "Mode");
+    result.ntpHost = SimpleJson::getString(ntp, "Host");
 
     if ((result.dateTimeType != "MANUAL" && result.dateTimeType != "NTP") ||
         result.timezone.empty() ||
@@ -181,6 +186,41 @@ SystemDateTime HttpMgmtClient::getSystemDateAndTime() {
                        result.localHour, result.localMinute, result.localSecond))
         throw std::runtime_error("MGMT returned invalid GetSystemDateAndTime payload");
     return result;
+}
+
+void HttpMgmtClient::setSystemDateAndTime(const SystemDateTime& req) {
+    if (req.dateTimeType != "MANUAL" && req.dateTimeType != "NTP")
+        throw std::invalid_argument("setSystemDateAndTime: dateTimeType must be MANUAL or NTP");
+    if (req.timezone.empty())
+        throw std::invalid_argument("setSystemDateAndTime: timezone must not be empty");
+
+    std::ostringstream body;
+    body << "{\"DateTimeType\":\"" << escapeJson(req.dateTimeType) << "\""
+         << ",\"TimeZone\":{\"TZ\":\"" << escapeJson(req.timezone) << "\"}";
+    if (req.dateTimeType == "NTP") {
+        body << ",\"NTPServer\":{\"Mode\":\"" << escapeJson(req.ntpMode)
+             << "\",\"Host\":\"" << escapeJson(req.ntpHost) << "\"}";
+    } else {
+        body << ",\"UTCDateTime\":{"
+             << "\"Date\":{\"Year\":" << req.year << ",\"Month\":" << req.month
+             << ",\"Day\":" << req.day << "},"
+             << "\"Time\":{\"Hour\":" << req.hour << ",\"Minute\":" << req.minute
+             << ",\"Second\":" << req.second << "}}";
+    }
+    body << "}";
+
+    const HttpResponse response = request(
+        "POST", "/mgmt/v1/Config/SetSystemDateAndTime", body.str());
+    const int resultCode = SimpleJson::getInt(response.body, "result", 0);
+    if (response.status == 200 && resultCode == 1) return;
+    if (resultCode == -1) {
+        throw MgmtValidationError(
+            "MGMT rejected SetSystemDateAndTime, field=" +
+            SimpleJson::getString(response.body, "field_error", "unknown"));
+    }
+    throw std::runtime_error(
+        "MGMT SetSystemDateAndTime failed (status=" +
+        std::to_string(response.status) + ", result=" + std::to_string(resultCode) + ")");
 }
 
 OnvifAuthenticationResult HttpMgmtClient::verifyWssePasswordDigest(

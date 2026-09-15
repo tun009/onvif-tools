@@ -36,4 +36,8 @@ struct SystemDateTime {
     int  localHour      = 0;
     int  localMinute    = 0;
     int  localSecond    = 0;
+    // NTP server hiện đang cấu hình (MGMT trả kèm trong GetSystemDateAndTime).
+    // Chỉ có ý nghĩa khi dateTimeType == "NTP". ntpMode: "MANUAL" | "DHCP".
+    std::string ntpMode;
+    std::string ntpHost;
 };
