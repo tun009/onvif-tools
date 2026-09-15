@@ -23,7 +23,7 @@ UNSUPPORTED       Sản phẩm quyết định không hỗ trợ và không adve
 | Network | S/T/M/G | MGMT | Internal REST/IPC | REAL_IN_PROGRESS | MGMT persist `network_protocols` trong `mgmt_network_config.json`; apply daemon/listener chưa hoàn thiện |
 | Date/time/NTP | S/T/M/G | MGMT | Internal REST/IPC | REAL_IN_PROGRESS | MGMT đã có DateTime service |
 | Discovery/scopes | S/T/M/G | MGMT desired state + onvif-module runtime | REST/IPC + WS-Discovery | REAL_IN_PROGRESS | MGMT persist Discovery Mode/scopes; onvif-module phải là WS-Discovery responder duy nhất và phục hồi state sau restart |
-| ONVIF users/RBAC | S/T/M/G | MGMT/Security | Internal REST | REAL_IN_PROGRESS | Local đã nối WSSE PasswordDigest và HTTP Digest qua MGMT `users(type=onvif)`; HTTP nonce TTL/nc được kiểm soát tại onvif-module; chưa có camera/DTT evidence và RBAC chưa áp operation |
+| ONVIF users/RBAC | S/T/M/G | MGMT/Security | Internal REST | REAL_IN_PROGRESS | HTTP Digest `REAL_VERIFIED` bằng DTT trên camera `192.168.8.127` ngày 2026-09-15: user `type=onvif` từ SQLite MGMT xác thực qua `onvif-module:8001 -> MGMT:8086`, `GetDeviceInformation` thành công; WSSE runtime evidence và RBAC chưa hoàn tất |
 | Media profiles | S/T/M | DVR | Internal API/IPC | REAL_IN_PROGRESS | Backend mới đã có stream/profile một phần; cần chốt contract/token |
 | Live RTSP | S/T | DVR | RTSP | REAL_IN_PROGRESS | Cần xác minh URI/SDP/auth với ONVIF profile |
 | Snapshot | S/T | DVR | HTTP/media API | MOCK | Cần xác nhận backend thật |
@@ -41,8 +41,8 @@ UNSUPPORTED       Sản phẩm quyết định không hỗ trợ và không adve
 
 | ONVIF operation | Service | Backend method/adapter | Real endpoint/IPC | Trạng thái | Test evidence |
 |---|---|---|---|---|---|
-| GetDeviceInformation | Device | `IDeviceBackend::getDeviceInfo` | MGMT DeviceInformation | REAL_IN_PROGRESS | Local source route qua `HttpMgmtClient`; lỗi MGMT trả SOAP Receiver fault, chưa có camera runtime evidence |
-| GetSystemDateAndTime | Device | `IDeviceBackend::getDateTime` | MGMT DateTime | REAL_IN_PROGRESS | Chưa ghi |
+| GetDeviceInformation | Device | `IDeviceBackend::getDeviceInfo` | MGMT DeviceInformation | REAL_VERIFIED | DTT đọc thành công trên camera `192.168.8.127` ngày 2026-09-15 sau HTTP Digest bằng user SQLite `type=onvif`; route runtime `onvif-module:8001 -> MGMT:8086` |
+| GetSystemDateAndTime | Device | `ICameraBackend::getSystemDateAndTime` (facade hiện tại) | MGMT DateTime | REAL_IN_PROGRESS | Source local đã route thẳng MGMT và map DateTimeType/DST/UTC/local/POSIX offset; không mock hoặc fallback system time; chờ build/runtime/DTT evidence trên camera |
 | GetNetworkInterfaces | Device | `IDeviceBackend::getNetwork` | MGMT Network | REAL_IN_PROGRESS | Chưa ghi |
 | GetNetworkProtocols | Device | `IDeviceBackend::getNetworkProtocols` | MGMT Network + runtime config | REAL_IN_PROGRESS | SOAP chỉ trả HTTP/HTTPS/RTSP; cần map MGMT ONVIF port → SOAP HTTP port |
 | SetNetworkProtocols | Device | `IDeviceBackend::setNetworkProtocols` | MGMT Network + service supervisor | REAL_IN_PROGRESS | MGMT hiện mới persist/log; chưa apply listener, cần partial update |

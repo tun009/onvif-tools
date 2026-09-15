@@ -20,6 +20,8 @@ struct NetworkConfig {
 };
 
 struct SystemDateTime {
+    std::string dateTimeType = "MANUAL";
+    std::string timezone     = "UTC";
     int  year           = 2024;
     int  month          = 1;
     int  day            = 1;
@@ -28,4 +30,10 @@ struct SystemDateTime {
     int  second         = 0;
     int  utcOffset      = 0;
     bool daylightSaving = false;
+    int  localYear      = 2024;
+    int  localMonth     = 1;
+    int  localDay       = 1;
+    int  localHour      = 0;
+    int  localMinute    = 0;
+    int  localSecond    = 0;
 };

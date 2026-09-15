@@ -51,6 +51,36 @@ void sendAll(int fd, const std::string& data) {
         offset += static_cast<std::size_t>(sent);
     }
 }
+
+std::string jsonObject(const std::string& json, const std::string& key) {
+    const std::string marker = "\"" + key + "\":";
+    auto start = json.find(marker);
+    if (start == std::string::npos) return {};
+    start = json.find('{', start + marker.size());
+    if (start == std::string::npos) return {};
+    int depth = 0;
+    bool quoted = false;
+    bool escaped = false;
+    for (std::size_t pos = start; pos < json.size(); ++pos) {
+        const char ch = json[pos];
+        if (quoted) {
+            if (escaped) escaped = false;
+            else if (ch == '\\') escaped = true;
+            else if (ch == '"') quoted = false;
+            continue;
+        }
+        if (ch == '"') quoted = true;
+        else if (ch == '{') ++depth;
+        else if (ch == '}' && --depth == 0) return json.substr(start, pos - start + 1);
+    }
+    return {};
+}
+
+bool validDateTime(int year, int month, int day, int hour, int minute, int second) {
+    return year >= 1970 && year <= 9999 && month >= 1 && month <= 12 &&
+           day >= 1 && day <= 31 && hour >= 0 && hour <= 23 &&
+           minute >= 0 && minute <= 59 && second >= 0 && second <= 59;
+}
 }
 
 HttpMgmtClient::HttpMgmtClient(MgmtClientConfig config) : config_(std::move(config)) {}
@@ -103,6 +133,53 @@ DeviceInfo HttpMgmtClient::getDeviceInformation() {
     info.manufacturer = SimpleJson::getString(body, "Manufacturer"); info.model = SimpleJson::getString(body, "Model");
     info.firmwareVersion = SimpleJson::getString(body, "FirmwareVersion"); info.serialNumber = SimpleJson::getString(body, "SerialNumber"); info.hardwareId = SimpleJson::getString(body, "HardwareId");
     return info;
+}
+
+SystemDateTime HttpMgmtClient::getSystemDateAndTime() {
+    const HttpResponse response = request("GET", "/mgmt/v1/Config/GetSystemDateAndTime");
+    if (response.status != 200)
+        throw std::runtime_error("MGMT rejected GetSystemDateAndTime request");
+    if (SimpleJson::getInt(response.body, "result", 0) != 1)
+        throw std::runtime_error("MGMT returned unsuccessful GetSystemDateAndTime result");
+
+    const std::string root = jsonObject(response.body, "GetSystemDateAndTimeResponse");
+    const std::string state = jsonObject(root, "SystemDateAndTime");
+    const std::string zone = jsonObject(state, "TimeZone");
+    const std::string utc = jsonObject(state, "UTCDateTime");
+    const std::string utcDate = jsonObject(utc, "Date");
+    const std::string utcTime = jsonObject(utc, "Time");
+    const std::string local = jsonObject(state, "LocalDateTime");
+    const std::string localDate = jsonObject(local, "Date");
+    const std::string localTime = jsonObject(local, "Time");
+    if (state.empty() || zone.empty() || utcDate.empty() || utcTime.empty() ||
+        localDate.empty() || localTime.empty())
+        throw std::runtime_error("MGMT returned incomplete GetSystemDateAndTime payload");
+
+    SystemDateTime result;
+    result.dateTimeType = SimpleJson::getString(state, "DateTimeType");
+    result.daylightSaving = SimpleJson::getBool(state, "DaylightSavings", false);
+    result.timezone = SimpleJson::getString(zone, "TZ");
+    result.year = SimpleJson::getInt(utcDate, "Year");
+    result.month = SimpleJson::getInt(utcDate, "Month");
+    result.day = SimpleJson::getInt(utcDate, "Day");
+    result.hour = SimpleJson::getInt(utcTime, "Hour");
+    result.minute = SimpleJson::getInt(utcTime, "Minute");
+    result.second = SimpleJson::getInt(utcTime, "Second");
+    result.localYear = SimpleJson::getInt(localDate, "Year");
+    result.localMonth = SimpleJson::getInt(localDate, "Month");
+    result.localDay = SimpleJson::getInt(localDate, "Day");
+    result.localHour = SimpleJson::getInt(localTime, "Hour");
+    result.localMinute = SimpleJson::getInt(localTime, "Minute");
+    result.localSecond = SimpleJson::getInt(localTime, "Second");
+
+    if ((result.dateTimeType != "MANUAL" && result.dateTimeType != "NTP") ||
+        result.timezone.empty() ||
+        !validDateTime(result.year, result.month, result.day, result.hour,
+                       result.minute, result.second) ||
+        !validDateTime(result.localYear, result.localMonth, result.localDay,
+                       result.localHour, result.localMinute, result.localSecond))
+        throw std::runtime_error("MGMT returned invalid GetSystemDateAndTime payload");
+    return result;
 }
 
 OnvifAuthenticationResult HttpMgmtClient::verifyWssePasswordDigest(

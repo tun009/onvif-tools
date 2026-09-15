@@ -6,6 +6,9 @@
 #include <cstring>
 #include <sstream>
 #include <algorithm>
+#include <cstdint>
+#include <cstdlib>
+#include <iomanip>
 
 std::mutex DeviceService::netMtx_;
 DeviceService::NetworkState DeviceService::net_;
@@ -55,6 +58,20 @@ static bool isValidHostname(const std::string& h) {
     return true;
 }
 
+static std::int64_t civilMinutes(int year, unsigned month, unsigned day,
+                                 int hour, int minute) {
+    year -= month <= 2;
+    const int era = (year >= 0 ? year : year - 399) / 400;
+    const unsigned yearOfEra = static_cast<unsigned>(year - era * 400);
+    const unsigned adjustedMonth = month > 2 ? month - 3 : month + 9;
+    const unsigned dayOfYear = (153 * adjustedMonth + 2) / 5 + day - 1;
+    const unsigned dayOfEra = yearOfEra * 365 + yearOfEra / 4 -
+                              yearOfEra / 100 + dayOfYear;
+    const std::int64_t days = static_cast<std::int64_t>(era) * 146097 +
+                              static_cast<std::int64_t>(dayOfEra);
+    return days * 24 * 60 + hour * 60 + minute;
+}
+
 DeviceService::DeviceService(struct soap* soap, const ServiceConfig& cfg, std::shared_ptr<ICameraBackend> backend)
     : DeviceBindingService(soap), cfg_(cfg), backend_(std::move(backend)) {}
 
@@ -83,33 +100,37 @@ int DeviceService::GetSystemDateAndTime(
     this->soap->header = nullptr;
     auto soap = this->soap;
 
-    // Get time from backend (IPC)
-    SystemDateTime dt;
-    try {
-        dt = backend_->getSystemDateAndTime();
-    } catch (const std::exception& e) {
-        std::cerr << "[DeviceService] Error getting system time from backend: " << e.what() << std::endl;
-        // Fallback to system time
-        std::time_t now = std::time(nullptr);
-        std::tm* tm_utc = std::gmtime(&now);
-        dt.year = tm_utc->tm_year + 1900;
-        dt.month = tm_utc->tm_mon + 1;
-        dt.day = tm_utc->tm_mday;
-        dt.hour = tm_utc->tm_hour;
-        dt.minute = tm_utc->tm_min;
-        dt.second = tm_utc->tm_sec;
-    }
+    const SystemDateTime dt = backend_->getSystemDateAndTime();
 
     // Allocate response struct using soap memory manager
     auto sdt = soap_new_tt__SystemDateTime(soap);
-    sdt->DateTimeType = tt__SetDateTimeType::Manual;
+    sdt->DateTimeType = dt.dateTimeType == "NTP"
+        ? tt__SetDateTimeType::NTP : tt__SetDateTimeType::Manual;
     sdt->DaylightSavings = dt.daylightSaving;
 
-    // TimeZone — POSIX TZ format: STD offset [DST[offset][,rule]]
-    // "UTC" alone không hợp lệ ("standard offset part format is incorrect"),
-    // dùng "UTC0" (STD=UTC, offset=0). Test DEVICE-3-1-1.
+    // ONVIF expects POSIX TZ syntax. Derive the current UTC offset from the
+    // MGMT-provided UTC/local values instead of hardcoding UTC0.
+    const auto utcMinutes = civilMinutes(dt.year, dt.month, dt.day,
+                                         dt.hour, dt.minute);
+    const auto localMinutes = civilMinutes(dt.localYear, dt.localMonth,
+                                           dt.localDay, dt.localHour,
+                                           dt.localMinute);
+    const int offsetMinutes = static_cast<int>(localMinutes - utcMinutes);
+    if (offsetMinutes < -14 * 60 || offsetMinutes > 14 * 60)
+        throw std::runtime_error("MGMT returned invalid UTC/local offset");
+    std::ostringstream posixTz;
+    posixTz << "UTC";
+    if (offsetMinutes != 0) {
+        posixTz << (offsetMinutes > 0 ? '-' : '+');
+        const int absolute = std::abs(offsetMinutes);
+        posixTz << absolute / 60;
+        if (absolute % 60)
+            posixTz << ':' << std::setw(2) << std::setfill('0') << absolute % 60;
+    } else {
+        posixTz << '0';
+    }
     sdt->TimeZone = soap_new_tt__TimeZone(soap);
-    sdt->TimeZone->TZ = "UTC0";
+    sdt->TimeZone->TZ = posixTz.str();
 
     // UTCDateTime
     sdt->UTCDateTime = soap_new_tt__DateTime(soap);
@@ -122,6 +143,17 @@ int DeviceService::GetSystemDateAndTime(
     sdt->UTCDateTime->Time->Hour = dt.hour;
     sdt->UTCDateTime->Time->Minute = dt.minute;
     sdt->UTCDateTime->Time->Second = dt.second;
+
+    // LocalDateTime
+    sdt->LocalDateTime = soap_new_tt__DateTime(soap);
+    sdt->LocalDateTime->Date = soap_new_tt__Date(soap);
+    sdt->LocalDateTime->Date->Year = dt.localYear;
+    sdt->LocalDateTime->Date->Month = dt.localMonth;
+    sdt->LocalDateTime->Date->Day = dt.localDay;
+    sdt->LocalDateTime->Time = soap_new_tt__Time(soap);
+    sdt->LocalDateTime->Time->Hour = dt.localHour;
+    sdt->LocalDateTime->Time->Minute = dt.localMinute;
+    sdt->LocalDateTime->Time->Second = dt.localSecond;
 
     tds__GetSystemDateAndTimeResponse.SystemDateAndTime = sdt;
 

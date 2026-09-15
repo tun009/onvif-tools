@@ -34,6 +34,7 @@ class IMgmtClient {
 public:
     virtual ~IMgmtClient() = default;
     virtual DeviceInfo getDeviceInformation() = 0;
+    virtual SystemDateTime getSystemDateAndTime() = 0;
     virtual OnvifAuthenticationResult verifyWssePasswordDigest(
         const WssePasswordDigest& credential) = 0;
     virtual OnvifAuthenticationResult verifyHttpDigest(

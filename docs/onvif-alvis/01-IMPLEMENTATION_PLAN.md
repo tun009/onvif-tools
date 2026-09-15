@@ -373,8 +373,12 @@ SOAP UsernameToken PasswordDigest
   tăng; MGMT xác minh proof bằng user `type=onvif` trong SQLite.
 - MGMT/network unavailable được coi là authentication failure; password,
   encryption key và digest không được ghi log.
-- Đây mới là source implementation local; chưa có runtime/DTT evidence trên
-  camera nên trạng thái vẫn là `REAL_IN_PROGRESS`.
+- Runtime evidence ngày 2026-09-15 trên camera `192.168.8.127`: DTT xác thực
+  HTTP Digest thành công bằng user `type=onvif` lưu trong SQLite MGMT, qua
+  `onvif-module:8001 -> MGMT:8086`, và đọc được `GetDeviceInformation`.
+- HTTP Digest vertical slice được coi là `REAL_VERIFIED`. Toàn bộ Phase 2 vẫn
+  là `REAL_IN_PROGRESS` vì WSSE runtime evidence, RBAC và security hardening
+  chưa hoàn tất.
 
 ### Gate
 
@@ -485,6 +489,26 @@ thực sự đổi listener/restart service. Vì vậy không được coi
 - `GetDiscoveryMode`, `SetDiscoveryMode`
 - `SystemReboot`
 - `SetSystemFactoryDefault`
+
+#### GetSystemDateAndTime vertical slice (source local, 2026-09-15)
+
+```text
+ONVIF DeviceService::GetSystemDateAndTime
+  -> AlvisBackendFacade
+  -> IMgmtClient::getSystemDateAndTime
+  -> GET /mgmt/v1/Config/GetSystemDateAndTime
+  -> MGMT DateTimeService + Linux runtime state
+```
+
+- Ánh xạ `DateTimeType`, `DaylightSavings`, `UTCDateTime` và `LocalDateTime`
+  từ response MGMT; không lấy operation này từ mock backend.
+- SOAP `TimeZone.TZ` được biểu diễn theo POSIX offset tính từ cặp UTC/local do
+  MGMT trả về; không hardcode `UTC0`.
+- MGMT lỗi hoặc payload thiếu/sai làm request trả SOAP Receiver fault; không
+  fallback sang giờ của process `onvif-server`.
+- `SetSystemDateAndTime` chưa migration trong vertical slice này.
+- Chưa có build/runtime/DTT evidence trên camera nên vẫn là
+  `REAL_IN_PROGRESS`.
 
 ### Lưu ý
 
