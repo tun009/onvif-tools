@@ -185,23 +185,55 @@ bool DigestAuthHandler::validate(const std::string& rawHeaders, const std::strin
             break;
         }
     }
-    if (authHeader.empty()) return false;
+    if (authHeader.empty()) {
+        std::cerr << "[DigestAuth] Reject: Authorization header is missing" << std::endl;
+        return false;
+    }
 
     const auto params = parseDigestParams(authHeader);
     const auto required = {"username", "realm", "nonce", "uri", "response",
                            "qop", "nc", "cnonce"};
-    for (const char* name : required)
-        if (params.find(name) == params.end()) return false;
+    for (const char* name : required) {
+        if (params.find(name) == params.end()) {
+            std::cerr << "[DigestAuth] Reject: required parameter is missing: "
+                      << name << std::endl;
+            return false;
+        }
+    }
 
     const std::string algorithm = params.count("algorithm") ? params.at("algorithm") : "MD5";
     const std::string actualTarget = requestTarget(rawHeaders, method);
-    if (params.at("realm") != realm_ || params.at("qop") != "auth" ||
-        algorithm != "MD5" || !isHex(params.at("response"), 32) ||
-        actualTarget.empty() || params.at("uri") != actualTarget)
+    if (params.at("realm") != realm_) {
+        std::cerr << "[DigestAuth] Reject: realm mismatch" << std::endl;
         return false;
+    }
+    if (params.at("qop") != "auth") {
+        std::cerr << "[DigestAuth] Reject: unsupported qop" << std::endl;
+        return false;
+    }
+    if (algorithm != "MD5") {
+        std::cerr << "[DigestAuth] Reject: unsupported algorithm" << std::endl;
+        return false;
+    }
+    if (!isHex(params.at("response"), 32)) {
+        std::cerr << "[DigestAuth] Reject: malformed response proof" << std::endl;
+        return false;
+    }
+    if (actualTarget.empty()) {
+        std::cerr << "[DigestAuth] Reject: invalid HTTP request target" << std::endl;
+        return false;
+    }
+    if (params.at("uri") != actualTarget) {
+        std::cerr << "[DigestAuth] Reject: digest URI does not match request target"
+                  << std::endl;
+        return false;
+    }
 
     std::uint32_t nonceCount = 0;
-    if (!parseNonceCount(params.at("nc"), nonceCount)) return false;
+    if (!parseNonceCount(params.at("nc"), nonceCount)) {
+        std::cerr << "[DigestAuth] Reject: malformed nonce-count" << std::endl;
+        return false;
+    }
     const std::string useKey = params.at("username") + ':' + params.at("cnonce");
     if (!nonceCanBeUsed(params.at("nonce"), useKey, nonceCount)) {
         std::cerr << "[DigestAuth] Unknown, expired or replayed nonce" << std::endl;
@@ -211,11 +243,15 @@ bool DigestAuthHandler::validate(const std::string& rawHeaders, const std::strin
     bool authenticated = false;
     if (mgmtClient_) {
         try {
-            authenticated = mgmtClient_->verifyHttpDigest(HttpDigestCredential{
+            const OnvifAuthenticationResult result =
+                mgmtClient_->verifyHttpDigest(HttpDigestCredential{
                 params.at("username"), params.at("realm"), method,
                 params.at("uri"), params.at("nonce"), params.at("qop"),
                 params.at("nc"), params.at("cnonce"), algorithm,
-                params.at("response")}).authenticated;
+                params.at("response")});
+            authenticated = result.authenticated;
+            std::cerr << "[DigestAuth] MGMT verification: "
+                      << (authenticated ? "accepted" : "rejected") << std::endl;
         } catch (const std::exception& error) {
             std::cerr << "[DigestAuth] MGMT authentication unavailable: "
                       << error.what() << std::endl;
@@ -234,5 +270,15 @@ bool DigestAuthHandler::validate(const std::string& rawHeaders, const std::strin
         authenticated = expected == supplied;
     }
 
-    return authenticated && commitNonceUse(params.at("nonce"), useKey, nonceCount);
+    if (!authenticated) {
+        std::cerr << "[DigestAuth] Reject: credential verification failed" << std::endl;
+        return false;
+    }
+    if (!commitNonceUse(params.at("nonce"), useKey, nonceCount)) {
+        std::cerr << "[DigestAuth] Reject: nonce expired or nonce-count replayed during commit"
+                  << std::endl;
+        return false;
+    }
+    std::cerr << "[DigestAuth] Accepted" << std::endl;
+    return true;
 }

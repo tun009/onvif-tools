@@ -4,6 +4,7 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <unistd.h>
+#include <iostream>
 #include <stdexcept>
 #include <sstream>
 #include <utility>
@@ -215,8 +216,13 @@ OnvifAuthenticationResult HttpMgmtClient::verifyHttpDigest(
         "\",\"Response\":\"" + escapeJson(credential.response) + "\"}";
     const HttpResponse response = request(
         "POST", "/internal/v1/auth/onvif/http-digest", body);
-    if (response.status == 200 && SimpleJson::getInt(response.body, "result", 0) == 1 &&
-        SimpleJson::getBool(response.body, "Authenticated", false)) {
+    const int resultCode = SimpleJson::getInt(response.body, "result", 0);
+    const bool authenticated = SimpleJson::getBool(response.body, "Authenticated", false);
+    std::cerr << "[HttpMgmtClient] HTTP Digest verification response: status="
+              << response.status << " result=" << resultCode
+              << " authenticated=" << (authenticated ? "true" : "false")
+              << std::endl;
+    if (response.status == 200 && resultCode == 1 && authenticated) {
         return {true, SimpleJson::getString(response.body, "UserLevel")};
     }
     if (response.status == 400 || response.status == 401 || response.status == 403)
