@@ -529,13 +529,12 @@ void OnvifServer::listenLoop() {
                 g_http_digest_authenticated = true;
             }
             if (isAuthRequired(g_current_headers) && !hasWsSecurity) {
-                DigestAuthHandler digestAuth(cfg_.username, cfg_.password);
+                DigestAuthHandler digestAuth = authClient_
+                    ? DigestAuthHandler(authClient_)
+                    : DigestAuthHandler(cfg_.username, cfg_.password);
                 std::string method = "POST";
 
-                // MGMT hiện mới có contract WSSE PasswordDigest. Ở real mode,
-                // không được fallback sang admin/password tĩnh để verify HTTP
-                // Digest; tiếp tục challenge và fail-closed cho đến Phase HTTP Digest.
-                if (authClient_ || !digestAuth.validate(g_current_headers, method)) {
+                if (!digestAuth.validate(g_current_headers, method)) {
                     static std::string challenge;
                     challenge = digestAuth.generateChallenge();
 

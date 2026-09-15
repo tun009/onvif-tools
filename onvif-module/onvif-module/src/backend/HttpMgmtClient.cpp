@@ -122,3 +122,27 @@ OnvifAuthenticationResult HttpMgmtClient::verifyWssePasswordDigest(
         return {};
     throw std::runtime_error("MGMT ONVIF authentication service unavailable");
 }
+
+OnvifAuthenticationResult HttpMgmtClient::verifyHttpDigest(
+    const HttpDigestCredential& credential) {
+    const std::string body =
+        "{\"Username\":\"" + escapeJson(credential.username) +
+        "\",\"Realm\":\"" + escapeJson(credential.realm) +
+        "\",\"Method\":\"" + escapeJson(credential.method) +
+        "\",\"Uri\":\"" + escapeJson(credential.uri) +
+        "\",\"Nonce\":\"" + escapeJson(credential.nonce) +
+        "\",\"Qop\":\"" + escapeJson(credential.qop) +
+        "\",\"Nc\":\"" + escapeJson(credential.nc) +
+        "\",\"Cnonce\":\"" + escapeJson(credential.cnonce) +
+        "\",\"Algorithm\":\"" + escapeJson(credential.algorithm) +
+        "\",\"Response\":\"" + escapeJson(credential.response) + "\"}";
+    const HttpResponse response = request(
+        "POST", "/internal/v1/auth/onvif/http-digest", body);
+    if (response.status == 200 && SimpleJson::getInt(response.body, "result", 0) == 1 &&
+        SimpleJson::getBool(response.body, "Authenticated", false)) {
+        return {true, SimpleJson::getString(response.body, "UserLevel")};
+    }
+    if (response.status == 400 || response.status == 401 || response.status == 403)
+        return {};
+    throw std::runtime_error("MGMT ONVIF HTTP Digest service unavailable");
+}

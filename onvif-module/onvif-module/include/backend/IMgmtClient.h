@@ -12,6 +12,19 @@ struct WssePasswordDigest {
     std::string passwordDigest;
 };
 
+struct HttpDigestCredential {
+    std::string username;
+    std::string realm;
+    std::string method;
+    std::string uri;
+    std::string nonce;
+    std::string qop;
+    std::string nc;
+    std::string cnonce;
+    std::string algorithm;
+    std::string response;
+};
+
 struct OnvifAuthenticationResult {
     bool authenticated = false;
     std::string userLevel;
@@ -23,4 +36,6 @@ public:
     virtual DeviceInfo getDeviceInformation() = 0;
     virtual OnvifAuthenticationResult verifyWssePasswordDigest(
         const WssePasswordDigest& credential) = 0;
+    virtual OnvifAuthenticationResult verifyHttpDigest(
+        const HttpDigestCredential& credential) = 0;
 };

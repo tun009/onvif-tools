@@ -368,8 +368,9 @@ SOAP UsernameToken PasswordDigest
 - `hybrid` và `production` dùng MGMT cho WSSE PasswordDigest và không fallback
   về `admin/admin123`.
 - `PasswordText` bị từ chối trong real mode vì MGMT chưa có contract tương ứng.
-- HTTP Digest trong real mode fail-closed; contract verify HTTP Digest là bước
-  tiếp theo, không được dùng password tĩnh làm đường vòng.
+- HTTP Digest trong real mode được chuyển qua MGMT bằng contract nội bộ riêng.
+  ONVIF module phát nonce ngẫu nhiên, giữ TTL 5 phút và cưỡng chế nonce-count
+  tăng; MGMT xác minh proof bằng user `type=onvif` trong SQLite.
 - MGMT/network unavailable được coi là authentication failure; password,
   encryption key và digest không được ghi log.
 - Đây mới là source implementation local; chưa có runtime/DTT evidence trên

@@ -23,7 +23,7 @@ UNSUPPORTED       Sản phẩm quyết định không hỗ trợ và không adve
 | Network | S/T/M/G | MGMT | Internal REST/IPC | REAL_IN_PROGRESS | MGMT persist `network_protocols` trong `mgmt_network_config.json`; apply daemon/listener chưa hoàn thiện |
 | Date/time/NTP | S/T/M/G | MGMT | Internal REST/IPC | REAL_IN_PROGRESS | MGMT đã có DateTime service |
 | Discovery/scopes | S/T/M/G | MGMT desired state + onvif-module runtime | REST/IPC + WS-Discovery | REAL_IN_PROGRESS | MGMT persist Discovery Mode/scopes; onvif-module phải là WS-Discovery responder duy nhất và phục hồi state sau restart |
-| ONVIF users/RBAC | S/T/M/G | MGMT/Security | Internal REST | REAL_IN_PROGRESS | Local đã nối WSSE PasswordDigest qua MGMT `users(type=onvif)`; mock mode giữ auth tĩnh, hybrid/production fail-closed và chưa có camera/DTT evidence; HTTP Digest/RBAC chưa nối |
+| ONVIF users/RBAC | S/T/M/G | MGMT/Security | Internal REST | REAL_IN_PROGRESS | Local đã nối WSSE PasswordDigest và HTTP Digest qua MGMT `users(type=onvif)`; HTTP nonce TTL/nc được kiểm soát tại onvif-module; chưa có camera/DTT evidence và RBAC chưa áp operation |
 | Media profiles | S/T/M | DVR | Internal API/IPC | REAL_IN_PROGRESS | Backend mới đã có stream/profile một phần; cần chốt contract/token |
 | Live RTSP | S/T | DVR | RTSP | REAL_IN_PROGRESS | Cần xác minh URI/SDP/auth với ONVIF profile |
 | Snapshot | S/T | DVR | HTTP/media API | MOCK | Cần xác nhận backend thật |
@@ -68,7 +68,7 @@ UNSUPPORTED       Sản phẩm quyết định không hỗ trợ và không adve
 |---|---|---|
 | Token registry Media/Metadata/Recording/Replay | ONVIF + DVR | OPEN |
 | Public RTSP URI và SDP mapping | ONVIF + DVR | OPEN |
-| MGMT internal client config/auth | ONVIF + MGMT | IN_PROGRESS — WSSE PasswordDigest contract đã nối local; HTTP Digest, service credential và runtime evidence còn thiếu |
+| MGMT internal client config/auth | ONVIF + MGMT | IN_PROGRESS — WSSE PasswordDigest và HTTP Digest contract đã nối local; service credential và runtime evidence còn thiếu |
 | Network desired/applied/advertised state và port mapping | ONVIF + MGMT + DVR/supervisor | OPEN |
 | Discovery persistence và quyền sở hữu WS-Discovery runtime | ONVIF + MGMT | OPEN |
 | Imaging capability/range mapping | ONVIF + MGMT + HAL | OPEN |
