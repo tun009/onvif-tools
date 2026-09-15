@@ -45,6 +45,8 @@ public:
 
     // ── System (Profile T mandatory 7.5) ─────────────────────────────────
     virtual int SetSystemDateAndTime(_tds__SetSystemDateAndTime *req, _tds__SetSystemDateAndTimeResponse &resp) override;
+    virtual int GetNTP(_tds__GetNTP *req, _tds__GetNTPResponse &resp) override;
+    virtual int SetNTP(_tds__SetNTP *req, _tds__SetNTPResponse &resp) override;
     virtual int SetSystemFactoryDefault(_tds__SetSystemFactoryDefault *req, _tds__SetSystemFactoryDefaultResponse &resp) override;
     virtual int SystemReboot(_tds__SystemReboot *req, _tds__SystemRebootResponse &resp) override;
 

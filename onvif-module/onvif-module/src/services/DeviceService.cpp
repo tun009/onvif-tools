@@ -59,6 +59,39 @@ static bool isValidHostname(const std::string& h) {
     return true;
 }
 
+// Kiểm tra dạng IPv4 dotted-quad đơn giản, dùng để chọn Type cho tt__NetworkHost
+// (NTP server có thể là IP hoặc hostname; MGMT lưu chung một string, không
+// phân biệt loại).
+static bool isIPv4Address(const std::string& s) {
+    int groups = 0, value = 0, digits = 0;
+    for (std::size_t i = 0; i <= s.size(); ++i) {
+        if (i == s.size() || s[i] == '.') {
+            if (digits == 0 || digits > 3 || value > 255) return false;
+            ++groups; value = 0; digits = 0;
+        } else if (std::isdigit((unsigned char)s[i])) {
+            value = value * 10 + (s[i] - '0');
+            ++digits;
+        } else {
+            return false;
+        }
+    }
+    return groups == 4;
+}
+
+// Cùng luật với DateTimeService::validHost() phía MGMT (chỉ alnum/._-:),
+// chặn input rõ ràng sai trước khi gọi MGMT thay vì để MGMT trả result=-1
+// mập mờ.
+static bool isValidNtpHost(const std::string& h) {
+    if (h.empty() || h.size() > 253) return false;
+    if (!std::isalnum((unsigned char)h.front())) return false;
+    for (char c : h) {
+        if (!(std::isalnum((unsigned char)c) || c == '_' || c == '.' ||
+              c == ':' || c == '-'))
+            return false;
+    }
+    return true;
+}
+
 static bool isLeapYear(int year) {
     return (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
 }
@@ -1191,6 +1224,112 @@ int DeviceService::SetSystemDateAndTime(_tds__SetSystemDateAndTime* req,
             "SetSystemDateAndTime backend unavailable", e.what());
     }
 
+    return SOAP_OK;
+}
+
+// ── GetNTP / SetNTP ──────────────────────────────────────────────────────────
+int DeviceService::GetNTP(_tds__GetNTP* req, _tds__GetNTPResponse& resp) {
+    (void)req;
+    this->soap->mustUnderstand = 0;
+    this->soap->header = nullptr;
+    auto soap = this->soap;
+
+    SystemDateTime current;
+    try {
+        current = backend_->getSystemDateAndTime();
+    } catch (const std::exception& e) {
+        std::cerr << "[DeviceService] GetNTP: cannot read current state: "
+                  << e.what() << std::endl;
+        return soap_receiver_fault_subcode(
+            this->soap, "\"http://www.onvif.org/ver10/error\":Action",
+            "DateTime backend unavailable", e.what());
+    }
+
+    auto info = soap_new_tt__NTPInformation(soap);
+    info->FromDHCP = (current.ntpMode == "DHCP");
+    if (!current.ntpHost.empty()) {
+        auto host = soap_new_tt__NetworkHost(soap);
+        if (isIPv4Address(current.ntpHost)) {
+            host->Type = tt__NetworkHostType::IPv4;
+            host->IPv4Address = Sp(soap, current.ntpHost);
+        } else {
+            host->Type = tt__NetworkHostType::DNS;
+            host->DNSname = Sp(soap, current.ntpHost);
+        }
+        if (info->FromDHCP) info->NTPFromDHCP.push_back(host);
+        else info->NTPManual.push_back(host);
+    }
+    resp.NTPInformation = info;
+    return SOAP_OK;
+}
+
+int DeviceService::SetNTP(_tds__SetNTP* req, _tds__SetNTPResponse& resp) {
+    (void)resp;
+    this->soap->mustUnderstand = 0;
+    this->soap->header = nullptr;
+    if (!req) {
+        return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                 "ter:InvalidArgVal", nullptr, "Missing request");
+    }
+
+    std::string host;
+    if (!req->FromDHCP) {
+        if (req->NTPManual.empty()) {
+            return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                     "ter:InvalidArgVal", "ter:MissingAttribute",
+                                     "NTPManual required when FromDHCP is false");
+        }
+        auto* h = req->NTPManual.front();
+        if (h) {
+            if (h->IPv4Address) host = *h->IPv4Address;
+            else if (h->DNSname) host = *h->DNSname;
+            else if (h->IPv6Address) host = *h->IPv6Address;
+        }
+        if (!isValidNtpHost(host)) {
+            return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                     "ter:InvalidArgVal", nullptr,
+                                     "Invalid NTP host");
+        }
+    }
+
+    // Đọc state hiện tại chỉ để giữ nguyên TimeZone — SetNTP không được đổi
+    // ngày/giờ/múi giờ, chỉ đổi cấu hình NTP server.
+    SystemDateTime current;
+    try {
+        current = backend_->getSystemDateAndTime();
+    } catch (const std::exception& e) {
+        std::cerr << "[DeviceService] SetNTP: cannot read current state: "
+                  << e.what() << std::endl;
+        return soap_receiver_fault_subcode(
+            this->soap, "\"http://www.onvif.org/ver10/error\":Action",
+            "DateTime backend unavailable", e.what());
+    }
+
+    SystemDateTime setReq;
+    // Giới hạn đã biết: MGMT (datetime_service.cpp) chỉ thực sự ghi NTPServer
+    // khi DateTimeType=NTP — nhánh MANUAL bỏ qua NTPServer trong request và
+    // giữ nguyên giá trị cũ trong DB. ONVIF coi SetNTP là operation độc lập
+    // với DateTimeType, nhưng để cấu hình NTP thực sự được lưu qua MGMT,
+    // SetNTP ở đây buộc phải gửi kèm DateTimeType=NTP — tức gọi SetNTP có
+    // side effect chuyển đồng hồ sang chế độ NTP. Không có cách nào khác để
+    // ghi NTPServer khi vẫn giữ DateTimeType=MANUAL với contract MGMT hiện tại.
+    setReq.dateTimeType = "NTP";
+    setReq.timezone = current.timezone;
+    setReq.ntpMode = req->FromDHCP ? "DHCP" : "MANUAL";
+    setReq.ntpHost = host;
+
+    try {
+        backend_->setSystemDateAndTime(setReq);
+    } catch (const MgmtValidationError& e) {
+        std::cerr << "[DeviceService] SetNTP rejected by MGMT: " << e.what() << std::endl;
+        return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                 "ter:InvalidArgVal", nullptr, e.what());
+    } catch (const std::exception& e) {
+        std::cerr << "[DeviceService] SetNTP backend error: " << e.what() << std::endl;
+        return soap_receiver_fault_subcode(
+            this->soap, "\"http://www.onvif.org/ver10/error\":Action",
+            "SetNTP backend unavailable", e.what());
+    }
     return SOAP_OK;
 }
 
