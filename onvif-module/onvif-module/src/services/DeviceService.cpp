@@ -1151,6 +1151,7 @@ int DeviceService::GetNetworkProtocols(_tds__GetNetworkProtocols* req,
     }
 
     bool foundHttp = false, foundRtsp = false;
+    int httpsPort = 0; // lấy từ MGMT nếu có, không tự bịa số
     for (const auto& p : protocols) {
         if (p.name == "ONVIF") {
             auto np = soap_new_tt__NetworkProtocol(soap);
@@ -1167,6 +1168,10 @@ int DeviceService::GetNetworkProtocols(_tds__GetNetworkProtocols* req,
             np->Port.push_back(p.port);
             resp.NetworkProtocols.push_back(np);
             foundRtsp = true;
+        } else if (p.name == "HTTPS" && p.port > 0) {
+            // MGMT trả port HTTPS thật (port web UI MGMT, không phải port
+            // SOAP) — dùng đúng giá trị này thay vì đoán/hardcode.
+            httpsPort = p.port;
         }
     }
     // MGMT chưa có/thiếu entry tương ứng -> fallback đúng port runtime thật
@@ -1187,7 +1192,14 @@ int DeviceService::GetNetworkProtocols(_tds__GetNetworkProtocols* req,
     }
     auto https = soap_new_tt__NetworkProtocol(soap);
     https->Name = tt__NetworkProtocolType::HTTPS;
+    // Luôn false: onvif-module chưa hỗ trợ TLS thật cho SOAP, bất kể MGMT
+    // báo port HTTPS của web UI đang bật hay không (2 khái niệm khác nhau).
     https->Enabled = false;
+    // Schema ONVIF bắt buộc Port dù Enabled=false (DEVICE-2-1-33 báo
+    // "incomplete content... expected Port" khi thiếu). Dùng port HTTPS
+    // thật MGMT trả (nếu có); 443 chỉ là fallback cuối cùng khi MGMT không
+    // trả entry HTTPS nào.
+    https->Port.push_back(httpsPort > 0 ? httpsPort : 443);
     resp.NetworkProtocols.push_back(https);
     return SOAP_OK;
 }
