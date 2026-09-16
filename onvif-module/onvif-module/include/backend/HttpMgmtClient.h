@@ -8,6 +8,18 @@ public:
     DeviceInfo getDeviceInformation() override;
     SystemDateTime getSystemDateAndTime() override;
     void setSystemDateAndTime(const SystemDateTime& request) override;
+
+    HostnameConfig getHostname() override;
+    void setHostname(const HostnameConfig& request) override;
+    DnsConfig getDns() override;
+    void setDns(const DnsConfig& request) override;
+    NetworkInterfaceConfig getNetworkInterface() override;
+    void setNetworkInterface(const NetworkInterfaceConfig& request) override;
+    NetworkGatewayConfig getNetworkGateway() override;
+    void setNetworkGateway(const NetworkGatewayConfig& request) override;
+    std::vector<NetworkProtocolEntry> getNetworkProtocols() override;
+    void setNetworkProtocols(const std::vector<NetworkProtocolEntry>& request) override;
+
     OnvifAuthenticationResult verifyWssePasswordDigest(
         const WssePasswordDigest& credential) override;
     OnvifAuthenticationResult verifyHttpDigest(

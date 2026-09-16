@@ -37,6 +37,44 @@ Một capability chỉ hoàn thành migration khi:
 - Restart dependency không làm onvif-server crash hoặc trả state giả.
 - `02-INTEGRATION_MATRIX.md` được cập nhật kèm evidence.
 
+## 2.1. Bắt buộc xác định đúng phạm vi TRƯỚC khi implement
+
+Trước khi bắt đầu code bất kỳ operation ONVIF nào, phải đối chiếu đủ 2 nguồn
+sau để xác nhận operation/field đó thực sự **mandatory**, tránh làm dư phạm vi
+không cần thiết:
+
+1. **Spec Profile tương ứng** (`docs/ONVIF_Profile_T_Specification_v1-0.md`,
+   `docs/ONVIF_Profile_G_Specification_v1-0.pdf`,
+   `docs/ONVIF_Profile_M_Client_Test_Specification_24.06.pdf`,
+   `docs/onvif-profile-m-specification-v1-0.pdf`) — tìm đúng mục "Function
+   list for devices", đọc cột **Requirement**: `M` (mandatory) chỉ có giá trị
+   khi tiêu đề bảng là `Device MANDATORY`; nếu tiêu đề là `Device CONDITIONAL`
+   ("if supported") thì `M` chỉ áp dụng **nếu thiết bị tự nhận hỗ trợ**, không
+   phải baseline bắt buộc. Field/kiểu dữ liệu con (VD IPv6 trong
+   `NetworkInterface`) không tự động mandatory chỉ vì nằm trong 1 operation
+   mandatory — chỉ mandatory nếu spec nói rõ.
+2. **`docs/onvif-alvis/g13.xml`** — log DTT chạy full Profile S/M/G/T thật
+   (05/08/2026, trước khi có tích hợp MGMT). Test case nào **không xuất hiện**
+   trong lần chạy full đó (`grep` theo `DEVICE-x-x-x`/tên test) là tín hiệu
+   mạnh cho thấy nó optional/conditional, không cần ưu tiên. Test nào có mặt
+   và `PASSED` là baseline hành vi SOAP đã đúng chuẩn, chỉ cần thay dữ liệu
+   mock bằng MGMT thật mà không phá hành vi đó.
+
+Chỉ triển khai phần vượt quá mandatory khi được yêu cầu rõ ràng, không tự ý mở
+rộng "cho đầy đủ".
+
+**Bài học đã xảy ra (2026-09-15/16), để tránh lặp lại:**
+
+- Đã viết `GetNTP`/`SetNTP` trước khi kiểm tra spec — sau mới phát hiện mục
+  8.8 NTP của Profile T là `Device CONDITIONAL`, và `DEVICE-3-1-12` không hề
+  có trong `g13.xml`. Việc đã làm không sai nhưng không cần ưu tiên.
+- Đề xuất thêm hỗ trợ IPv6 cho `GetDNS`/`SetDNS` và
+  `GetNetworkInterfaces`/`SetNetworkInterfaces` trước khi kiểm tra spec — sau
+  mới phát hiện `ONVIF_Profile_T_Specification_v1-0.md` **không hề nhắc tới
+  IPv6** ở mục 7.4; chỉ cần IPv4 là đủ mandatory. Suýt làm dư việc không cần
+  thiết (IPv6 trong `SetNetworkInterfaces` của MGMT có logic riêng, validate
+  prefix/gateway phức tạp hơn hẳn IPv4).
+
 ## 3. Phase 0 — Đóng băng conformance baseline
 
 ### Công việc
@@ -490,25 +528,147 @@ thực sự đổi listener/restart service. Vì vậy không được coi
 - `SystemReboot`
 - `SetSystemFactoryDefault`
 
-#### GetSystemDateAndTime vertical slice (source local, 2026-09-15)
+#### GetSystemDateAndTime / SetSystemDateAndTime (camera `192.168.8.124`, 2026-09-15)
 
 ```text
-ONVIF DeviceService::GetSystemDateAndTime
+ONVIF DeviceService::GetSystemDateAndTime / SetSystemDateAndTime
   -> AlvisBackendFacade
-  -> IMgmtClient::getSystemDateAndTime
-  -> GET /mgmt/v1/Config/GetSystemDateAndTime
-  -> MGMT DateTimeService + Linux runtime state
+  -> IMgmtClient::getSystemDateAndTime / setSystemDateAndTime
+  -> GET|POST /mgmt/v1/Config/GetSystemDateAndTime|SetSystemDateAndTime
+  -> MGMT DateTimeService + Linux runtime state (timedatectl, systemd-timesyncd)
 ```
 
-- Ánh xạ `DateTimeType`, `DaylightSavings`, `UTCDateTime` và `LocalDateTime`
-  từ response MGMT; không lấy operation này từ mock backend.
-- SOAP `TimeZone.TZ` được biểu diễn theo POSIX offset tính từ cặp UTC/local do
-  MGMT trả về; không hardcode `UTC0`.
-- MGMT lỗi hoặc payload thiếu/sai làm request trả SOAP Receiver fault; không
-  fallback sang giờ của process `onvif-server`.
-- `SetSystemDateAndTime` chưa migration trong vertical slice này.
-- Chưa có build/runtime/DTT evidence trên camera nên vẫn là
-  `REAL_IN_PROGRESS`.
+- `GetSystemDateAndTime`: ánh xạ `DateTimeType`, `DaylightSavings`,
+  `UTCDateTime`, `LocalDateTime` từ response MGMT; `TimeZone.TZ` biểu diễn
+  theo POSIX offset tự tính từ cặp UTC/local MGMT trả về (không hardcode
+  `UTC0`). Không lấy operation này từ mock backend.
+- `SetSystemDateAndTime` (case Manual): validate lịch thật (leap year,
+  days-in-month) trước khi gọi MGMT; nếu client gửi `TimeZone`, so offset với
+  zone IANA hiện có — khớp thì giữ nguyên zone, lệch thì từ chối
+  (`ter:InvalidTimeZone`) vì một offset POSIX có thể khớp nhiều zone IANA,
+  không có cách suy ngược an toàn. Case NTP: đọc `NTPServer.Mode/Host` hiện
+  tại từ MGMT (field này MGMT đã trả sẵn trong `GetSystemDateAndTime`) rồi
+  gửi lại nguyên vẹn, vì bản thân `SetSystemDateAndTime` không mang theo NTP
+  host; nếu MGMT chưa từng cấu hình NTP (`Host` rỗng) thì trả Receiver fault
+  rõ ràng thay vì gửi thiếu dữ liệu xuống MGMT.
+- MGMT lỗi hoặc payload thiếu/sai làm request trả SOAP Receiver fault
+  (`result=0`/lỗi kết nối); MGMT từ chối do input sai (`result=-1`) map sang
+  Sender fault. Không fallback sang giờ/mock của process `onvif-server`.
+- **Evidence DTT trên camera `192.168.8.124`:** `DEVICE-3-1-1`
+  (GetSystemDateAndTime), `DEVICE-3-1-4` (invalid timezone), `DEVICE-3-1-5`
+  (invalid date), `DEVICE-3-1-11` (SetSystemDateAndTime thật, đổi giờ hệ
+  thống thành công) — **cả 4 đều PASS**. Trạng thái: `REAL_DTT` (đã pass DTT,
+  chưa test VMS/restart-failure nên chưa đủ điều kiện `REAL_VERIFIED`).
+- Trong lúc debug đã phát hiện và fix 1 bug hạ tầng không liên quan logic
+  DateTime: `make full` (không `clean`) có thể link nhầm object file cũ do
+  Makefile thiếu dependency tracking theo header — gây HTTP Digest luôn
+  reject dù đúng credential. Từ nay build trên camera nên dùng
+  `make clean && make full`.
+
+#### GetNTP / SetNTP — không mandatory, đã viết source nhưng chưa build/test (2026-09-15)
+
+- Đối chiếu `ONVIF_Profile_T_Specification_v1-0.md` mục 8.8: `GetNTP`/`SetNTP`
+  là **`Device CONDITIONAL` ("if supported")**, không phải mandatory baseline
+  như `GetSystemDateAndTime`/`SetSystemDateAndTime` (mục 7.5, `Device
+  MANDATORY`). Đối chiếu `g13.xml` (log DTT full S/M/G/T chạy 2026-08-05):
+  `DEVICE-3-1-12 SETSYSTEMDATEANDTIME USING NTP` **không có trong lần chạy
+  đó** — khớp với việc NTP là optional, không bắt buộc để đạt conformance.
+- Đã viết `DeviceService::GetNTP`/`SetNTP` (đọc/ghi qua field `NTPServer`
+  sẵn có trong `GetSystemDateAndTime`/`SetSystemDateAndTime`, không cần MGMT
+  thêm API). Giới hạn đã biết: MGMT chỉ thực sự ghi `NTPServer` khi
+  `DateTimeType=NTP` (nhánh Manual bỏ qua field này) nên `SetNTP` buộc phải
+  gửi kèm `DateTimeType=NTP` — tức gọi `SetNTP` có side effect chuyển đồng hồ
+  sang chế độ NTP, khác tinh thần ONVIF spec (SetNTP lẽ ra độc lập với
+  DateTimeType) nhưng là cách duy nhất dữ liệu thực sự được lưu với contract
+  MGMT hiện tại.
+- **Chưa build/chưa có evidence trên camera** (tên field gSOAP
+  `tt__NTPInformation`/`tt__NetworkHost`/`tt__NetworkHostType` suy từ đúng
+  pattern `tt__DNSInformation`/`tt__IPAddress` đã chạy được trong cùng file,
+  nhưng chưa verify compile thật). Vì không mandatory, không cần ưu tiên vá
+  tiếp — chỉ nên quay lại nếu sản phẩm quyết định quảng cáo hỗ trợ NTP.
+
+#### Network configuration — GetHostName/SetHostName, GetDNS/SetDNS, GetNetworkInterfaces/SetNetworkInterfaces, GetNetworkDefaultGateway/SetNetworkDefaultGateway, GetNetworkProtocols/SetNetworkProtocols (source local, 2026-09-16)
+
+Đã đối chiếu `g13.xml` (log DTT full S/M/G/T 2026-08-05) theo đúng mục 2.1:
+toàn bộ 13 test `DEVICE-2-1-x` liên quan (Hostname, DNS, NetworkInterface,
+NetworkDefaultGateway, NetworkProtocols) đều **PASSED**, đều IPv4-only —
+khớp `ONVIF_Profile_T_Specification_v1-0.md` mục 7.4 (không nhắc IPv6 chỗ
+nào). **Cố tình bỏ qua IPv6** ở lần triển khai này dù MGMT đã hỗ trợ IPv6
+thật đầy đủ (DNS, NetworkInterfaces, Gateway) — không cần cho mandatory,
+xem mục 2.1.
+
+```text
+ONVIF DeviceService::Get/Set{Hostname,DNS,NetworkInterfaces,NetworkDefaultGateway,NetworkProtocols}
+  -> AlvisBackendFacade (gate qua capabilities.network, giống getDeviceInfo —
+     KHÔNG bypass như GetSystemDateAndTime)
+  -> IMgmtClient::get/set{Hostname,Dns,NetworkInterface,NetworkGateway,NetworkProtocols}
+  -> GET|POST /mgmt/v1/{GetHostname,SetHostname,GetDNS,SetDNS,
+     GetNetworkInterfaces,SetNetworkInterfaces,GetNetworkDefaultGateway,
+     SetNetworkDefaultGateway,GetNetworkProtocols,SetNetworkProtocols}
+```
+
+Các quyết định thiết kế quan trọng:
+
+- **Subnet mask ↔ prefix length**: MGMT lưu/trả subnet dạng dotted mask
+  (`"255.255.255.0"`), ONVIF `PrefixedIPv4Address` dùng CIDR prefix length
+  (int). Đã viết `prefixLengthToSubnetMask()`/`subnetMaskToPrefixLength()`
+  đổi 2 chiều ở `HttpMgmtClient`.
+- **Port mapping `GetNetworkProtocols`/`SetNetworkProtocols`**: MGMT
+  `"ONVIF"` ↔ SOAP `HTTP` (đúng như đã ghi sẵn ở mục Runtime configuration
+  contract phía trên — MGMT `"HTTP"` là port web UI MGMT 8086, KHÔNG phải
+  port SOAP). MGMT `"RTSP"` ↔ SOAP `RTSP`. SOAP `HTTPS` luôn công bố
+  `Enabled=false` vì onvif-module chưa hỗ trợ TLS thật — không quảng cáo
+  capability không có (nguyên tắc #5, `README.md`). `SetNetworkProtocols`
+  với `HTTPS.Enabled=true` bị từ chối `ter:ActionNotSupported` ngay tại
+  onvif-module, không gửi xuống MGMT.
+- **Giới hạn đã biết — đổi port ONVIF chưa tự áp dụng**: `SetNetworkProtocols`
+  đổi port `"ONVIF"` chỉ persist xuống MGMT, KHÔNG tự rebind listener đang
+  chạy của onvif-module (chưa có cơ chế reload port runtime) — cần restart
+  thủ công để port mới có hiệu lực thật. Nếu thiếu entry `"ONVIF"`/`"RTSP"`
+  trong response MGMT, fallback về đúng `cfg_.httpPort`/`cfg_.rtspPort`
+  runtime hiện tại thay vì bỏ trống.
+- **Giới hạn đã biết — `SetNetworkInterfaces` áp dụng bất đồng bộ**: MGMT trả
+  `result:1` ngay sau khi validate xong, việc apply thật (`nmcli`) chạy ở
+  background thread riêng của MGMT — không có cách xác nhận apply thành công
+  đồng bộ qua chính response này.
+- `AlvisBackendFacade` gate các operation này qua `real("network")` (giống
+  `getDeviceInfo`), KHÁC với `GetSystemDateAndTime`/`SetSystemDateAndTime`
+  (bypass capability, luôn gọi MGMT bất kể mode) — nghĩa là cần đặt
+  `capabilities.network = real` trong `onvif.conf` (hiện đang `mock`) thì
+  các operation này mới thực sự dùng MGMT khi deploy lên camera.
+- Mock path (`capabilities.network = mock`) được giữ nguyên qua
+  `BackendConnector` với state mặc định y hệt `NetworkState` cũ trong
+  `DeviceService.h` (không qua IPC — mock-camera-backend chưa có message
+  type cho các operation này) để không phá baseline `g13.xml` khi cần chạy
+  regression thuần mock.
+- **Chưa build/chưa có evidence trên camera** — cùng hạn chế như các lần
+  trước (không có `soapcpp2`/gsoap toolchain để compile-check local
+  `DeviceService.cpp`; đã compile-check được `HttpMgmtClient.cpp`,
+  `AlvisBackendFacade.cpp`, `BackendConnector.cpp` sạch qua WSL g++). Tên
+  field gSOAP dùng lại đúng nguyên các pattern đã compile thành công trước
+  đó trong cùng file (`tt__NetworkInterface`, `tt__IPv4NetworkInterface`,
+  `tt__PrefixedIPv4Address`, `tt__NetworkGateway`, `tt__NetworkProtocol`,
+  `tt__DNSInformation`, `tt__HostnameInformation`...) — độ tin cậy cao hơn
+  hẳn so với `GetNTP`/`SetNTP` (phải suy đoán field mới hoàn toàn).
+
+#### SystemReboot / SetSystemFactoryDefault — BLOCKED, chờ MGMT (2026-09-15)
+
+- Đọc source `D:\Elcom\NewVersion\frontend\MGMT\src\backend` thấy có sẵn
+  controller `MaintenanceRestoreApiController` với 3 endpoint tương ứng:
+  `POST /mgmt/v1/Maintenance/Reboot` (map `SystemReboot`),
+  `POST /mgmt/v1/Maintenance/RestoreDefault` (map
+  `SetSystemFactoryDefault(FactoryDefault=Soft)`, giữ user/logs),
+  `POST /mgmt/v1/Maintenance/FactoryReset` (map
+  `SetSystemFactoryDefault(FactoryDefault=Hard)`, reset DB tài khoản + xóa
+  storage + tự reboot sau 2s).
+- **Team backend MGMT xác nhận trực tiếp (2026-09-15): 2 API này (`Reboot`,
+  `RestoreDefault`/`FactoryReset`) CHƯA làm xong**, dù đã thấy trong source
+  local đối chiếu được. Không dựa vào việc đọc được source để coi là sẵn
+  sàng dùng — **chờ MGMT xác nhận hoàn thiện rồi mới nối**.
+- Rủi ro cần nhớ khi quay lại: `Hard FactoryReset` sẽ xóa toàn bộ tài khoản
+  ONVIF trong SQLite (kể cả user vừa dùng để test DTT) và đổi network về
+  DHCP — không nên test trực tiếp trên camera đang dùng để phát triển mà
+  không có kế hoạch khôi phục lại IP/tài khoản sau đó.
 
 ### Lưu ý
 

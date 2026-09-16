@@ -181,6 +181,70 @@ bool BackendConnector::setNetworkConfig(const NetworkConfig& cfg) {
     return true;
 }
 
+HostnameConfig BackendConnector::getHostname() {
+    std::lock_guard<std::mutex> lk(netMockMutex_);
+    return netMockHostname_;
+}
+
+void BackendConnector::setHostname(const HostnameConfig& req) {
+    std::lock_guard<std::mutex> lk(netMockMutex_);
+    netMockHostname_ = req;
+}
+
+DnsConfig BackendConnector::getDns() {
+    std::lock_guard<std::mutex> lk(netMockMutex_);
+    return netMockDns_;
+}
+
+void BackendConnector::setDns(const DnsConfig& req) {
+    std::lock_guard<std::mutex> lk(netMockMutex_);
+    netMockDns_ = req;
+}
+
+NetworkInterfaceConfig BackendConnector::getNetworkInterface() {
+    std::lock_guard<std::mutex> lk(netMockMutex_);
+    return netMockInterface_;
+}
+
+void BackendConnector::setNetworkInterface(const NetworkInterfaceConfig& req) {
+    std::lock_guard<std::mutex> lk(netMockMutex_);
+    netMockInterface_.enabled = req.enabled;
+    netMockInterface_.mtu = req.mtu;
+    netMockInterface_.ipv4Enabled = req.ipv4Enabled;
+    netMockInterface_.dhcp = req.dhcp;
+    if (!req.address.empty()) {
+        netMockInterface_.address = req.address;
+        netMockInterface_.prefixLength = req.prefixLength;
+    }
+}
+
+NetworkGatewayConfig BackendConnector::getNetworkGateway() {
+    std::lock_guard<std::mutex> lk(netMockMutex_);
+    return netMockGateway_;
+}
+
+void BackendConnector::setNetworkGateway(const NetworkGatewayConfig& req) {
+    std::lock_guard<std::mutex> lk(netMockMutex_);
+    netMockGateway_ = req;
+}
+
+std::vector<NetworkProtocolEntry> BackendConnector::getNetworkProtocols() {
+    std::lock_guard<std::mutex> lk(netMockMutex_);
+    return netMockProtocols_;
+}
+
+void BackendConnector::setNetworkProtocols(const std::vector<NetworkProtocolEntry>& req) {
+    std::lock_guard<std::mutex> lk(netMockMutex_);
+    for (const auto& p : req) {
+        for (auto& cur : netMockProtocols_) {
+            if (cur.name == p.name) {
+                cur.enabled = p.enabled;
+                cur.port = p.port;
+            }
+        }
+    }
+}
+
 SystemDateTime BackendConnector::getSystemDateAndTime() {
     auto resp = sendRequest(ipc::MsgType::REQ_GET_DATETIME, "{}");
     std::string j(resp.payload.begin(), resp.payload.end());

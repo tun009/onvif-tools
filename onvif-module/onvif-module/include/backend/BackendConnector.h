@@ -21,6 +21,19 @@ public:
     DeviceInfo     getDeviceInfo()                              override;
     NetworkConfig  getNetworkConfig()                           override;
     bool           setNetworkConfig(const NetworkConfig& cfg)   override;
+    // Network configuration (Profile T 7.4) — mock nội bộ, không qua IPC
+    // (mock-camera-backend chưa có message type cho các operation này).
+    // Giữ để bảo toàn baseline conformance mock khi capabilities.network=mock.
+    HostnameConfig getHostname()                                override;
+    void           setHostname(const HostnameConfig&)           override;
+    DnsConfig      getDns()                                     override;
+    void           setDns(const DnsConfig&)                     override;
+    NetworkInterfaceConfig getNetworkInterface()                override;
+    void           setNetworkInterface(const NetworkInterfaceConfig&) override;
+    NetworkGatewayConfig getNetworkGateway()                    override;
+    void           setNetworkGateway(const NetworkGatewayConfig&) override;
+    std::vector<NetworkProtocolEntry> getNetworkProtocols()     override;
+    void           setNetworkProtocols(const std::vector<NetworkProtocolEntry>&) override;
     SystemDateTime getSystemDateAndTime()                       override;
     bool           setSystemDateAndTime(const SystemDateTime&)  override;
     bool           reboot()                                     override;
@@ -96,4 +109,16 @@ private:
     // concurrent ONVIF workers cannot consume each other's responses.
     std::mutex                               requestMutex_;
     std::map<std::string, EventCallback>     callbacks_;
+
+    // Mock nội bộ cho Network configuration (không qua IPC) — bảo toàn giá
+    // trị mặc định đã pass DTT baseline (xem g13.xml DEVICE-2-1-x).
+    std::mutex             netMockMutex_;
+    HostnameConfig         netMockHostname_{false, "MockCam-4K"};
+    DnsConfig               netMockDns_{false, "8.8.8.8", "8.8.4.4", {"local"}};
+    NetworkInterfaceConfig  netMockInterface_{"eth0", "eth0", "00:11:22:33:44:55",
+                                              true, 1500, true, false,
+                                              "192.168.8.36", 24};
+    NetworkGatewayConfig    netMockGateway_{"192.168.254.1"};
+    std::vector<NetworkProtocolEntry> netMockProtocols_{
+        {"HTTP", true, 80}, {"HTTPS", false, 443}, {"RTSP", true, 554}};
 };

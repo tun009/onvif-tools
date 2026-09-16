@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <vector>
 
 struct DeviceInfo {
     std::string manufacturer;
@@ -40,4 +41,43 @@ struct SystemDateTime {
     // Chỉ có ý nghĩa khi dateTimeType == "NTP". ntpMode: "MANUAL" | "DHCP".
     std::string ntpMode;
     std::string ntpHost;
+};
+
+// Network configuration (Profile T mục 7.4). Chỉ IPv4 — ONVIF Profile T
+// không bắt buộc IPv6 (không nhắc tới trong spec), MGMT có hỗ trợ IPv6 thật
+// nhưng cố tình bỏ qua ở vertical slice này để đúng phạm vi mandatory; xem
+// 01-IMPLEMENTATION_PLAN.md mục 2.1.
+
+struct HostnameConfig {
+    bool fromDhcp = false;
+    std::string name;
+};
+
+struct DnsConfig {
+    bool fromDhcp = false;
+    std::string primaryDns;
+    std::string secondaryDns;
+    std::vector<std::string> searchDomain;
+};
+
+struct NetworkInterfaceConfig {
+    std::string token;
+    std::string name;
+    std::string hwAddress;
+    bool enabled = true;
+    int  mtu = 1500;
+    bool ipv4Enabled = true;
+    bool dhcp = false;
+    std::string address;
+    int  prefixLength = 24;
+};
+
+struct NetworkGatewayConfig {
+    std::string ipv4Address;
+};
+
+struct NetworkProtocolEntry {
+    std::string name;   // "HTTP" | "HTTPS" | "RTSP" — đúng 3 giá trị ONVIF schema cho phép
+    bool enabled = false;
+    int  port = 0;
 };

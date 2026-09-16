@@ -12,6 +12,11 @@ public:
                        BackendMode mode, std::map<std::string, CapabilityMode> capabilities);
     DeviceInfo getDeviceInfo() override;
     NetworkConfig getNetworkConfig() override; bool setNetworkConfig(const NetworkConfig&) override;
+    HostnameConfig getHostname() override; void setHostname(const HostnameConfig&) override;
+    DnsConfig getDns() override; void setDns(const DnsConfig&) override;
+    NetworkInterfaceConfig getNetworkInterface() override; void setNetworkInterface(const NetworkInterfaceConfig&) override;
+    NetworkGatewayConfig getNetworkGateway() override; void setNetworkGateway(const NetworkGatewayConfig&) override;
+    std::vector<NetworkProtocolEntry> getNetworkProtocols() override; void setNetworkProtocols(const std::vector<NetworkProtocolEntry>&) override;
     SystemDateTime getSystemDateAndTime() override; bool setSystemDateAndTime(const SystemDateTime&) override;
     bool reboot() override; bool factoryReset(bool) override;
     std::vector<StreamProfile> getProfiles() override;

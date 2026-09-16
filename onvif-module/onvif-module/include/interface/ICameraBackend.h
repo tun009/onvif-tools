@@ -17,6 +17,17 @@ public:
     virtual DeviceInfo     getDeviceInfo()                              = 0;
     virtual NetworkConfig  getNetworkConfig()                           = 0;
     virtual bool           setNetworkConfig(const NetworkConfig& cfg)   = 0;
+    // Network configuration (Profile T 7.4) — chỉ IPv4, xem DeviceTypes.h.
+    virtual HostnameConfig getHostname()                                = 0;
+    virtual void           setHostname(const HostnameConfig&)           = 0;
+    virtual DnsConfig      getDns()                                     = 0;
+    virtual void           setDns(const DnsConfig&)                     = 0;
+    virtual NetworkInterfaceConfig getNetworkInterface()                = 0;
+    virtual void           setNetworkInterface(const NetworkInterfaceConfig&) = 0;
+    virtual NetworkGatewayConfig getNetworkGateway()                    = 0;
+    virtual void           setNetworkGateway(const NetworkGatewayConfig&) = 0;
+    virtual std::vector<NetworkProtocolEntry> getNetworkProtocols()     = 0;
+    virtual void           setNetworkProtocols(const std::vector<NetworkProtocolEntry>&) = 0;
     virtual SystemDateTime getSystemDateAndTime()                       = 0;
     virtual bool           setSystemDateAndTime(const SystemDateTime&)  = 0;
     virtual bool           reboot()                                     = 0;

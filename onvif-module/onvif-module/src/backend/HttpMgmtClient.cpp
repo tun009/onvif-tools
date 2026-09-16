@@ -4,6 +4,8 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <unistd.h>
+#include <cstdint>
+#include <cstdio>
 #include <iostream>
 #include <stdexcept>
 #include <sstream>
@@ -81,6 +83,105 @@ bool validDateTime(int year, int month, int day, int hour, int minute, int secon
     return year >= 1970 && year <= 9999 && month >= 1 && month <= 12 &&
            day >= 1 && day <= 31 && hour >= 0 && hour <= 23 &&
            minute >= 0 && minute <= 59 && second >= 0 && second <= 59;
+}
+
+// Trích chuỗi con "[...]" ứng với 1 key, cùng cách bracket-matching như
+// jsonObject() nhưng cho mảng thay vì object.
+std::string jsonArray(const std::string& json, const std::string& key) {
+    const std::string marker = "\"" + key + "\":";
+    auto start = json.find(marker);
+    if (start == std::string::npos) return {};
+    start = json.find('[', start + marker.size());
+    if (start == std::string::npos) return {};
+    int depth = 0;
+    bool quoted = false;
+    bool escaped = false;
+    for (std::size_t pos = start; pos < json.size(); ++pos) {
+        const char ch = json[pos];
+        if (quoted) {
+            if (escaped) escaped = false;
+            else if (ch == '\\') escaped = true;
+            else if (ch == '"') quoted = false;
+            continue;
+        }
+        if (ch == '"') quoted = true;
+        else if (ch == '[') ++depth;
+        else if (ch == ']' && --depth == 0) return json.substr(start, pos - start + 1);
+    }
+    return {};
+}
+
+// Tách 1 chuỗi mảng JSON thành các object con ở top-level (chỉ đếm độ sâu
+// {}, bỏ qua dấu phẩy/khoảng trắng — đủ dùng cho mảng phẳng như
+// NetworkProtocols/NetworkInterfaces, không cần parser JSON đầy đủ).
+std::vector<std::string> jsonArrayObjects(const std::string& arrayJson) {
+    std::vector<std::string> result;
+    int depth = 0;
+    bool quoted = false;
+    bool escaped = false;
+    std::size_t objStart = std::string::npos;
+    for (std::size_t pos = 0; pos < arrayJson.size(); ++pos) {
+        const char ch = arrayJson[pos];
+        if (quoted) {
+            if (escaped) escaped = false;
+            else if (ch == '\\') escaped = true;
+            else if (ch == '"') quoted = false;
+            continue;
+        }
+        if (ch == '"') { quoted = true; continue; }
+        if (ch == '{') { if (depth == 0) objStart = pos; ++depth; continue; }
+        if (ch == '}') {
+            if (--depth == 0 && objStart != std::string::npos) {
+                result.push_back(arrayJson.substr(objStart, pos - objStart + 1));
+                objStart = std::string::npos;
+            }
+        }
+    }
+    return result;
+}
+
+// Mảng chuỗi phẳng kiểu ["1.2.3.4","8.8.8.8"] — trả các giá trị theo thứ tự.
+std::vector<std::string> jsonArrayStrings(const std::string& arrayJson) {
+    std::vector<std::string> result;
+    bool quoted = false;
+    bool escaped = false;
+    std::string current;
+    for (std::size_t pos = 0; pos < arrayJson.size(); ++pos) {
+        const char ch = arrayJson[pos];
+        if (quoted) {
+            if (escaped) { current.push_back(ch); escaped = false; }
+            else if (ch == '\\') escaped = true;
+            else if (ch == '"') { quoted = false; result.push_back(current); current.clear(); }
+            else current.push_back(ch);
+            continue;
+        }
+        if (ch == '"') quoted = true;
+    }
+    return result;
+}
+
+// MGMT lưu subnet dạng dotted mask ("255.255.255.0"); ONVIF dùng CIDR prefix
+// length (int). Cần đổi 2 chiều ở biên onvif-module <-> MGMT.
+std::string prefixLengthToSubnetMask(int prefix) {
+    if (prefix < 0) prefix = 0;
+    if (prefix > 32) prefix = 32;
+    const std::uint32_t mask = prefix == 0 ? 0u : (0xFFFFFFFFu << (32 - prefix));
+    std::ostringstream oss;
+    oss << ((mask >> 24) & 0xFF) << '.' << ((mask >> 16) & 0xFF) << '.'
+        << ((mask >> 8) & 0xFF) << '.' << (mask & 0xFF);
+    return oss.str();
+}
+
+int subnetMaskToPrefixLength(const std::string& mask) {
+    unsigned int a = 0, b = 0, c = 0, d = 0;
+    if (std::sscanf(mask.c_str(), "%u.%u.%u.%u", &a, &b, &c, &d) != 4) return 24;
+    const std::uint32_t value = (a << 24) | (b << 16) | (c << 8) | d;
+    int prefix = 0;
+    for (int i = 31; i >= 0; --i) {
+        if (value & (1u << i)) ++prefix;
+        else break;
+    }
+    return prefix;
 }
 }
 
@@ -221,6 +322,189 @@ void HttpMgmtClient::setSystemDateAndTime(const SystemDateTime& req) {
     throw std::runtime_error(
         "MGMT SetSystemDateAndTime failed (status=" +
         std::to_string(response.status) + ", result=" + std::to_string(resultCode) + ")");
+}
+
+HostnameConfig HttpMgmtClient::getHostname() {
+    const HttpResponse response = request("GET", "/mgmt/v1/GetHostname");
+    if (response.status != 200) throw std::runtime_error("MGMT rejected GetHostname request");
+    const std::string info = jsonObject(response.body, "HostnameInformation");
+    if (info.empty()) throw std::runtime_error("MGMT returned invalid GetHostname payload");
+    HostnameConfig result;
+    result.fromDhcp = SimpleJson::getBool(info, "FromDHCP", false);
+    result.name = SimpleJson::getString(info, "Name");
+    return result;
+}
+
+void HttpMgmtClient::setHostname(const HostnameConfig& req) {
+    const std::string body = "{\"Name\":\"" + escapeJson(req.name) +
+        "\",\"FromDHCP\":" + (req.fromDhcp ? "true" : "false") + "}";
+    const HttpResponse response = request("POST", "/mgmt/v1/SetHostname", body);
+    const int resultCode = SimpleJson::getInt(response.body, "result", 0);
+    if (response.status == 200 && resultCode == 1) return;
+    if (response.status == 400) {
+        throw MgmtValidationError("MGMT rejected SetHostname: " +
+                                   SimpleJson::getString(response.body, "error", "unknown"));
+    }
+    throw std::runtime_error("MGMT SetHostname failed (status=" +
+                              std::to_string(response.status) + ")");
+}
+
+DnsConfig HttpMgmtClient::getDns() {
+    const HttpResponse response = request("GET", "/mgmt/v1/GetDNS");
+    if (response.status != 200) throw std::runtime_error("MGMT rejected GetDNS request");
+    const std::string info = jsonObject(response.body, "DNSInformation");
+    if (info.empty()) throw std::runtime_error("MGMT returned invalid GetDNS payload");
+    DnsConfig result;
+    result.fromDhcp = SimpleJson::getBool(info, "FromDHCP", false);
+    // Chỉ lấy entry Type=IPv4 — bỏ qua IPv6 theo phạm vi đã chốt (mục 2.1
+    // 01-IMPLEMENTATION_PLAN.md).
+    std::vector<std::string> ipv4;
+    for (const auto& item : jsonArrayObjects(jsonArray(info, "DNSManual"))) {
+        if (SimpleJson::getString(item, "Type") == "IPv4") {
+            ipv4.push_back(SimpleJson::getString(item, "IPv4Address"));
+        }
+    }
+    if (!ipv4.empty()) result.primaryDns = ipv4[0];
+    if (ipv4.size() > 1) result.secondaryDns = ipv4[1];
+    result.searchDomain = jsonArrayStrings(jsonArray(info, "SearchDomain"));
+    return result;
+}
+
+void HttpMgmtClient::setDns(const DnsConfig& req) {
+    std::ostringstream body;
+    body << "{\"FromDHCP\":" << (req.fromDhcp ? "true" : "false");
+    if (!req.fromDhcp) {
+        body << ",\"DNSManual\":[";
+        bool first = true;
+        if (!req.primaryDns.empty()) {
+            body << "{\"IPv4Address\":\"" << escapeJson(req.primaryDns) << "\"}";
+            first = false;
+        }
+        if (!req.secondaryDns.empty()) {
+            if (!first) body << ",";
+            body << "{\"IPv4Address\":\"" << escapeJson(req.secondaryDns) << "\"}";
+        }
+        body << "]";
+    }
+    body << "}";
+    const HttpResponse response = request("POST", "/mgmt/v1/SetDNS", body.str());
+    const int resultCode = SimpleJson::getInt(response.body, "result", 0);
+    if (response.status == 200 && resultCode == 1) return;
+    if (response.status == 400) {
+        throw MgmtValidationError("MGMT rejected SetDNS: " +
+                                   SimpleJson::getString(response.body, "error", "unknown"));
+    }
+    throw std::runtime_error("MGMT SetDNS failed (status=" +
+                              std::to_string(response.status) + ")");
+}
+
+NetworkInterfaceConfig HttpMgmtClient::getNetworkInterface() {
+    const HttpResponse response = request("GET", "/mgmt/v1/GetNetworkInterfaces");
+    if (response.status != 200) throw std::runtime_error("MGMT rejected GetNetworkInterfaces request");
+    const std::string root = jsonObject(response.body, "GetNetworkInterfacesResponse");
+    const auto objects = jsonArrayObjects(jsonArray(root, "NetworkInterfaces"));
+    if (objects.empty()) throw std::runtime_error("MGMT returned no network interface");
+    const std::string& iface = objects.front();
+    NetworkInterfaceConfig result;
+    result.token = SimpleJson::getString(iface, "token");
+    result.enabled = SimpleJson::getBool(iface, "Enabled", true);
+    const std::string info = jsonObject(iface, "Info");
+    result.name = SimpleJson::getString(info, "Name");
+    result.hwAddress = SimpleJson::getString(info, "HwAddress");
+    const std::string ipv4 = jsonObject(iface, "IPv4");
+    result.ipv4Enabled = SimpleJson::getBool(ipv4, "Enabled", true);
+    const std::string config = jsonObject(ipv4, "Config");
+    result.dhcp = SimpleJson::getBool(config, "DHCP", false);
+    const auto manualObjs = jsonArrayObjects(jsonArray(config, "Manual"));
+    if (!manualObjs.empty()) {
+        result.address = SimpleJson::getString(manualObjs.front(), "Address");
+        result.prefixLength = subnetMaskToPrefixLength(
+            SimpleJson::getString(manualObjs.front(), "SubnetMask"));
+    }
+    return result;
+}
+
+void HttpMgmtClient::setNetworkInterface(const NetworkInterfaceConfig& req) {
+    std::ostringstream body;
+    body << "{\"NetworkInterface\":{\"IPv4\":{\"Enabled\":" << (req.ipv4Enabled ? "true" : "false")
+         << ",\"DHCP\":" << (req.dhcp ? "true" : "false");
+    if (!req.dhcp) {
+        body << ",\"Manual\":[{\"Address\":\"" << escapeJson(req.address)
+             << "\",\"SubnetMask\":\""
+             << escapeJson(prefixLengthToSubnetMask(req.prefixLength)) << "\"}]";
+    }
+    body << "}}}";
+    const HttpResponse response = request("POST", "/mgmt/v1/SetNetworkInterfaces", body.str());
+    const int resultCode = SimpleJson::getInt(response.body, "result", 0);
+    // Giới hạn đã biết: MGMT trả result=1 ngay sau khi validate xong, việc
+    // apply thật (nmcli) chạy trong background thread riêng — không có cách
+    // xác nhận apply thành công đồng bộ qua chính response này.
+    if (response.status == 200 && resultCode == 1) return;
+    if (response.status == 400) {
+        throw MgmtValidationError("MGMT rejected SetNetworkInterfaces: " +
+                                   SimpleJson::getString(response.body, "error", "unknown"));
+    }
+    throw std::runtime_error("MGMT SetNetworkInterfaces failed (status=" +
+                              std::to_string(response.status) + ")");
+}
+
+NetworkGatewayConfig HttpMgmtClient::getNetworkGateway() {
+    const HttpResponse response = request("GET", "/mgmt/v1/GetNetworkDefaultGateway");
+    if (response.status != 200) throw std::runtime_error("MGMT rejected GetNetworkDefaultGateway request");
+    const std::string gw = jsonObject(response.body, "NetworkGateway");
+    NetworkGatewayConfig result;
+    const auto v4list = jsonArrayStrings(jsonArray(gw, "IPv4Address"));
+    if (!v4list.empty()) result.ipv4Address = v4list.front();
+    return result;
+}
+
+void HttpMgmtClient::setNetworkGateway(const NetworkGatewayConfig& req) {
+    const std::string body = "{\"IPv4Address\":[\"" + escapeJson(req.ipv4Address) + "\"]}";
+    const HttpResponse response = request("POST", "/mgmt/v1/SetNetworkDefaultGateway", body);
+    const int resultCode = SimpleJson::getInt(response.body, "result", 0);
+    if (response.status == 200 && resultCode == 1) return;
+    if (response.status == 400) {
+        throw MgmtValidationError("MGMT rejected SetNetworkDefaultGateway: " +
+                                   SimpleJson::getString(response.body, "error", "unknown"));
+    }
+    throw std::runtime_error("MGMT SetNetworkDefaultGateway failed (status=" +
+                              std::to_string(response.status) + ")");
+}
+
+std::vector<NetworkProtocolEntry> HttpMgmtClient::getNetworkProtocols() {
+    const HttpResponse response = request("GET", "/mgmt/v1/GetNetworkProtocols");
+    if (response.status != 200) throw std::runtime_error("MGMT rejected GetNetworkProtocols request");
+    std::vector<NetworkProtocolEntry> result;
+    for (const auto& item : jsonArrayObjects(jsonArray(response.body, "NetworkProtocols"))) {
+        NetworkProtocolEntry entry;
+        entry.name = SimpleJson::getString(item, "Name");
+        entry.enabled = SimpleJson::getBool(item, "Enabled", false);
+        entry.port = SimpleJson::getInt(item, "PortNumber", 0);
+        result.push_back(entry);
+    }
+    return result;
+}
+
+void HttpMgmtClient::setNetworkProtocols(const std::vector<NetworkProtocolEntry>& req) {
+    std::ostringstream body;
+    body << "{\"NetworkProtocols\":[";
+    for (std::size_t i = 0; i < req.size(); ++i) {
+        if (i) body << ",";
+        body << "{\"Name\":\"" << escapeJson(req[i].name) << "\",\"Enabled\":"
+             << (req[i].enabled ? "true" : "false") << ",\"PortNumber\":" << req[i].port << "}";
+    }
+    body << "]}";
+    const HttpResponse response = request("POST", "/mgmt/v1/SetNetworkProtocols", body.str());
+    const int resultCode = SimpleJson::getInt(response.body, "result", 0);
+    if (response.status == 200 && resultCode == 1) return;
+    // MGMT dùng result âm (-1..-4) cho các case xung đột port HTTP/HTTPS —
+    // là lỗi input/xung đột, không phải backend lỗi -> Sender fault.
+    if (resultCode < 0 || response.status == 400) {
+        throw MgmtValidationError("MGMT rejected SetNetworkProtocols: " +
+                                   SimpleJson::getString(response.body, "error", "unknown"));
+    }
+    throw std::runtime_error("MGMT SetNetworkProtocols failed (status=" +
+                              std::to_string(response.status) + ")");
 }
 
 OnvifAuthenticationResult HttpMgmtClient::verifyWssePasswordDigest(

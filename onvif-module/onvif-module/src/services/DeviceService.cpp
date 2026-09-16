@@ -860,10 +860,19 @@ int DeviceService::GetHostname(_tds__GetHostname* req,
     this->soap->header = nullptr;
     auto soap = this->soap;
 
+    HostnameConfig cfg;
+    try {
+        cfg = backend_->getHostname();
+    } catch (const std::exception& e) {
+        std::cerr << "[DeviceService] GetHostname backend error: " << e.what() << std::endl;
+        return soap_receiver_fault_subcode(
+            this->soap, "\"http://www.onvif.org/ver10/error\":Action",
+            "Hostname backend unavailable", e.what());
+    }
+
     auto info = soap_new_tt__HostnameInformation(soap);
-    std::lock_guard<std::mutex> lk(netMtx_);
-    info->FromDHCP = net_.hostnameFromDHCP;
-    info->Name = Sp(soap, net_.hostname);
+    info->FromDHCP = cfg.fromDhcp;
+    info->Name = Sp(soap, cfg.name);
     resp.HostnameInformation = info;
     return SOAP_OK;
 }
@@ -879,41 +888,55 @@ int DeviceService::SetHostname(_tds__SetHostname* req,
                                  "ter:InvalidArgVal", "ter:InvalidHostname",
                                  "Invalid hostname");
     }
-    std::lock_guard<std::mutex> lk(netMtx_);
-    net_.hostname = req->Name;
-    net_.hostnameFromDHCP = false;
+    HostnameConfig cfg;
+    cfg.name = req->Name;
+    cfg.fromDhcp = false;
+    try {
+        backend_->setHostname(cfg);
+    } catch (const MgmtValidationError& e) {
+        return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                 "ter:InvalidArgVal", "ter:InvalidHostname", e.what());
+    } catch (const std::exception& e) {
+        std::cerr << "[DeviceService] SetHostname backend error: " << e.what() << std::endl;
+        return soap_receiver_fault_subcode(
+            this->soap, "\"http://www.onvif.org/ver10/error\":Action",
+            "SetHostname backend unavailable", e.what());
+    }
     return SOAP_OK;
 }
 
 // ── GetDNS / SetDNS ─────────────────────────────────────────────────────────
+// Chỉ IPv4 (xem 01-IMPLEMENTATION_PLAN.md mục 2.1 — Profile T không bắt buộc
+// IPv6). MGMT có hỗ trợ IPv6 thật nhưng cố tình bỏ qua ở đây.
 int DeviceService::GetDNS(_tds__GetDNS* req, _tds__GetDNSResponse& resp) {
     (void)req;
     this->soap->mustUnderstand = 0;
     this->soap->header = nullptr;
     auto soap = this->soap;
 
-    auto info = soap_new_tt__DNSInformation(soap);
-    std::lock_guard<std::mutex> lk(netMtx_);
-    info->FromDHCP = net_.dnsFromDHCP;
-    info->SearchDomain = net_.searchDomain;
-    // Khi FromDHCP=true, DNS phải nằm ở DNSFromDHCP (không phải DNSManual).
-    // Test DEVICE-2-1-8 xác định điều này (check current DNS configuration).
-    if (net_.dnsFromDHCP) {
-        // Giả lập DHCP-provided DNS (mock)
-        for (const auto& ip : std::vector<std::string>{"192.168.8.1", "8.8.8.8"}) {
-            auto a = soap_new_tt__IPAddress(soap);
-            a->Type = tt__IPType::IPv4;
-            a->IPv4Address = Sp(soap, ip);
-            info->DNSFromDHCP.push_back(a);
-        }
-    } else {
-        for (const auto& ip : net_.dnsManual) {
-            auto a = soap_new_tt__IPAddress(soap);
-            a->Type = tt__IPType::IPv4;
-            a->IPv4Address = Sp(soap, ip);
-            info->DNSManual.push_back(a);
-        }
+    DnsConfig cfg;
+    try {
+        cfg = backend_->getDns();
+    } catch (const std::exception& e) {
+        std::cerr << "[DeviceService] GetDNS backend error: " << e.what() << std::endl;
+        return soap_receiver_fault_subcode(
+            this->soap, "\"http://www.onvif.org/ver10/error\":Action",
+            "DNS backend unavailable", e.what());
     }
+
+    auto info = soap_new_tt__DNSInformation(soap);
+    info->FromDHCP = cfg.fromDhcp;
+    info->SearchDomain = cfg.searchDomain;
+    auto addIp = [&](const std::string& ip) {
+        if (ip.empty()) return;
+        auto a = soap_new_tt__IPAddress(soap);
+        a->Type = tt__IPType::IPv4;
+        a->IPv4Address = Sp(soap, ip);
+        if (cfg.fromDhcp) info->DNSFromDHCP.push_back(a);
+        else info->DNSManual.push_back(a);
+    };
+    addIp(cfg.primaryDns);
+    addIp(cfg.secondaryDns);
     resp.DNSInformation = info;
     return SOAP_OK;
 }
@@ -926,17 +949,32 @@ int DeviceService::SetDNS(_tds__SetDNS* req, _tds__SetDNSResponse& resp) {
         return soap_sender_fault_subcode(this->soap, "ter:InvalidArgVal",
                                          "Sender", "Missing SetDNS request");
     }
-    std::lock_guard<std::mutex> lk(netMtx_);
-    net_.dnsFromDHCP = req->FromDHCP;
-    net_.searchDomain = req->SearchDomain;
-    net_.dnsManual.clear();
+    DnsConfig cfg;
+    cfg.fromDhcp = req->FromDHCP;
+    cfg.searchDomain = req->SearchDomain;
     for (auto* a : req->DNSManual) {
-        if (a && a->IPv4Address) net_.dnsManual.push_back(*a->IPv4Address);
+        if (!a || !a->IPv4Address) continue;
+        if (cfg.primaryDns.empty()) cfg.primaryDns = *a->IPv4Address;
+        else if (cfg.secondaryDns.empty()) cfg.secondaryDns = *a->IPv4Address;
+    }
+    try {
+        backend_->setDns(cfg);
+    } catch (const MgmtValidationError& e) {
+        return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                 "ter:InvalidArgVal", nullptr, e.what());
+    } catch (const std::exception& e) {
+        std::cerr << "[DeviceService] SetDNS backend error: " << e.what() << std::endl;
+        return soap_receiver_fault_subcode(
+            this->soap, "\"http://www.onvif.org/ver10/error\":Action",
+            "SetDNS backend unavailable", e.what());
     }
     return SOAP_OK;
 }
 
 // ── GetNetworkInterfaces / SetNetworkInterfaces ─────────────────────────────
+// Chỉ IPv4 (mục 2.1). SetNetworkInterfaces: MGMT trả result=1 ngay rồi apply
+// thật ở background thread — không có cách xác nhận apply thành công đồng bộ
+// qua chính response này (giới hạn đã ghi trong 01-IMPLEMENTATION_PLAN.md).
 int DeviceService::GetNetworkInterfaces(_tds__GetNetworkInterfaces* req,
                                         _tds__GetNetworkInterfacesResponse& resp) {
     (void)req;
@@ -944,32 +982,40 @@ int DeviceService::GetNetworkInterfaces(_tds__GetNetworkInterfaces* req,
     this->soap->header = nullptr;
     auto soap = this->soap;
 
-    std::lock_guard<std::mutex> lk(netMtx_);
+    NetworkInterfaceConfig cfg;
+    try {
+        cfg = backend_->getNetworkInterface();
+    } catch (const std::exception& e) {
+        std::cerr << "[DeviceService] GetNetworkInterfaces backend error: " << e.what() << std::endl;
+        return soap_receiver_fault_subcode(
+            this->soap, "\"http://www.onvif.org/ver10/error\":Action",
+            "Network interface backend unavailable", e.what());
+    }
+
     auto iface = soap_new_tt__NetworkInterface(soap);
-    iface->token = net_.ifaceToken;
-    iface->Enabled = net_.ifaceEnabled;
+    iface->token = cfg.token;
+    iface->Enabled = cfg.enabled;
 
     iface->Info = soap_new_tt__NetworkInterfaceInfo(soap);
-    iface->Info->Name = Sp(soap, net_.ifaceName);
-    iface->Info->HwAddress = net_.hwAddress;
+    iface->Info->Name = Sp(soap, cfg.name);
+    iface->Info->HwAddress = cfg.hwAddress;
     auto* mtu = (int*)soap_malloc(soap, sizeof(int));
-    *mtu = net_.mtu;
+    *mtu = cfg.mtu;
     iface->Info->MTU = mtu;
 
     iface->IPv4 = soap_new_tt__IPv4NetworkInterface(soap);
-    iface->IPv4->Enabled = true;
+    iface->IPv4->Enabled = cfg.ipv4Enabled;
     iface->IPv4->Config = soap_new_tt__IPv4Configuration(soap);
-    iface->IPv4->Config->DHCP = net_.ipv4DhcpEnabled;
+    iface->IPv4->Config->DHCP = cfg.dhcp;
     auto* manual = soap_new_tt__PrefixedIPv4Address(soap);
-    manual->Address = net_.ipv4Manual;
-    manual->PrefixLength = net_.prefixLength;
+    manual->Address = cfg.address;
+    manual->PrefixLength = cfg.prefixLength;
     iface->IPv4->Config->Manual.push_back(manual);
     // IPCONFIG-1-1-3: khi DHCP=true, tool expect FromDHCP field có địa chỉ.
-    // Fake DHCP lease = same IP.
-    if (net_.ipv4DhcpEnabled) {
+    if (cfg.dhcp) {
         auto* fromDhcp = soap_new_tt__PrefixedIPv4Address(soap);
-        fromDhcp->Address = net_.ipv4Manual;
-        fromDhcp->PrefixLength = net_.prefixLength;
+        fromDhcp->Address = cfg.address;
+        fromDhcp->PrefixLength = cfg.prefixLength;
         iface->IPv4->Config->FromDHCP = fromDhcp;
     }
 
@@ -985,25 +1031,44 @@ int DeviceService::SetNetworkInterfaces(_tds__SetNetworkInterfaces* req,
         return soap_sender_fault_subcode(this->soap, "ter:InvalidArgVal",
                                          "Sender", "Missing request");
     }
-    std::lock_guard<std::mutex> lk(netMtx_);
-    if (req->InterfaceToken != net_.ifaceToken) {
+    NetworkInterfaceConfig cfg;
+    try {
+        cfg = backend_->getNetworkInterface();
+    } catch (const std::exception& e) {
+        std::cerr << "[DeviceService] SetNetworkInterfaces: cannot read current state: "
+                  << e.what() << std::endl;
+        return soap_receiver_fault_subcode(
+            this->soap, "\"http://www.onvif.org/ver10/error\":Action",
+            "Network interface backend unavailable", e.what());
+    }
+    if (req->InterfaceToken != cfg.token) {
         return soap_sender_fault_subcode(this->soap, "ter:InvalidArgVal",
                                          "Sender", "Unknown InterfaceToken");
     }
-    // Cập nhật state — merge field có gửi (DEVICE-2-1-18 verify appliance).
+    // Merge field có gửi (DEVICE-2-1-18 verify appliance) lên state hiện tại.
     if (req->NetworkInterface) {
         auto* ni = req->NetworkInterface;
-        if (ni->Enabled) net_.ifaceEnabled = *ni->Enabled;
-        if (ni->MTU)     net_.mtu = *ni->MTU;
+        if (ni->Enabled) cfg.enabled = *ni->Enabled;
+        if (ni->MTU)     cfg.mtu = *ni->MTU;
         if (ni->IPv4) {
             auto* v4 = ni->IPv4;
-            if (v4->Enabled) { /* keep enabled */ }
-            if (v4->DHCP)    net_.ipv4DhcpEnabled = *v4->DHCP;
+            if (v4->DHCP) cfg.dhcp = *v4->DHCP;
             if (!v4->Manual.empty() && v4->Manual[0]) {
-                net_.ipv4Manual   = v4->Manual[0]->Address;
-                net_.prefixLength = v4->Manual[0]->PrefixLength;
+                cfg.address = v4->Manual[0]->Address;
+                cfg.prefixLength = v4->Manual[0]->PrefixLength;
             }
         }
+    }
+    try {
+        backend_->setNetworkInterface(cfg);
+    } catch (const MgmtValidationError& e) {
+        return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                 "ter:InvalidArgVal", nullptr, e.what());
+    } catch (const std::exception& e) {
+        std::cerr << "[DeviceService] SetNetworkInterfaces backend error: " << e.what() << std::endl;
+        return soap_receiver_fault_subcode(
+            this->soap, "\"http://www.onvif.org/ver10/error\":Action",
+            "SetNetworkInterfaces backend unavailable", e.what());
     }
     resp.RebootNeeded = false;
     return SOAP_OK;
@@ -1016,9 +1081,17 @@ int DeviceService::GetNetworkDefaultGateway(_tds__GetNetworkDefaultGateway* req,
     this->soap->mustUnderstand = 0;
     this->soap->header = nullptr;
     auto soap = this->soap;
-    std::lock_guard<std::mutex> lk(netMtx_);
+    NetworkGatewayConfig cfg;
+    try {
+        cfg = backend_->getNetworkGateway();
+    } catch (const std::exception& e) {
+        std::cerr << "[DeviceService] GetNetworkDefaultGateway backend error: " << e.what() << std::endl;
+        return soap_receiver_fault_subcode(
+            this->soap, "\"http://www.onvif.org/ver10/error\":Action",
+            "Network gateway backend unavailable", e.what());
+    }
     auto gw = soap_new_tt__NetworkGateway(soap);
-    gw->IPv4Address = net_.gatewayIPv4;
+    if (!cfg.ipv4Address.empty()) gw->IPv4Address.push_back(cfg.ipv4Address);
     resp.NetworkGateway = gw;
     return SOAP_OK;
 }
@@ -1028,30 +1101,94 @@ int DeviceService::SetNetworkDefaultGateway(_tds__SetNetworkDefaultGateway* req,
     (void)resp;
     this->soap->mustUnderstand = 0;
     this->soap->header = nullptr;
-    if (!req) {
-        return soap_sender_fault_subcode(this->soap, "ter:InvalidArgVal",
-                                         "Sender", "Missing request");
+    if (!req || req->IPv4Address.empty()) {
+        return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                 "ter:InvalidArgVal", nullptr,
+                                 "IPv4Address is required");
     }
-    std::lock_guard<std::mutex> lk(netMtx_);
-    net_.gatewayIPv4 = req->IPv4Address;
+    NetworkGatewayConfig cfg;
+    cfg.ipv4Address = req->IPv4Address.front();
+    try {
+        backend_->setNetworkGateway(cfg);
+    } catch (const MgmtValidationError& e) {
+        return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                 "ter:InvalidArgVal", nullptr, e.what());
+    } catch (const std::exception& e) {
+        std::cerr << "[DeviceService] SetNetworkDefaultGateway backend error: " << e.what() << std::endl;
+        return soap_receiver_fault_subcode(
+            this->soap, "\"http://www.onvif.org/ver10/error\":Action",
+            "SetNetworkDefaultGateway backend unavailable", e.what());
+    }
     return SOAP_OK;
 }
 
 // ── GetNetworkProtocols / SetNetworkProtocols ───────────────────────────────
+// MGMT quản lý port SOAP ONVIF dưới tên protocol "ONVIF" (khác hẳn MGMT
+// "HTTP", vốn là port web UI MGMT 8086) — map "ONVIF" của MGMT thành "HTTP"
+// của SOAP, vì đó chính là transport thật SOAP đang chạy. "HTTPS" luôn công
+// bố disabled vì onvif-module chưa hỗ trợ TLS (README nguyên tắc #5: không
+// quảng cáo capability backend thật không làm được).
+//
+// Giới hạn đã biết: đổi port "ONVIF" qua SetNetworkProtocols chỉ ghi xuống
+// MGMT (persist), KHÔNG tự rebind listener đang chạy của onvif-module —
+// cần restart thủ công để port mới có hiệu lực thật (xem
+// 01-IMPLEMENTATION_PLAN.md mục Network configuration).
 int DeviceService::GetNetworkProtocols(_tds__GetNetworkProtocols* req,
                                        _tds__GetNetworkProtocolsResponse& resp) {
     (void)req;
     this->soap->mustUnderstand = 0;
     this->soap->header = nullptr;
     auto soap = this->soap;
-    std::lock_guard<std::mutex> lk(netMtx_);
-    for (const auto& p : net_.protocols) {
+
+    std::vector<NetworkProtocolEntry> protocols;
+    try {
+        protocols = backend_->getNetworkProtocols();
+    } catch (const std::exception& e) {
+        std::cerr << "[DeviceService] GetNetworkProtocols backend error: " << e.what() << std::endl;
+        return soap_receiver_fault_subcode(
+            this->soap, "\"http://www.onvif.org/ver10/error\":Action",
+            "Network protocols backend unavailable", e.what());
+    }
+
+    bool foundHttp = false, foundRtsp = false;
+    for (const auto& p : protocols) {
+        if (p.name == "ONVIF") {
+            auto np = soap_new_tt__NetworkProtocol(soap);
+            np->Name = tt__NetworkProtocolType::HTTP;
+            // Luôn true: SOAP server này đang thực sự phục vụ request này.
+            np->Enabled = true;
+            np->Port.push_back(p.port);
+            resp.NetworkProtocols.push_back(np);
+            foundHttp = true;
+        } else if (p.name == "RTSP") {
+            auto np = soap_new_tt__NetworkProtocol(soap);
+            np->Name = tt__NetworkProtocolType::RTSP;
+            np->Enabled = p.enabled;
+            np->Port.push_back(p.port);
+            resp.NetworkProtocols.push_back(np);
+            foundRtsp = true;
+        }
+    }
+    // MGMT chưa có/thiếu entry tương ứng -> fallback đúng port runtime thật
+    // của process này thay vì bỏ trống (bắt buộc phải công bố HTTP/RTSP).
+    if (!foundHttp) {
         auto np = soap_new_tt__NetworkProtocol(soap);
-        np->Name = static_cast<tt__NetworkProtocolType>(p.type);
-        np->Enabled = p.enabled;
-        np->Port.push_back(p.port);
+        np->Name = tt__NetworkProtocolType::HTTP;
+        np->Enabled = true;
+        np->Port.push_back(cfg_.httpPort);
         resp.NetworkProtocols.push_back(np);
     }
+    if (!foundRtsp) {
+        auto np = soap_new_tt__NetworkProtocol(soap);
+        np->Name = tt__NetworkProtocolType::RTSP;
+        np->Enabled = true;
+        np->Port.push_back(cfg_.rtspPort);
+        resp.NetworkProtocols.push_back(np);
+    }
+    auto https = soap_new_tt__NetworkProtocol(soap);
+    https->Name = tt__NetworkProtocolType::HTTPS;
+    https->Enabled = false;
+    resp.NetworkProtocols.push_back(https);
     return SOAP_OK;
 }
 
@@ -1064,19 +1201,37 @@ int DeviceService::SetNetworkProtocols(_tds__SetNetworkProtocols* req,
         return soap_sender_fault_subcode(this->soap, "ter:InvalidArgVal",
                                          "Sender", "Missing request");
     }
-    std::lock_guard<std::mutex> lk(netMtx_);
+    std::vector<NetworkProtocolEntry> updates;
     for (auto* p : req->NetworkProtocols) {
         if (!p) continue;
-        int type = static_cast<int>(p->Name);
-        // Reject enum values ngoài HTTP/HTTPS/RTSP (0..2) — SetNetworkProtocols
-        // - UNSUPPORTED PROTOCOLS test yêu cầu fault ActionNotSupported.
-        // Nhưng gSOAP enum đã filter — nếu tool gửi type khác, gSOAP deserialize fail trước.
-        for (auto& cur : net_.protocols) {
-            if (cur.type == type) {
-                cur.enabled = p->Enabled;
-                if (!p->Port.empty()) cur.port = p->Port[0];
+        if (p->Name == tt__NetworkProtocolType::HTTPS) {
+            if (p->Enabled) {
+                // DEVICE-2-1-35 style: không hỗ trợ thật -> ActionNotSupported.
+                return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                         "ter:ActionNotSupported", nullptr,
+                                         "HTTPS is not supported by this device");
             }
+            continue; // đã disabled sẵn, không cần gửi gì xuống MGMT
         }
+        NetworkProtocolEntry entry;
+        entry.enabled = p->Enabled;
+        entry.port = p->Port.empty() ? 0 : p->Port[0];
+        if (p->Name == tt__NetworkProtocolType::HTTP) entry.name = "ONVIF";
+        else if (p->Name == tt__NetworkProtocolType::RTSP) entry.name = "RTSP";
+        else continue;
+        updates.push_back(entry);
+    }
+    if (updates.empty()) return SOAP_OK;
+    try {
+        backend_->setNetworkProtocols(updates);
+    } catch (const MgmtValidationError& e) {
+        return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
+                                 "ter:InvalidArgVal", nullptr, e.what());
+    } catch (const std::exception& e) {
+        std::cerr << "[DeviceService] SetNetworkProtocols backend error: " << e.what() << std::endl;
+        return soap_receiver_fault_subcode(
+            this->soap, "\"http://www.onvif.org/ver10/error\":Action",
+            "SetNetworkProtocols backend unavailable", e.what());
     }
     return SOAP_OK;
 }
