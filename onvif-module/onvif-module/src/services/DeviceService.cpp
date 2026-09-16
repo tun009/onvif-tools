@@ -264,7 +264,7 @@ int DeviceService::GetDeviceInformation(
             this->soap,
             "\"http://www.onvif.org/ver10/error\":Action",
             "Device information backend unavailable",
-            e.what());
+            nullptr);
     }
 
     tds__GetDeviceInformationResponse.Manufacturer = info.manufacturer;
@@ -867,7 +867,7 @@ int DeviceService::GetHostname(_tds__GetHostname* req,
         std::cerr << "[DeviceService] GetHostname backend error: " << e.what() << std::endl;
         return soap_receiver_fault_subcode(
             this->soap, "\"http://www.onvif.org/ver10/error\":Action",
-            "Hostname backend unavailable", e.what());
+            "Hostname backend unavailable", nullptr);
     }
 
     auto info = soap_new_tt__HostnameInformation(soap);
@@ -900,7 +900,7 @@ int DeviceService::SetHostname(_tds__SetHostname* req,
         std::cerr << "[DeviceService] SetHostname backend error: " << e.what() << std::endl;
         return soap_receiver_fault_subcode(
             this->soap, "\"http://www.onvif.org/ver10/error\":Action",
-            "SetHostname backend unavailable", e.what());
+            "SetHostname backend unavailable", nullptr);
     }
     return SOAP_OK;
 }
@@ -921,7 +921,7 @@ int DeviceService::GetDNS(_tds__GetDNS* req, _tds__GetDNSResponse& resp) {
         std::cerr << "[DeviceService] GetDNS backend error: " << e.what() << std::endl;
         return soap_receiver_fault_subcode(
             this->soap, "\"http://www.onvif.org/ver10/error\":Action",
-            "DNS backend unavailable", e.what());
+            "DNS backend unavailable", nullptr);
     }
 
     auto info = soap_new_tt__DNSInformation(soap);
@@ -966,7 +966,7 @@ int DeviceService::SetDNS(_tds__SetDNS* req, _tds__SetDNSResponse& resp) {
         std::cerr << "[DeviceService] SetDNS backend error: " << e.what() << std::endl;
         return soap_receiver_fault_subcode(
             this->soap, "\"http://www.onvif.org/ver10/error\":Action",
-            "SetDNS backend unavailable", e.what());
+            "SetDNS backend unavailable", nullptr);
     }
     return SOAP_OK;
 }
@@ -989,7 +989,7 @@ int DeviceService::GetNetworkInterfaces(_tds__GetNetworkInterfaces* req,
         std::cerr << "[DeviceService] GetNetworkInterfaces backend error: " << e.what() << std::endl;
         return soap_receiver_fault_subcode(
             this->soap, "\"http://www.onvif.org/ver10/error\":Action",
-            "Network interface backend unavailable", e.what());
+            "Network interface backend unavailable", nullptr);
     }
 
     auto iface = soap_new_tt__NetworkInterface(soap);
@@ -1039,7 +1039,7 @@ int DeviceService::SetNetworkInterfaces(_tds__SetNetworkInterfaces* req,
                   << e.what() << std::endl;
         return soap_receiver_fault_subcode(
             this->soap, "\"http://www.onvif.org/ver10/error\":Action",
-            "Network interface backend unavailable", e.what());
+            "Network interface backend unavailable", nullptr);
     }
     if (req->InterfaceToken != cfg.token) {
         return soap_sender_fault_subcode(this->soap, "ter:InvalidArgVal",
@@ -1068,7 +1068,7 @@ int DeviceService::SetNetworkInterfaces(_tds__SetNetworkInterfaces* req,
         std::cerr << "[DeviceService] SetNetworkInterfaces backend error: " << e.what() << std::endl;
         return soap_receiver_fault_subcode(
             this->soap, "\"http://www.onvif.org/ver10/error\":Action",
-            "SetNetworkInterfaces backend unavailable", e.what());
+            "SetNetworkInterfaces backend unavailable", nullptr);
     }
     resp.RebootNeeded = false;
     return SOAP_OK;
@@ -1088,7 +1088,7 @@ int DeviceService::GetNetworkDefaultGateway(_tds__GetNetworkDefaultGateway* req,
         std::cerr << "[DeviceService] GetNetworkDefaultGateway backend error: " << e.what() << std::endl;
         return soap_receiver_fault_subcode(
             this->soap, "\"http://www.onvif.org/ver10/error\":Action",
-            "Network gateway backend unavailable", e.what());
+            "Network gateway backend unavailable", nullptr);
     }
     auto gw = soap_new_tt__NetworkGateway(soap);
     if (!cfg.ipv4Address.empty()) gw->IPv4Address.push_back(cfg.ipv4Address);
@@ -1117,7 +1117,7 @@ int DeviceService::SetNetworkDefaultGateway(_tds__SetNetworkDefaultGateway* req,
         std::cerr << "[DeviceService] SetNetworkDefaultGateway backend error: " << e.what() << std::endl;
         return soap_receiver_fault_subcode(
             this->soap, "\"http://www.onvif.org/ver10/error\":Action",
-            "SetNetworkDefaultGateway backend unavailable", e.what());
+            "SetNetworkDefaultGateway backend unavailable", nullptr);
     }
     return SOAP_OK;
 }
@@ -1147,7 +1147,7 @@ int DeviceService::GetNetworkProtocols(_tds__GetNetworkProtocols* req,
         std::cerr << "[DeviceService] GetNetworkProtocols backend error: " << e.what() << std::endl;
         return soap_receiver_fault_subcode(
             this->soap, "\"http://www.onvif.org/ver10/error\":Action",
-            "Network protocols backend unavailable", e.what());
+            "Network protocols backend unavailable", nullptr);
     }
 
     bool foundHttp = false, foundRtsp = false;
@@ -1231,7 +1231,7 @@ int DeviceService::SetNetworkProtocols(_tds__SetNetworkProtocols* req,
         std::cerr << "[DeviceService] SetNetworkProtocols backend error: " << e.what() << std::endl;
         return soap_receiver_fault_subcode(
             this->soap, "\"http://www.onvif.org/ver10/error\":Action",
-            "SetNetworkProtocols backend unavailable", e.what());
+            "SetNetworkProtocols backend unavailable", nullptr);
     }
     return SOAP_OK;
 }
@@ -1315,7 +1315,7 @@ int DeviceService::SetSystemDateAndTime(_tds__SetSystemDateAndTime* req,
                   << e.what() << std::endl;
         return soap_receiver_fault_subcode(
             this->soap, "\"http://www.onvif.org/ver10/error\":Action",
-            "DateTime backend unavailable", e.what());
+            "DateTime backend unavailable", nullptr);
     }
 
     SystemDateTime setReq;
@@ -1357,8 +1357,7 @@ int DeviceService::SetSystemDateAndTime(_tds__SetSystemDateAndTime* req,
             (current.ntpMode == "MANUAL" && current.ntpHost.empty())) {
             return soap_receiver_fault_subcode(
                 this->soap, "\"http://www.onvif.org/ver10/error\":Action",
-                "NTP server is not configured",
-                "Configure an NTP server via MGMT before enabling NTP DateTimeType");
+                "NTP server is not configured", nullptr);
         }
         setReq.ntpMode = current.ntpMode;
         setReq.ntpHost = current.ntpHost;
@@ -1376,7 +1375,7 @@ int DeviceService::SetSystemDateAndTime(_tds__SetSystemDateAndTime* req,
                   << e.what() << std::endl;
         return soap_receiver_fault_subcode(
             this->soap, "\"http://www.onvif.org/ver10/error\":Action",
-            "SetSystemDateAndTime backend unavailable", e.what());
+            "SetSystemDateAndTime backend unavailable", nullptr);
     }
 
     return SOAP_OK;
@@ -1397,7 +1396,7 @@ int DeviceService::GetNTP(_tds__GetNTP* req, _tds__GetNTPResponse& resp) {
                   << e.what() << std::endl;
         return soap_receiver_fault_subcode(
             this->soap, "\"http://www.onvif.org/ver10/error\":Action",
-            "DateTime backend unavailable", e.what());
+            "DateTime backend unavailable", nullptr);
     }
 
     auto info = soap_new_tt__NTPInformation(soap);
@@ -1457,7 +1456,7 @@ int DeviceService::SetNTP(_tds__SetNTP* req, _tds__SetNTPResponse& resp) {
                   << e.what() << std::endl;
         return soap_receiver_fault_subcode(
             this->soap, "\"http://www.onvif.org/ver10/error\":Action",
-            "DateTime backend unavailable", e.what());
+            "DateTime backend unavailable", nullptr);
     }
 
     SystemDateTime setReq;
@@ -1483,7 +1482,7 @@ int DeviceService::SetNTP(_tds__SetNTP* req, _tds__SetNTPResponse& resp) {
         std::cerr << "[DeviceService] SetNTP backend error: " << e.what() << std::endl;
         return soap_receiver_fault_subcode(
             this->soap, "\"http://www.onvif.org/ver10/error\":Action",
-            "SetNTP backend unavailable", e.what());
+            "SetNTP backend unavailable", nullptr);
     }
     return SOAP_OK;
 }
