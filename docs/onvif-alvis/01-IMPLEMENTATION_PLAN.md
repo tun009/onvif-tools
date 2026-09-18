@@ -641,15 +641,43 @@ Các quyết định thiết kế quan trọng:
   `DeviceService.h` (không qua IPC — mock-camera-backend chưa có message
   type cho các operation này) để không phá baseline `g13.xml` khi cần chạy
   regression thuần mock.
-- **Chưa build/chưa có evidence trên camera** — cùng hạn chế như các lần
-  trước (không có `soapcpp2`/gsoap toolchain để compile-check local
-  `DeviceService.cpp`; đã compile-check được `HttpMgmtClient.cpp`,
-  `AlvisBackendFacade.cpp`, `BackendConnector.cpp` sạch qua WSL g++). Tên
-  field gSOAP dùng lại đúng nguyên các pattern đã compile thành công trước
-  đó trong cùng file (`tt__NetworkInterface`, `tt__IPv4NetworkInterface`,
-  `tt__PrefixedIPv4Address`, `tt__NetworkGateway`, `tt__NetworkProtocol`,
-  `tt__DNSInformation`, `tt__HostnameInformation`...) — độ tin cậy cao hơn
-  hẳn so với `GetNTP`/`SetNTP` (phải suy đoán field mới hoàn toàn).
+- **Build/evidence trên camera `192.168.8.124` (2026-09-16):** đã build
+  (`make clean && make full`) và chạy DTT thật. Trong lúc chạy phát hiện và
+  fix 3 bug thật (không phải giả định): (1) `soap_receiver_fault_subcode`
+  truyền `e.what()`/literal string vào tham số `detail` — tham số này là
+  raw-XML (`##any`) theo schema SOAP 1.2, truyền text thường vi phạm schema
+  → DTT fail; đã sửa toàn bộ 18 chỗ gọi (kể cả 1 chỗ có sẵn từ trước, không
+  phải do lần sửa này) thành `nullptr`. (2) Thiếu `<tt:Port>` cho entry HTTPS
+  trong `GetNetworkProtocolsResponse` dù `Enabled=false` — schema vẫn bắt
+  buộc có Port → đã luôn push port. (3) Hardcode port HTTPS `443` — đã sửa
+  lấy đúng port thật MGMT trả về, `443` chỉ dùng khi MGMT không có entry
+  HTTPS.
+
+- **Đối chiếu đầy đủ 14 test `DEVICE-2-1-x` trong `g13.xml`** (tất cả đều
+  `Passed` ở baseline cũ, pre-MGMT) với tiến độ DTT thật hiện tại:
+
+  | Test ID | Nội dung | Trạng thái |
+  |---|---|---|
+  | `2-1-1` | GetHostname | ✅ **PASS** (DTT thật, camera `.124`, 2026-09-16) |
+  | `2-1-3` | SetHostname — error case | ✅ **PASS** (DTT thật) |
+  | `2-1-33` | GetNetworkProtocols | ✅ **PASS** (DTT thật) |
+  | `2-1-4` | GetDNS | ⬜ Chưa test — an toàn (read-only) |
+  | `2-1-17` | GetNetworkInterface | ⬜ Chưa test — an toàn (read-only) |
+  | `2-1-25` | GetNetworkDefaultGateway | ⬜ Chưa test — an toàn (read-only) |
+  | `2-1-5` | SetDNS — SearchDomain | ⬜ Chưa test — rủi ro thấp |
+  | `2-1-6` | SetDNS — DNSManual IPv4 | ⬜ Chưa test — rủi ro thấp |
+  | `2-1-8` | SetDNS — FromDHCP | ⬜ Chưa test — rủi ro thấp |
+  | `2-1-32` | SetHostname — case hợp lệ | ⬜ Chưa test — rủi ro thấp |
+  | `2-1-35` | SetNetworkProtocols — unsupported protocols | ⬜ Chưa test — rủi ro thấp (case lỗi, MGMT từ chối nên không apply) |
+  | `2-1-18` | SetNetworkInterface — IPv4 | ⬜ Chưa test — **⚠️ RỦI RO CAO**: đổi IP/subnet thật, có thể làm rớt kết nối tới camera ngay lập tức |
+  | `2-1-30` | SetNetworkDefaultGateway — IPv4 | ⬜ Chưa test — **⚠️ RỦI RO CAO**: đổi gateway thật, có thể làm camera mất route ra ngoài cho mọi người đang dùng |
+  | `2-1-34` | SetNetworkProtocols | ⬜ Chưa test — **⚠️ RỦI RO CAO**: `applyProtocolPorts()` phía MGMT gọi thật `systemctl restart rtsp_server.service` + `restart/stop onvif_server.service` → gián đoạn RTSP/ONVIF đang chạy |
+
+  **Quyết định (2026-09-16, theo yêu cầu người dùng):** camera `.124` đang có
+  nhiều người dùng thật (xem RTSP/web) nên **tạm hoãn 11 case còn lại**,
+  đặc biệt 3 case rủi ro cao (`2-1-18`, `2-1-30`, `2-1-34`), để test vào lúc
+  không có ai truy cập web/RTSP. Không tự ý chạy các case Set này khi chưa
+  xác nhận camera đang rảnh.
 
 #### SystemReboot / SetSystemFactoryDefault — BLOCKED, chờ MGMT (2026-09-15)
 

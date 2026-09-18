@@ -11,8 +11,6 @@
 #include <cstdlib>
 #include <iomanip>
 
-std::mutex DeviceService::netMtx_;
-DeviceService::NetworkState DeviceService::net_;
 std::mutex DeviceService::sysMtx_;
 DeviceService::SystemState DeviceService::sys_;
 
@@ -156,8 +154,52 @@ static std::int64_t civilMinutes(int year, unsigned month, unsigned day,
     return days * 24 * 60 + hour * 60 + minute;
 }
 
+// Chuẩn hoá 1 giá trị động (Model/HardwareId từ MGMT) thành token hợp lệ cho
+// ONVIF scope URI: gộp khoảng trắng/ký tự lạ thành 1 dấu '-', bỏ dấu '-' thừa
+// ở cuối. Scope URI không được chứa khoảng trắng.
+static std::string sanitizeScopeToken(const std::string& raw) {
+    std::string out;
+    out.reserve(raw.size());
+    bool lastWasDash = false;
+    for (char c : raw) {
+        if (std::isalnum((unsigned char)c) || c == '-' || c == '_' || c == '.') {
+            out += c;
+            lastWasDash = false;
+        } else if (!lastWasDash && !out.empty()) {
+            out += '-';
+            lastWasDash = true;
+        }
+    }
+    while (!out.empty() && out.back() == '-') out.pop_back();
+    return out;
+}
+
 DeviceService::DeviceService(struct soap* soap, const ServiceConfig& cfg, std::shared_ptr<ICameraBackend> backend)
-    : DeviceBindingService(soap), cfg_(cfg), backend_(std::move(backend)) {}
+    : DeviceBindingService(soap), cfg_(cfg), backend_(std::move(backend)) {
+    // sys_ là static, dùng chung cho mọi instance được tạo qua copy() (gSOAP
+    // tạo 1 instance/kết nối) — chỉ cần patch placeholder "name"/"hardware"
+    // đúng 1 lần cho cả process. Nếu backend_->getDeviceInfo() ném lỗi (MGMT
+    // chưa sẵn sàng lúc khởi động), call_once tự retry ở lần construct kế
+    // tiếp thay vì khoá cứng lỗi vĩnh viễn.
+    static std::once_flag scopesPatched;
+    std::call_once(scopesPatched, [this]() {
+        if (!backend_) return;
+        try {
+            DeviceInfo info = backend_->getDeviceInfo();
+            std::lock_guard<std::mutex> lk(sysMtx_);
+            for (auto& s : sys_.scopes) {
+                if (s.find("/name/") != std::string::npos && !info.model.empty()) {
+                    s = "onvif://www.onvif.org/name/" + sanitizeScopeToken(info.model);
+                } else if (s.find("/hardware/") != std::string::npos && !info.hardwareId.empty()) {
+                    s = "onvif://www.onvif.org/hardware/" + sanitizeScopeToken(info.hardwareId);
+                }
+            }
+        } catch (const std::exception&) {
+            // Giữ nguyên placeholder mặc định nếu MGMT chưa gọi được; không
+            // chặn construction của DeviceService vì lỗi này.
+        }
+    });
+}
 
 DeviceBindingService* DeviceService::copy() {
     return new DeviceService(this->soap, cfg_, backend_);

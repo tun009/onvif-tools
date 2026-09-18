@@ -71,37 +71,6 @@ private:
     ServiceConfig cfg_;
     std::shared_ptr<ICameraBackend> backend_;
 
-    // Network state (static, persist across requests trong 1 phiên process).
-    struct NetworkState {
-        std::string hostname = "MockCam-4K";
-        bool hostnameFromDHCP = false;
-        bool dnsFromDHCP = false;
-        std::vector<std::string> searchDomain = {"local"};
-        std::vector<std::string> dnsManual   = {"8.8.8.8", "8.8.4.4"};
-
-        std::string ifaceToken = "eth0";
-        bool        ifaceEnabled = true;
-        std::string ifaceName    = "eth0";
-        std::string hwAddress    = "00:11:22:33:44:55";
-        int         mtu          = 1500;
-
-        // IPv4 config
-        bool        ipv4DhcpEnabled = false;
-        std::string ipv4Manual      = "192.168.8.36";
-        int         prefixLength    = 24;
-
-        std::vector<std::string> gatewayIPv4 = {"192.168.254.1"};
-
-        struct Protocol { int type; bool enabled; int port; };
-        std::vector<Protocol> protocols = {
-            {0, true, 80},     // HTTP
-            {1, false, 443},   // HTTPS
-            {2, true, 554},    // RTSP
-        };
-    };
-    static std::mutex netMtx_;
-    static NetworkState net_;
-
     // System + User state (Profile T 7.5 & 7.6)
     struct MockUser {
         std::string username;
@@ -116,15 +85,20 @@ private:
         std::vector<MockUser> users = {{"admin", "admin123", 0}};
         // Discovery
         int  discoveryMode = 0;  // 0=Discoverable, 1=NonDiscoverable
+        // "name" là fallback, chỉ tồn tại trong khoảnh khắc DeviceService khởi
+        // tạo lần đầu mà backend_->getDeviceInfo() chưa kịp trả lời (xem
+        // constructor DeviceService::DeviceService) — sau đó bị ghi đè bằng
+        // Model thật từ MGMT. Không đặt tên rõ ràng là mock ở đây, vì fallback
+        // này vẫn có thể lộ ra ngoài cho client thật trong khoảnh khắc đó.
         std::vector<std::string> scopes = {
             "onvif://www.onvif.org/type/NetworkVideoTransmitter",
             "onvif://www.onvif.org/type/video_encoder",
-            "onvif://www.onvif.org/name/MockCam-4K",
+            "onvif://www.onvif.org/name/Alvis-Camera",
             "onvif://www.onvif.org/hardware/JetsonOrinNX-8GB",
             "onvif://www.onvif.org/Profile/Streaming",   // Profile S (Media1 legacy) — declared cùng Profile T
             "onvif://www.onvif.org/Profile/T",
             "onvif://www.onvif.org/Profile/M",           // Profile M (Metadata & Analytics)
-            "onvif://www.onvif.org/Profilae/G"            // Profile G (Recording/Search/Replay)
+            "onvif://www.onvif.org/Profile/G"            // Profile G (Recording/Search/Replay)
         };
     };
     static std::mutex sysMtx_;
