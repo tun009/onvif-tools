@@ -494,29 +494,43 @@ int Media2Service::GetVideoSourceConfigurations(
                                 "No such VideoSourceConfiguration");
     }
 
+    // Lấy động từ backend (thay vì hardcode theo tên profile mock cũ) — phải
+    // khớp đúng dữ liệu mà GetProfiles vừa trả cho cùng ProfileToken, nếu
+    // không DTT MEDIA2-2-2-4 sẽ báo lệch giữa 2 API. Không truyền ProfileToken
+    // thì lấy profile đầu tiên làm đại diện (khớp cách DTT đối chiếu khi gọi
+    // không kèm token).
+    std::string beSourceToken = "src_main";
+    int beWidth = 1920, beHeight = 1080;
+    try {
+        auto profiles = backend_->getProfiles();
+        const StreamProfile* match = nullptr;
+        if (!profToken.empty()) {
+            for (const auto& p : profiles) if (p.token == profToken) { match = &p; break; }
+        } else if (!profiles.empty()) {
+            match = &profiles.front();
+        }
+        if (match) {
+            if (!match->sourceToken.empty()) beSourceToken = match->sourceToken;
+            if (match->videoConfig.resolution.width > 0 && match->videoConfig.resolution.height > 0) {
+                beWidth = match->videoConfig.resolution.width;
+                beHeight = match->videoConfig.resolution.height;
+            }
+        }
+    } catch (...) {}
+
     auto vsc = soap_new_tt__VideoSourceConfiguration(soap);
     if (vsc) {
         vsc->token = VALID_VS_CONFIG;
         vsc->Name = "VideoSourceConfig";
         vsc->UseCount = 4;
-        vsc->SourceToken = "src_main";
+        vsc->SourceToken = beSourceToken;
 
         vsc->Bounds = soap_new_tt__IntRectangle(soap);
         if (vsc->Bounds) {
             vsc->Bounds->x = 0;
             vsc->Bounds->y = 0;
-            // The source configuration must describe the same active source
-            // geometry exposed by GetProfiles, including the 4K main stream.
-            if (profToken == "profile_sub2") {
-                vsc->Bounds->width = 640;
-                vsc->Bounds->height = 480;
-            } else if (profToken == "profile_main") {
-                vsc->Bounds->width = 3840;
-                vsc->Bounds->height = 2160;
-            } else {
-                vsc->Bounds->width = 1920;
-                vsc->Bounds->height = 1080;
-            }
+            vsc->Bounds->width = beWidth;
+            vsc->Bounds->height = beHeight;
         }
         // MEDIA2-2-2-5: nếu đã SetVideoSourceConfiguration và query KHÔNG kèm
         // ProfileToken → echo lại field đã set (Name/Bounds).
@@ -804,9 +818,25 @@ int Media2Service::GetVideoSourceConfigurationOptions(
         }
     }
 
+    // Lấy động từ backend thay vì hardcode "src_main" — phải khớp SourceToken
+    // thật mà GetProfiles trả cho cùng ProfileToken (MEDIA2-2-2-7).
+    std::string profToken;
+    if (req && req->ProfileToken) profToken = *req->ProfileToken;
+    std::string beSourceToken = "src_main";
+    try {
+        auto profiles = backend_->getProfiles();
+        const StreamProfile* match = nullptr;
+        if (!profToken.empty()) {
+            for (const auto& p : profiles) if (p.token == profToken) { match = &p; break; }
+        } else if (!profiles.empty()) {
+            match = &profiles.front();
+        }
+        if (match && !match->sourceToken.empty()) beSourceToken = match->sourceToken;
+    } catch (...) {}
+
     auto opt = soap_new_tt__VideoSourceConfigurationOptions(soap);
     if (opt) {
-        opt->VideoSourceTokensAvailable.push_back("src_main");
+        opt->VideoSourceTokensAvailable.push_back(beSourceToken);
         // BoundsRange bắt buộc (schema): XRange/YRange/WidthRange/HeightRange
         // (MEDIA2-2-2-1 "BoundsRange has incomplete content, expected XRange").
         opt->BoundsRange = soap_new_tt__IntRectangleRange(soap);
@@ -859,11 +889,21 @@ int Media2Service::GetVideoEncoderConfigurationOptions(
 
     // Validate ConfigurationToken (nếu truyền). Token hợp lệ: các encoder config
     // trong pool (bao gồm spare — MEDIA2_RTSS-1-1-23 spec §7.8.1). Khác → fault.
-    auto isKnownEncoderConfig = [](const std::string& t){
-        return t == "video_encoder_config" ||
-               t == "video_encoder_config_profile_sub1" ||
-               t == "video_encoder_config_profile_sub2" ||
-               t == "video_encoder_config_spare";
+    // Suy ra động từ backend_->getProfiles() theo đúng quy tắc dựng token ở
+    // GetProfiles ("profile_main" -> "video_encoder_config", còn lại ->
+    // "video_encoder_config_" + token) — không hardcode danh sách cố định,
+    // vì DVR thật trả token khác hẳn tên mock cũ (video_encoder_config_0,
+    // video_encoder_config_0_sub...).
+    auto isKnownEncoderConfig = [this](const std::string& t){
+        if (t == "video_encoder_config_spare") return true;
+        try {
+            for (const auto& p : backend_->getProfiles()) {
+                const std::string tok = (p.token == "profile_main")
+                    ? "video_encoder_config" : ("video_encoder_config_" + p.token);
+                if (t == tok) return true;
+            }
+        } catch (...) {}
+        return false;
     };
     if (!configToken.empty() && !isKnownEncoderConfig(configToken)) {
         return m2SendOnvifFault(soap, "SOAP-ENV:Sender",
@@ -898,13 +938,18 @@ int Media2Service::GetVideoEncoderConfigurationOptions(
         // hình). Cả hai đọc CÙNG nguồn backend → nhất quán tự động. Map token →
         // backend profile; spare/dynamic/unknown → default 1920x1080 (khớp
         // addDefaultEncoderConfig).
-        std::string beProfile;
-        if (configToken == "video_encoder_config_profile_sub1" || profileToken == "profile_sub1")
-            beProfile = "profile_sub1";
-        else if (configToken == "video_encoder_config_profile_sub2" || profileToken == "profile_sub2")
-            beProfile = "profile_sub2";
-        else if (configToken == "video_encoder_config" || profileToken == "profile_main")
-            beProfile = "profile_main";
+        // Suy ra profile token thật của backend từ configToken/profileToken.
+        // ProfileToken (nếu DTT truyền) luôn là token backend thật, dùng
+        // trực tiếp. Nếu chỉ có configToken, đảo ngược đúng quy tắc dựng
+        // token ở GetProfiles để ra lại profile token gốc — tổng quát cho
+        // mọi backend (mock cũ lẫn DVR thật), không hardcode 2-3 tên cố định.
+        std::string beProfile = profileToken;
+        if (beProfile.empty() && !configToken.empty()) {
+            if (configToken == "video_encoder_config") beProfile = "profile_main";
+            else if (configToken.rfind("video_encoder_config_", 0) == 0 &&
+                     configToken != "video_encoder_config_spare")
+                beProfile = configToken.substr(std::string("video_encoder_config_").size());
+        }
         int rw = 1920, rh = 1080;  // default: spare / dynamic / fallback
         if (!beProfile.empty()) {
             try {

@@ -212,6 +212,7 @@ Một operation có thể xuất hiện trong nhiều profile. Profile không x�
 8. Token phải ổn định và thống nhất giữa Media, Metadata, Recording, Search và Replay.
 9. Lỗi backend phải được map sang SOAP Fault phù hợp.
 10. Mỗi capability chỉ được coi là migrated khi đã pass unit, integration, DTT và VMS test tương ứng.
+11. **Mọi chỉnh sửa code/config đều phải thực hiện ở local rồi commit + push, sau đó `git pull` xuống camera — không được sửa trực tiếp file trên camera.** Sửa trực tiếp trên server tạo local diff không kiểm soát, gây xung đột khi `git pull` lần sau (đã xảy ra thật với `onvif.conf` trên `.125`: ai đó từng sửa tay `interface = eth0` và xoá vài dòng comment trực tiếp trên server, để lại file `.bak`, khiến lần pull kế tiếp bị chặn vì "local changes would be overwritten"). Trường hợp 1 giá trị thực sự chỉ đúng cho riêng 1 máy (ví dụ `device_ip`, `discovery.interface` — tên card mạng khác nhau giữa các máy), xử lý bằng `git stash` trước khi pull rồi `git stash pop` lại sau, không sửa tay rồi bỏ qua git.
 
 ## 10. Chế độ chạy trong giai đoạn migration
 
