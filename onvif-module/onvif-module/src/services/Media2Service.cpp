@@ -22,6 +22,15 @@ const char* METADATA_STREAM_PORT = "8555";
 const char* RTSP_RELAY_PORT = "8555";
 const char* RTSP_HTTP_TUNNEL_PORT = "8080";
 
+// video_source_config_<sourceToken> — token duy nhất theo NGUỒN VẬT LÝ, không
+// theo profile: nhiều profile (main/sub) chia sẻ cùng 1 nguồn phải khai báo
+// CÙNG 1 VideoSourceConfiguration (MEDIA2-2-2-4). sourceToken rỗng → giữ
+// literal cũ "video_source_config" cho tương thích ngược (dynamic profile,
+// mock cũ không set sourceToken).
+std::string videoSourceConfigToken(const std::string& sourceToken) {
+    return sourceToken.empty() ? "video_source_config" : ("video_source_config_" + sourceToken);
+}
+
 struct DynProfile {
     std::string token;
     std::string name;
@@ -208,7 +217,7 @@ int Media2Service::GetProfiles(
                 if (dp && dp->vsToken.empty()) { /* skip VS for dyn without add */ } else {
                 auto vsc = soap_new_tt__VideoSourceConfiguration(soap);
                 if (vsc) {
-                    vsc->token = dp ? dp->vsToken : "video_source_config";
+                    vsc->token = dp ? dp->vsToken : videoSourceConfigToken(fp ? fp->sourceToken : std::string());
                     vsc->Name = "VideoSourceConfig";
                     // Keep the profile configuration consistent with
                     // GetVideoSourceConfigurations. DTT compares this field
@@ -484,52 +493,65 @@ int Media2Service::GetVideoSourceConfigurations(
     this->soap->header = nullptr;
     auto soap = this->soap;
 
-    // MEDIA2-2-2-6: ConfigurationToken không tồn tại → fault
-    // env:Sender/ter:InvalidArgVal/ter:NoConfig.
     std::string cfgToken;
     std::string profToken;
     if (req) {
         if (req->ConfigurationToken) cfgToken = *req->ConfigurationToken;
         if (req->ProfileToken)       profToken = *req->ProfileToken;
     }
-    static const char* VALID_VS_CONFIG = "video_source_config";
-    if (!cfgToken.empty() && cfgToken != VALID_VS_CONFIG) {
+
+    // Suy ra sourceToken (nguồn vật lý) mục tiêu từ cfgToken/profToken. Token
+    // giờ RIÊNG theo từng nguồn (video_source_config_<sourceToken>), khớp
+    // đúng cách GetProfiles dựng token — nhiều nguồn khác nhau không thể
+    // cùng đại diện bởi 1 token duy nhất (MEDIA2-2-2-4).
+    std::vector<StreamProfile> profiles;
+    try { profiles = backend_->getProfiles(); } catch (...) {}
+
+    std::string targetSourceToken;
+    bool haveTarget = false;
+    if (!profToken.empty()) {
+        for (const auto& p : profiles) {
+            if (p.token == profToken) { targetSourceToken = p.sourceToken; haveTarget = true; break; }
+        }
+    } else if (!cfgToken.empty()) {
+        static const std::string prefix = "video_source_config_";
+        if (cfgToken.rfind(prefix, 0) == 0) {
+            targetSourceToken = cfgToken.substr(prefix.size());
+            haveTarget = true;
+        } else if (cfgToken == "video_source_config") {
+            if (!profiles.empty()) { targetSourceToken = profiles.front().sourceToken; haveTarget = true; }
+        }
+    } else if (!profiles.empty()) {
+        targetSourceToken = profiles.front().sourceToken;
+        haveTarget = true;
+    }
+
+    // MEDIA2-2-2-6: ConfigurationToken không tồn tại → fault
+    // env:Sender/ter:InvalidArgVal/ter:NoConfig.
+    const StreamProfile* match = nullptr;
+    for (const auto& p : profiles) {
+        if (p.sourceToken == targetSourceToken) { match = &p; break; }
+    }
+    if (!cfgToken.empty() && (!haveTarget || !match)) {
         return m2SendOnvifFault(soap, "SOAP-ENV:Sender",
                                 "ter:InvalidArgVal", "ter:NoConfig",
                                 "No such VideoSourceConfiguration");
     }
 
-    // Lấy động từ backend (thay vì hardcode theo tên profile mock cũ) — phải
-    // khớp đúng dữ liệu mà GetProfiles vừa trả cho cùng ProfileToken, nếu
-    // không DTT MEDIA2-2-2-4 sẽ báo lệch giữa 2 API. Không truyền ProfileToken
-    // thì lấy profile đầu tiên làm đại diện (khớp cách DTT đối chiếu khi gọi
-    // không kèm token).
-    std::string beSourceToken = "src_main";
+    const std::string vscToken = !cfgToken.empty() ? cfgToken : videoSourceConfigToken(targetSourceToken);
+    std::string beSourceToken = match ? match->sourceToken : "src_main";
     int beWidth = 1920, beHeight = 1080;
-    try {
-        auto profiles = backend_->getProfiles();
-        const StreamProfile* match = nullptr;
-        if (!profToken.empty()) {
-            for (const auto& p : profiles) if (p.token == profToken) { match = &p; break; }
-        } else if (!profiles.empty()) {
-            match = &profiles.front();
-        }
-        if (match) {
-            if (!match->sourceToken.empty()) beSourceToken = match->sourceToken;
-            // sourceBounds = vùng capture của nguồn vật lý, backend/adapter
-            // đã đảm bảo giống nhau cho mọi profile cùng sourceToken — đọc
-            // thẳng field này, không dùng videoConfig.resolution (độ phân
-            // giải encode riêng của từng stream).
-            if (match->sourceBounds.width > 0 && match->sourceBounds.height > 0) {
-                beWidth = match->sourceBounds.width;
-                beHeight = match->sourceBounds.height;
-            }
-        }
-    } catch (...) {}
+    // sourceBounds = vùng capture của nguồn vật lý, backend/adapter đã đảm
+    // bảo giống nhau cho mọi profile cùng sourceToken — đọc thẳng field này,
+    // không dùng videoConfig.resolution (độ phân giải encode riêng từng stream).
+    if (match && match->sourceBounds.width > 0 && match->sourceBounds.height > 0) {
+        beWidth = match->sourceBounds.width;
+        beHeight = match->sourceBounds.height;
+    }
 
     auto vsc = soap_new_tt__VideoSourceConfiguration(soap);
     if (vsc) {
-        vsc->token = VALID_VS_CONFIG;
+        vsc->token = vscToken;
         vsc->Name = "VideoSourceConfig";
         vsc->UseCount = 4;
         vsc->SourceToken = beSourceToken;
@@ -545,7 +567,7 @@ int Media2Service::GetVideoSourceConfigurations(
         // ProfileToken → echo lại field đã set (Name/Bounds).
         if (profToken.empty()) {
             std::lock_guard<std::mutex> lk(g_profMtx);
-            auto it = g_vscOverride.find(VALID_VS_CONFIG);
+            auto it = g_vscOverride.find(vscToken);
             if (it != g_vscOverride.end() && it->second.has) {
                 const auto& ov = it->second;
                 if (!ov.name.empty()) vsc->Name = ov.name;
@@ -816,32 +838,52 @@ int Media2Service::GetVideoSourceConfigurationOptions(
     this->soap->header = nullptr;
     auto soap = this->soap;
 
-    // Validate ConfigurationToken (nếu client truyền). Token duy nhất hợp lệ:
-    // "video_source_config". Khác → fault ter:NoConfig (MEDIA2-2-2-6).
-    if (req && req->ConfigurationToken) {
-        const std::string& tok = *req->ConfigurationToken;
-        if (!tok.empty() && tok != "video_source_config") {
-            return m2SendOnvifFault(soap, "SOAP-ENV:Sender",
-                                    "ter:InvalidArgVal", "ter:NoConfig",
-                                    "Invalid ConfigurationToken");
+    std::string cfgToken;
+    if (req && req->ConfigurationToken) cfgToken = *req->ConfigurationToken;
+    std::string profToken;
+    if (req && req->ProfileToken) profToken = *req->ProfileToken;
+
+    // Suy ra sourceToken (nguồn vật lý) mục tiêu từ cfgToken/profToken — cùng
+    // quy tắc với GetVideoSourceConfigurations: token riêng theo từng nguồn
+    // (video_source_config_<sourceToken>), không còn 1 token chung.
+    std::vector<StreamProfile> profiles;
+    try { profiles = backend_->getProfiles(); } catch (...) {}
+
+    std::string targetSourceToken;
+    bool haveTarget = false;
+    if (!profToken.empty()) {
+        for (const auto& p : profiles) {
+            if (p.token == profToken) { targetSourceToken = p.sourceToken; haveTarget = true; break; }
         }
+    } else if (!cfgToken.empty()) {
+        static const std::string prefix = "video_source_config_";
+        if (cfgToken.rfind(prefix, 0) == 0) {
+            targetSourceToken = cfgToken.substr(prefix.size());
+            haveTarget = true;
+        } else if (cfgToken == "video_source_config") {
+            if (!profiles.empty()) { targetSourceToken = profiles.front().sourceToken; haveTarget = true; }
+        }
+    } else if (!profiles.empty()) {
+        targetSourceToken = profiles.front().sourceToken;
+        haveTarget = true;
+    }
+
+    const StreamProfile* match = nullptr;
+    for (const auto& p : profiles) {
+        if (p.sourceToken == targetSourceToken) { match = &p; break; }
+    }
+
+    // Validate ConfigurationToken (nếu client truyền) — hợp lệ khi khớp 1
+    // nguồn vật lý đang tồn tại. Khác → fault ter:NoConfig (MEDIA2-2-2-6).
+    if (!cfgToken.empty() && (!haveTarget || !match)) {
+        return m2SendOnvifFault(soap, "SOAP-ENV:Sender",
+                                "ter:InvalidArgVal", "ter:NoConfig",
+                                "Invalid ConfigurationToken");
     }
 
     // Lấy động từ backend thay vì hardcode "src_main" — phải khớp SourceToken
     // thật mà GetProfiles trả cho cùng ProfileToken (MEDIA2-2-2-7).
-    std::string profToken;
-    if (req && req->ProfileToken) profToken = *req->ProfileToken;
-    std::string beSourceToken = "src_main";
-    try {
-        auto profiles = backend_->getProfiles();
-        const StreamProfile* match = nullptr;
-        if (!profToken.empty()) {
-            for (const auto& p : profiles) if (p.token == profToken) { match = &p; break; }
-        } else if (!profiles.empty()) {
-            match = &profiles.front();
-        }
-        if (match && !match->sourceToken.empty()) beSourceToken = match->sourceToken;
-    } catch (...) {}
+    std::string beSourceToken = match ? match->sourceToken : "src_main";
 
     auto opt = soap_new_tt__VideoSourceConfigurationOptions(soap);
     if (opt) {
