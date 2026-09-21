@@ -13,6 +13,11 @@ struct ServiceConfig {
     std::string deviceUuid;
     std::string username;
     std::string password;
+    // True chỉ khi capability "media" đang chạy mock backend thật (có relay
+    // gortsplib xác thực Digest thật ở RTSP_RELAY_PORT). Dùng để quyết định
+    // Media2Service::GetStreamUri có nên rewrite URI RTSP qua relay đó hay
+    // trả thẳng URI backend cung cấp (DVR thật tự lo Digest ở MediaMTX).
+    bool        useMockRtspRelay = false;
 };
 
 class DeviceService : public DeviceBindingService {

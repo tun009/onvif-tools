@@ -120,6 +120,27 @@ int main(int argc, char* argv[]) {
         printf("[main] Startup smoke tests disabled by configuration.\n");
     }
 
+    // ── Đọc port ONVIF/RTSP thật từ MGMT (ghi đè giá trị tĩnh onvif.conf) ──
+    // MGMT sở hữu network config thật (docs/onvif-alvis/01-IMPLEMENTATION_PLAN.md,
+    // mục Network configuration). Entry "ONVIF" = port SOAP web service này
+    // (khác MGMT "HTTP" = port web UI MGMT); "RTSP" = port stream thật của
+    // DVR. Lỗi/thiếu entry -> giữ nguyên giá trị đã đọc từ onvif.conf (fallback
+    // đã chốt sẵn trong plan, không phải sự cố). Mock giữ nguyên cfg tĩnh vì
+    // không có MGMT thật để tin cậy.
+    if (cfg.backendMode != BackendMode::Mock) {
+        try {
+            const auto protocols = mgmtClient->getNetworkProtocols();
+            for (const auto& p : protocols) {
+                if (p.name == "ONVIF" && p.port > 0) cfg.httpPort = p.port;
+                else if (p.name == "RTSP" && p.port > 0) cfg.rtspPort = p.port;
+            }
+            printf("[main] Port from MGMT: ONVIF=%d, RTSP=%d\n", cfg.httpPort, cfg.rtspPort);
+        } catch (const std::exception& e) {
+            printf("[main] MGMT GetNetworkProtocols unavailable (%s); using onvif.conf: ONVIF=%d, RTSP=%d\n",
+                   e.what(), cfg.httpPort, cfg.rtspPort);
+        }
+    }
+
     // ── Start ONVIF SOAP server ───────────────────────────────────
     ServiceConfig svcCfg;
     svcCfg.deviceIp = cfg.deviceIp;
@@ -128,6 +149,7 @@ int main(int argc, char* argv[]) {
     svcCfg.deviceUuid = cfg.deviceUuid;
     svcCfg.username = cfg.username;
     svcCfg.password = cfg.password;
+    svcCfg.useMockRtspRelay = cfg.capability("media") == CapabilityMode::Mock;
 
     // Mock giữ credential tĩnh để bảo toàn baseline. Hybrid/production dùng
     // MGMT làm nguồn xác thực duy nhất; không fallback admin/admin123.

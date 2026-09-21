@@ -17,10 +17,11 @@
 namespace {
 const char* PROFILE_METADATA_TOKEN = "profile_metadata";
 const char* METADATA_STREAM_PORT = "8555";
-// Video RTSP is served by the gortsplib relay, which also enforces RTSP
-// Digest authentication required by Profiles M and T.
+// Relay gortsplib xác thực Digest — CHỈ tồn tại thật ở mock backend
+// (cfg_.useMockRtspRelay). Với DVR thật, MediaMTX tự lo Digest (xem
+// docs/Camera-alvis/rtsp-digest-and-http-tunnel-issue.md) nên không route
+// qua relay này — xem nhánh dùng RTSP_RELAY_PORT trong GetStreamUri.
 const char* RTSP_RELAY_PORT = "8555";
-const char* RTSP_HTTP_TUNNEL_PORT = "8080";
 
 // video_source_config_<sourceToken> — token duy nhất theo NGUỒN VẬT LÝ, không
 // theo profile: nhiều profile (main/sub) chia sẻ cùng 1 nguồn phải khai báo
@@ -417,9 +418,13 @@ int Media2Service::GetStreamUri(
     if (pos != std::string::npos) uri.replace(pos, 9, cfg_.deviceIp);
 
     // Route video RTSP through the authenticated gortsplib relay instead of
-    // the unauthenticated MediaMTX listener.
-    if (protocol == "RTSP" || protocol == "RtspUnicast" ||
-        protocol == "RtspMulticast") {
+    // the unauthenticated MediaMTX listener — CHỈ khi đây thật sự là mock
+    // backend (relay đó có thật). Với DVR thật, cfg_.useMockRtspRelay=false
+    // nên bỏ qua, trả thẳng URI backend cung cấp (đúng port DVR thật, ví dụ
+    // 554 — xem docs/Camera-alvis/rtsp-digest-and-http-tunnel-issue.md).
+    if (cfg_.useMockRtspRelay &&
+        (protocol == "RTSP" || protocol == "RtspUnicast" ||
+         protocol == "RtspMulticast")) {
         std::string mediaMtxPort = ":" + std::to_string(cfg_.rtspPort);
         size_t mediaMtxPos = uri.find(mediaMtxPort);
         if (mediaMtxPos != std::string::npos) {
@@ -428,13 +433,17 @@ int Media2Service::GetStreamUri(
         }
     }
 
-    // Hỗ trợ RTSP over HTTP tunneling theo yêu cầu của Test Tool
+    // Hỗ trợ RTSP over HTTP tunneling theo yêu cầu của Test Tool. Port đích
+    // của tunnel LUÔN là port ONVIF web service hiện tại (cfg_.httpPort —
+    // đọc động từ MGMT ở main.cpp, không hardcode) vì tunnel này chạy ngay
+    // trong listenLoop của OnvifServer, trên chính socket đó
+    // (xem OnvifServer::proxyRtspHttpTunnel).
     if (protocol == "RtspOverHttp" || protocol == "RtspOverHttps") {
         std::string rtspPortStr = ":" + std::to_string(cfg_.rtspPort);
         size_t portPos = uri.find(rtspPortStr);
         if (portPos != std::string::npos) {
             uri.replace(portPos, rtspPortStr.length(),
-                        std::string(":") + RTSP_HTTP_TUNNEL_PORT);
+                        std::string(":") + std::to_string(cfg_.httpPort));
         }
         if (uri.rfind("rtsp://", 0) == 0) {
             std::string targetScheme = (protocol == "RtspOverHttps") ? "https://" : "http://";
