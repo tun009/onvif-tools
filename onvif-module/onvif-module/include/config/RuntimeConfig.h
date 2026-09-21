@@ -17,6 +17,7 @@ struct RuntimeConfig {
     std::string deviceUuid = "12345678-1234-1234-1234-123456789abc";
     BackendMode backendMode = BackendMode::Mock;
     std::string mgmtBaseUrl = "http://127.0.0.1:8086";
+    std::string dvrBaseUrl = "http://127.0.0.1:8200";
     int connectTimeoutMs = 1000;
     int requestTimeoutMs = 3000;
     int retryIntervalMs = 2000;

@@ -1,6 +1,7 @@
 #include "backend/BackendConnector.h"
 #include "backend/AlvisBackendFacade.h"
 #include "backend/HttpMgmtClient.h"
+#include "backend/HttpDvrClient.h"
 #include "config/RuntimeConfig.h"
 #include "OnvifServer.h"
 
@@ -36,6 +37,7 @@ int main(int argc, char* argv[]) {
     printf("  Device : %s:%d\n", cfg.deviceIp.c_str(), cfg.httpPort);
     printf("  Backend mode: %s\n", toString(cfg.backendMode));
     printf("  MGMT: %s\n", cfg.mgmtBaseUrl.c_str());
+    printf("  DVR : %s\n", cfg.dvrBaseUrl.c_str());
     printf("  Startup smoke tests: %s\n", cfg.runSmokeTests ? "enabled" : "disabled");
     printf("  WS-Discovery: %s\n", cfg.discoveryEnabled ? "enabled" : "disabled");
     printf("==============================================\n");
@@ -61,8 +63,10 @@ int main(int argc, char* argv[]) {
 
     auto mgmtClient = std::make_shared<HttpMgmtClient>(MgmtClientConfig{
         cfg.mgmtBaseUrl, cfg.connectTimeoutMs, cfg.requestTimeoutMs});
+    auto dvrClient = std::make_shared<HttpDvrClient>(DvrClientConfig{
+        cfg.dvrBaseUrl, cfg.deviceIp, cfg.connectTimeoutMs, cfg.requestTimeoutMs});
     auto backend = std::make_shared<AlvisBackendFacade>(
-        mockBackend, mgmtClient, cfg.backendMode, cfg.capabilities);
+        mockBackend, mgmtClient, dvrClient, cfg.backendMode, cfg.capabilities);
 
     // ── Optional startup smoke test ───────────────────────────────
     if (cfg.runSmokeTests) {

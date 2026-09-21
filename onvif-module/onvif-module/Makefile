@@ -13,6 +13,7 @@ IPC_SRCS := $(SRC_DIR)/main.cpp \
             $(SRC_DIR)/backend/BackendConnector.cpp \
             $(SRC_DIR)/backend/AlvisBackendFacade.cpp \
             $(SRC_DIR)/backend/HttpMgmtClient.cpp \
+            $(SRC_DIR)/backend/HttpDvrClient.cpp \
             $(SRC_DIR)/config/RuntimeConfig.cpp
 IPC_OBJS := $(patsubst %.cpp, $(BUILD_DIR)/%.o, $(IPC_SRCS))
 

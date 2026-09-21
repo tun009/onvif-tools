@@ -1,6 +1,7 @@
 #pragma once
 
 #include "backend/IMgmtClient.h"
+#include "backend/IDvrClient.h"
 #include "config/RuntimeConfig.h"
 #include "interface/ICameraBackend.h"
 
@@ -9,6 +10,7 @@
 class AlvisBackendFacade final : public ICameraBackend {
 public:
     AlvisBackendFacade(CameraBackendPtr mockBackend, std::shared_ptr<IMgmtClient> mgmtClient,
+                       std::shared_ptr<IDvrClient> dvrClient,
                        BackendMode mode, std::map<std::string, CapabilityMode> capabilities);
     DeviceInfo getDeviceInfo() override;
     NetworkConfig getNetworkConfig() override; bool setNetworkConfig(const NetworkConfig&) override;
@@ -34,5 +36,5 @@ public:
     bool subscribe(const std::string&, const std::string&, EventCallback) override; bool unsubscribe(const std::string&) override; bool renewSubscription(const std::string&, int) override;
 private:
     bool real(const std::string&) const; ICameraBackend& mock(const char*) const;
-    CameraBackendPtr mockBackend_; std::shared_ptr<IMgmtClient> mgmtClient_; BackendMode mode_; std::map<std::string, CapabilityMode> capabilities_;
+    CameraBackendPtr mockBackend_; std::shared_ptr<IMgmtClient> mgmtClient_; std::shared_ptr<IDvrClient> dvrClient_; BackendMode mode_; std::map<std::string, CapabilityMode> capabilities_;
 };

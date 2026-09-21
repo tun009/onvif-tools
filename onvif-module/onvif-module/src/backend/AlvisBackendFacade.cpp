@@ -2,8 +2,8 @@
 #include <stdexcept>
 #include <utility>
 
-AlvisBackendFacade::AlvisBackendFacade(CameraBackendPtr mockBackend, std::shared_ptr<IMgmtClient> mgmtClient, BackendMode mode, std::map<std::string, CapabilityMode> capabilities)
-    : mockBackend_(std::move(mockBackend)), mgmtClient_(std::move(mgmtClient)), mode_(mode), capabilities_(std::move(capabilities)) {}
+AlvisBackendFacade::AlvisBackendFacade(CameraBackendPtr mockBackend, std::shared_ptr<IMgmtClient> mgmtClient, std::shared_ptr<IDvrClient> dvrClient, BackendMode mode, std::map<std::string, CapabilityMode> capabilities)
+    : mockBackend_(std::move(mockBackend)), mgmtClient_(std::move(mgmtClient)), dvrClient_(std::move(dvrClient)), mode_(mode), capabilities_(std::move(capabilities)) {}
 bool AlvisBackendFacade::real(const std::string &capability) const
 {
     const auto it = capabilities_.find(capability);
@@ -147,10 +147,37 @@ bool AlvisBackendFacade::setSystemDateAndTime(const SystemDateTime &v)
 }
 bool AlvisBackendFacade::reboot() { return mock("SystemReboot").reboot(); }
 bool AlvisBackendFacade::factoryReset(bool v) { return mock("SetSystemFactoryDefault").factoryReset(v); }
-std::vector<StreamProfile> AlvisBackendFacade::getProfiles() { return mock("GetProfiles").getProfiles(); }
-StreamUri AlvisBackendFacade::getStreamUri(const std::string &t, StreamProtocol p) { return mock("GetStreamUri").getStreamUri(t, p); }
+std::vector<StreamProfile> AlvisBackendFacade::getProfiles()
+{
+    if (real("media"))
+    {
+        if (!dvrClient_)
+            throw std::runtime_error("DVR client unavailable");
+        return dvrClient_->getProfiles();
+    }
+    return mock("GetProfiles").getProfiles();
+}
+StreamUri AlvisBackendFacade::getStreamUri(const std::string &t, StreamProtocol p)
+{
+    if (real("media"))
+    {
+        if (!dvrClient_)
+            throw std::runtime_error("DVR client unavailable");
+        return dvrClient_->getStreamUri(t, p);
+    }
+    return mock("GetStreamUri").getStreamUri(t, p);
+}
 bool AlvisBackendFacade::setVideoEncoderConfig(const std::string &t, const VideoEncoderConfig &v) { return mock("SetVideoEncoderConfiguration").setVideoEncoderConfig(t, v); }
-SnapshotUri AlvisBackendFacade::getSnapshotUri(const std::string &t) { return mock("GetSnapshotUri").getSnapshotUri(t); }
+SnapshotUri AlvisBackendFacade::getSnapshotUri(const std::string &t)
+{
+    if (real("media"))
+    {
+        if (!dvrClient_)
+            throw std::runtime_error("DVR client unavailable");
+        return dvrClient_->getSnapshotUri(t);
+    }
+    return mock("GetSnapshotUri").getSnapshotUri(t);
+}
 bool AlvisBackendFacade::ptzAbsoluteMove(const std::string &t, const PTZVector &p, const PTZVector &s) { return mock("AbsoluteMove").ptzAbsoluteMove(t, p, s); }
 bool AlvisBackendFacade::ptzRelativeMove(const std::string &t, const PTZVector &p, const PTZVector &s) { return mock("RelativeMove").ptzRelativeMove(t, p, s); }
 bool AlvisBackendFacade::ptzContinuousMove(const std::string &t, const PTZVector &v) { return mock("ContinuousMove").ptzContinuousMove(t, v); }

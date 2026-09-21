@@ -679,6 +679,99 @@ Các quyết định thiết kế quan trọng:
   không có ai truy cập web/RTSP. Không tự ý chạy các case Set này khi chưa
   xác nhận camera đang rảnh.
 
+#### Scopes (Get/Set/Add/RemoveScopes) — giữ local, dọn mock leftover (2026-09-16/18)
+
+- **Quyết định kiến trúc**: KHÔNG nối MGMT cho Scopes ở giai đoạn này, dù MGMT
+  đã có sẵn đủ 6 API (`Get/SetDiscoveryMode`, `Get/Set/Add/RemoveScopes`,
+  đọc/ghi bảng SQL `network_scopes`/`network_discovery` thật, xem
+  `network_discovery_api_controller.cpp`). Lý do: API Configurable Scope phía
+  MGMT **chưa thực sự phát hành** — chỉ hiện trong Swagger, chưa có UI/luồng
+  dùng thật (xác nhận trực tiếp từ người dùng) — giống tình huống
+  `SystemReboot`/`SetSystemFactoryDefault` bên dưới: source có nhưng chưa sẵn
+  sàng dùng thật, nối vào lúc này là làm dư và tự rước phụ thuộc vào 1 API có
+  thể còn đổi.
+- **Nguyên tắc phân loại rút ra** (áp dụng cho các quyết định tương tự sau
+  này): dữ liệu phản ánh **khả năng phần mềm** (Fixed scope: Profile S/T/M/G,
+  hardware) luôn nên hardcode/tính trong chính onvif-module — kể cả nếu MGMT
+  có làm đúng 100% cũng không nên chuyển, vì 2 repo khác nhau dễ lệch đồng bộ
+  theo thời gian, vi phạm nguyên tắc #5 README (không quảng bá capability
+  không có thật). Dữ liệu do **người dùng cấu hình** (Configurable scope) mới
+  nên đi qua MGMT, và chỉ khi tính năng đó đã thực sự release.
+- **Bug tìm thấy khi audit MGMT** (chỉ để tham khảo, KHÔNG sửa — không phải
+  repo của mình): `SqliteNetworkRepository::removeScopes()` có 1 danh sách
+  Fixed scope hardcode để chặn xoá, nhưng **thiếu `Profile/M`, `Profile/G` và
+  sai hardware string** (`Alvis-AI-Camera` thay vì `JetsonOrinNX-8GB` thật) —
+  càng củng cố quyết định không lấy Fixed scope từ MGMT.
+- **Dọn dẹp thực hiện trong onvif-module** (`DeviceService.h`/`.cpp`):
+  1. Xoá `struct NetworkState`/`net_`/`netMtx_` — xác minh 100% không còn
+     dùng ở đâu (dead code sót lại sau khi Network config đã chuyển hết sang
+     `backend_`, kể cả chính field `hostname = "MockCam-4K"` bên trong đó).
+  2. Sửa lỗi gõ nhầm `"onvif://www.onvif.org/Profilae/G"` → `.../Profile/G`
+     trong Fixed scope list (bug thật, độc lập, do thiếu chữ "e" làm sai
+     substring match `/Profile/` khi phân loại Fixed — người dùng tự phát
+     hiện và sửa trong IDE).
+  3. Scope `name/MockCam-4K` (rác mock lộ ra tận response SOAP thật, đã có
+     trong `g13.xml` từ 2026-08-05) → patch động trong constructor
+     `DeviceService::DeviceService`, dùng `std::call_once` gọi 1 lần
+     `backend_->getDeviceInfo()` (đường thật, đã pass test từ trước) để thay
+     bằng `name/<Model thật>`; nếu MGMT chưa sẵn sàng lúc khởi động thì giữ
+     fallback trung tính `Alvis-Camera` (không còn chữ "Mock") và tự retry ở
+     lần `copy()` kế tiếp (đặc tính của `call_once` khi callable ném lỗi).
+  4. `hardware/JetsonOrinNX-8GB` giữ nguyên hardcode — xác nhận là hardware
+     thật, không phải mock; chỉ còn nghi vấn phụ (chưa xác minh) là có đúng
+     cho MỌI dòng camera Alvis (ANPR vs Bullet) hay chỉ 1 SKU.
+- **Evidence build/test trên `.124` (2026-09-18)**: build (`make clean && make
+  full`), restart thành công, DTT xác nhận `GetScopes` trả về đúng
+  `name/ALN2-58` (Model thật từ `GetDeviceInformation`, Manufacturer "ERABYTE
+  INC.") thay vì "MockCam-4K" — fix hoạt động đúng như thiết kế.
+
+#### Discovery Mode / DISCOVERY-1-1-x — BLOCKED kép: bug MGMT + `discovery.enable=false` (2026-09-16/18)
+
+- **Không nối `SetDiscoveryMode`/`GetDiscoveryMode` xuống MGMT thật** — audit
+  `linux_net_discovery_service.cpp` tìm thấy 3 bug cụ thể:
+  1. `isDiscoveryActive()`: so khớp bằng `out.find("active")`, mà chuỗi
+     `"inactive"` cũng chứa substring `"active"` → hàm gần như luôn trả
+     `true` bất kể service thật đang chạy hay dừng hẳn (chỉ sai `false` đúng
+     khi service hoàn toàn không cài).
+  2. `applyDiscoveryMode()`: luôn `return true` cứng, không đọc exit code
+     thật của lệnh `systemctl` (dù cùng file header đã có sẵn
+     `executeCommandWithStatus()` đọc đúng exit code, đang được dùng đúng ở
+     `linux_net_dns_service.cpp`) → nhánh lỗi phía controller
+     (`if (!applied) return 500`) là dead code.
+  3. Get kiểm tra cả `wsdd` lẫn `onvif_discovery` (đúng tên service thật mà
+     DVR cũ dùng, xem `D:\Elcom\DVR\dvr\service\onvif_discovery.service`),
+     nhưng Set **chỉ đụng `wsdd`**, không bao giờ start/stop `onvif_discovery`
+     — bất đối xứng, khiến Set gần như vô tác dụng với daemon thật trên dòng
+     máy dùng `onvif_discovery`.
+  → 3 bug này cộng hưởng có thể khiến DB tự đảo ngược giá trị vừa Set (xem
+  phân tích chi tiết trong lịch sử hội thoại 2026-09-16). Đã quyết định
+  **không báo cáo lỗi sang MGMT lúc này**, chỉ ghi nhận nội bộ để không ai
+  vô tình nối API này vào sau.
+- **Phát hiện thêm (2026-09-18, từ DTT thật trên `.124`)**: `config/onvif.conf`
+  hiện có `[discovery] enable = false` — switch tạm thời từ "Safe parallel
+  startup" (mục Task 01, 2026-09-07) để chạy song song an toàn với ONVIF cũ
+  (`/opt/dvr_apps/sub_process/onvif_server`, PID thật vẫn đang chạy trên máy,
+  cổng 8000), tránh giành UDP 3702. Hệ quả: `OnvifServer` không tạo
+  `DiscoveryService`, nên `DeviceService::SetScopes/AddScopes/RemoveScopes`'s
+  `DiscoveryService::current()` luôn `nullptr` → **`announceHelloNow()` không
+  bao giờ chạy** trong suốt runtime hiện tại.
+  - Verify trực tiếp trên `.124`: `ss -lun | grep 3702` → không ai lắng nghe
+    UDP 3702 (kể cả ONVIF cũ PID 682 hiện tại).
+  - Hệ quả cho DTT: test `DISCOVERY-1-1-11-v21.06 DEVICE SCOPES CONFIGURATION`
+    fail ở step "Waiting for Hello message from the DUT" sau `AddScopes` (chờ
+    60s, không nhận được) — **không phải bug code Scopes/AddScopes** (code
+    Hello chưa từng chạy được vì bị guard `nullptr`). Ngược lại
+    `DISCOVERY-1-1-9-v21.06 DISCOVERY MODE CONFIGURATION` lại PASS toàn bộ
+    kể cả bước chờ Hello/Bye — nguồn Hello DTT nhận được (nếu có) không xác
+    định được là từ đâu (không loại trừ ONVIF cũ hoặc thiết bị khác trên
+    mạng), chưa có công cụ bắt gói tin (tcpdump) để xác minh thêm.
+  - **Kết luận**: toàn bộ nhóm test `DISCOVERY-1-1-x` hiện KHÔNG đánh giá
+    được đáng tin cậy cho onvif-module mới, kết quả pass/fail mang tính ngẫu
+    nhiên theo nguồn phát Hello không xác định. Muốn test thật cần bật lại
+    `discovery.enable=true`, nhưng việc đó phải giải quyết trước xung đột UDP
+    3702 với ONVIF cũ đang phục vụ người dùng thật — **quyết định này ảnh
+    hưởng ONVIF cũ, chưa xử lý, chờ người dùng xác nhận thời điểm/hướng đi**.
+
 #### SystemReboot / SetSystemFactoryDefault — BLOCKED, chờ MGMT (2026-09-15)
 
 - Đọc source `D:\Elcom\NewVersion\frontend\MGMT\src\backend` thấy có sẵn
@@ -734,6 +827,124 @@ Các quyết định thiết kế quan trọng:
 ### Nguồn thật
 
 DVR media/profile/encoder/RTSP service.
+
+**Xác nhận (2026-09-18):** source thật nằm tại `D:\Elcom\Ovif-mock\AlvisOS\DVR`
+(kiến trúc mới, cùng cấp với `AlvisOS\{BUS,CORE,GATEWAY,HAL,MGMT}`, KHÔNG phải
+`D:\Elcom\DVR\dvr` — đó là DVR cũ chỉ dùng đối chiếu hành vi legacy). Trên
+camera `.124`, DVR mới đang chạy thật: `/opt/dvr_apps/dvr` (build 2026-09-18),
+service `dvr_new.service`, dùng `libdvr_lib.so`/`libbus.so`/`libhal.so` —
+đúng kiến trúc module hoá tả trong README. REST API nghe tại
+`http://<device-ip>:8200/dvr/v1.0/...` (đã verify `ss -lntp` trên `.124`,
+nghe `0.0.0.0`, gọi thẳng được không cần qua Apache proxy — proxy chỉ ảnh
+hưởng audit log phía DVR, không chặn request trực tiếp).
+
+Stack cũ (`onvif_server.service` cổng 8000, `rtsp_server.service`,
+`videoexport.service`, nhánh `/opt/dvr_apps/sub_process/*`) **vẫn đang chạy
+song song** trên cùng camera — cần lưu ý khi test tránh xung đột (đã thấy
+tương tự với UDP 3702 ở phần Discovery).
+
+#### Research: contract `GetProfiles` thật + `GetSnapshotUri` (2026-09-18)
+
+- **`GET /dvr/v3.0/GetProfiles`** (`api_helpers.cpp::build_profiles_json`):
+  response JSON gần như khớp thẳng field name ONVIF — `token`, `Name`,
+  `Enabled`, `Type`, `VideoSourceConfiguration{token,Name}`,
+  `VideoEncoderConfiguration{token,Name,Encoding,Resolution{Width,Height},
+  RateControl{FrameRateLimit,EncodingInterval,BitrateTarget,GovLength,
+  EncodingProfile,BitrateControl}}` — độ tin cậy mapping cao, không cần đoán
+  nhiều.
+- **Phát hiện quan trọng — 2 loại stream URI song song, chỉ 1 loại dùng được
+  cho ONVIF**: mỗi profile có cả `StreamUri` (`rtsp://host:rtsp_port/live/
+  ch<N>` — do chính DVR tự chạy 1 RTSP server riêng, KHÔNG phải MediaMTX) và
+  `WebStreamUri` (`http://host:whep_port/dvr_ch<N>/whep` — WebRTC/WHEP, do
+  MediaMTX phục vụ, chỉ dành cho web UI xem live qua trình duyệt). Code có
+  comment xác nhận MediaMTX bị tắt module RTSP riêng để tránh đụng port với
+  DVR (`"Disable mediamtx RTSP server to avoid port conflict with DVR"`).
+  → ONVIF `GetStreamUri` phải map vào field `StreamUri` có sẵn trong
+  `GetProfiles`, KHÔNG được dùng API riêng `GetH264StreamUri` (comment trong
+  code ghi rõ "(WebRTC WHEP)" — API đó dành cho web UI, trả về `WebStreamUri`,
+  sai giao thức nếu lấy nhầm cho ONVIF).
+- **`GetSnapshotUri` — đã verify đủ điều kiện map, KHÔNG cần yêu cầu team DVR
+  bổ sung gì**:
+  - Đối chiếu đúng 9 bước DTT thật đã PASS ở `MEDIA-6-1-1` (`g13.xml`): chỉ
+    cần `GetSnapshotUri` trả `MediaUri.Uri` hợp lệ cú pháp, HTTP GET vào đó
+    trả `200` + `Content-Type` đúng + byte là JPEG hợp lệ — **không hề kiểm
+    tra độ phân giải ảnh có khớp đúng profile (main/sub/third) hay không**.
+  - DVR có sẵn `GET /dvr/v1.0/GetSnapshot?profile=<channel_id>` → đọc tới tận
+    `DvrController::getSnapshot()` (dvr_controller.cpp:586): lấy
+    `latest_frame_ref` (frame thật mới nhất qua BUS) rồi encode thật bằng
+    `mjpeg_codec->encode()` (hardware codec) — **không phải mock/placeholder**,
+    trả `image/jpeg` đúng chuẩn, có xử lý lỗi (404 khi chưa có frame/encode
+    lỗi) tử tế.
+  - Thiết kế: `DeviceService::GetSnapshotUri` không cần gọi DVR lúc xử lý
+    request — chỉ tự ghép chuỗi
+    `http://<device_ip>:8200/dvr/v1.0/GetSnapshot?profile=<channel_id>` làm
+    `Uri` trả về (giống cách build URI tĩnh, không phải fetch dữ liệu).
+  - Lưu ý khi code (không phải bug DVR): `ProfileToken` dạng `"0_sub"` phải
+    tự tách lấy phần số đầu (`"0"`) làm `channel_id` trước khi ghép URL —
+    `std::stoul` phía DVR chỉ đọc phần số đầu, tự bỏ qua hậu tố; chấp nhận
+    được vì DTT không kiểm tra độ phân giải theo từng profile.
+- **Đối chiếu `g13.xml` — toàn bộ operation ưu tiên đều mandatory và từng
+  PASS** ở baseline cũ: `MEDIA-1-1-1/3/5` (GetProfiles Media1),
+  `MEDIA-2-2-1/4` (Video Source Config), `MEDIA-2-3-1/4` (Video Encoder
+  Config), `MEDIA-6-1-1` (Snapshot URI), `MEDIA2-1-1-4` (GetProfiles Media2),
+  `MEDIA2-2-2-4/7`, `MEDIA2-2-3-3`, `MEDIA2-5-1-1` (Snapshot URI Media2),
+  `MEDIA2_RTSS-*`/`RTSS-*` (streaming thật H.264/JPEG nhiều transport). Danh
+  sách "Operation ưu tiên" hiện tại là đúng và đủ, không cần thêm/bớt.
+- **Chưa làm**: chưa thiết kế/code adapter `IDvrClient`/`HttpDvrClient` thật
+  (tương tự `HttpMgmtClient` ở Phase 3) — mới dừng ở nghiên cứu contract.
+
+#### DVR REST API có gate xác thực Token — đã tắt tạm trên `.125` để dev (2026-09-18/21)
+
+- **Phát hiện**: mọi endpoint `/dvr/v1.0|v3.0/...` (kể cả `GetProfiles`,
+  `GetSnapshot`) đều bắt buộc header `Token` do `ApiServer::installTokenGate()`
+  (`api_server.cpp`) chặn — `publicPaths()` rỗng, không có ngoại lệ. Token
+  được verify bằng cách gọi `POST http://127.0.0.1:8101/nse/v1.0/VerifyToken`
+  — 1 service riêng (`nse.service`), xác nhận đang chạy thật trên cả `.124`
+  lẫn `.125`.
+- **Không phải bug/thiếu sót mới, cũng không phải "đã bỏ từ lâu" như nghi
+  ngờ ban đầu** — đối chiếu source DVR cũ (`D:\Elcom\DVR\dvr`,
+  `dvr_control_worker.cpp:6295`) thấy đúng lời gọi
+  `POST /nse/v1.0/VerifyToken` đã tồn tại **từ trước**, nhưng bị **comment,
+  không chạy** — DVR cũ dùng cơ chế khác (list `tokens_user` nạp từ DB). DVR
+  mới đã "đánh thức" lại đúng đoạn code cũ này, biến nó thành đường xác thực
+  chính thức, mặc định bật (`DVR_TOKEN_CHECK=1`). `onvif_server` cũ chưa từng
+  set header Token khi gọi DVR (đã grep toàn bộ `test.cpp`, không thấy) — vì
+  deployment cũ nhiều khả năng tắt hẳn cờ `enableToken` phía DVR, không phải
+  vì onvif_server "biết cách" xử lý token.
+- **Không tự tìm ra được cách onvif-module lấy token hợp lệ** (source
+  `nse.service` không nằm trong 6 module `AlvisOS` đã đối chiếu) → theo yêu
+  cầu người dùng, đã nhờ team DVR **tắt tạm token check trên `.125`** để dev.
+  Verify trực tiếp (2026-09-21):
+  ```
+  /opt/dvr_apps/dvr_new.env trên .125:
+  DVR_TOKEN_CHECK=0   # 1 = on (default), 0 = off for local testing
+
+  curl http://127.0.0.1:8200/dvr/v3.0/GetProfiles -> HTTP 200, trả đủ 4 profile thật
+  ```
+  Comment trong `.env` ghi rõ đây là cờ **cho dev/test cục bộ**, không phải
+  trạng thái production dự kiến — production sau này vẫn cần bật lại
+  `DVR_TOKEN_CHECK=1` và có cơ chế lấy token thật cho onvif-module. Việc này
+  **chưa giải quyết**, chỉ tạm gỡ để code/test Phase 4 không bị chặn.
+- **Vấn đề riêng, vẫn còn treo cho `GetSnapshotUri`**: dù tắt token trên
+  `.125` giúp onvif-module tự gọi DVR nội bộ được, nhưng `GetSnapshotUri`
+  trả `Uri` cho **VMS bên ngoài tự gọi trực tiếp** — nếu sau này production
+  bật lại `DVR_TOKEN_CHECK=1`, VMS sẽ không biết cách đính token nội bộ này,
+  bị 401. Cần 1 trong: (a) thêm `/dvr/v1.0/GetSnapshot` vào `publicPaths()`
+  phía DVR, (b) DVR nhận token qua query string thay vì chỉ header (để nhúng
+  vào URI trả về), hoặc (c) onvif-module tự proxy ảnh (mở thêm 1 endpoint
+  HTTP thường ngoài SOAP, tự gọi DVR kèm token thật rồi relay JPEG lại cho
+  VMS). Chưa chọn hướng, cần bàn với team DVR khi tới lúc bật lại token thật.
+- **Dữ liệu thật thu được từ `.125` — lưu ý khi code**:
+  - `token` theo đúng convention đã giả định: `"0"`/`"0_sub"`/`"1"`/`"1_sub"`
+    (số kênh + hậu tố `_sub`), khớp logic tách `channel_id` cho
+    `GetSnapshotUri` đã thiết kế.
+  - `StreamUri` trả `host=127.0.0.1` (đúng vì gọi nội bộ) — khi build lại
+    `Uri` trả cho ONVIF phải thay bằng IP thật của thiết bị
+    (`cfg_.deviceIp`), không dùng nguyên host DVR trả về.
+  - **RTSP port khác nhau theo từng máy**: `.125` dùng `1992`, `.124` dùng
+    `554` — không được hardcode port RTSP, phải lấy động từ chính field
+    `StreamUri` DVR trả về (parse port ra) hoặc từ 1 API riêng, không suy
+    đoán cố định.
 
 ### Operation ưu tiên
 

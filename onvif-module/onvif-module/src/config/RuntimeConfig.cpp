@@ -70,6 +70,7 @@ RuntimeConfig loadRuntimeConfig(const std::string& path) {
             else if (key == "ctrl_socket") config.ctrlSocket = value;
             else if (key == "evt_socket") config.evtSocket = value;
             else if (key == "mgmt_base_url") config.mgmtBaseUrl = value;
+            else if (key == "dvr_base_url") config.dvrBaseUrl = value;
             else if (key == "connect_timeout_ms") config.connectTimeoutMs = std::atoi(value.c_str());
             else if (key == "request_timeout_ms") config.requestTimeoutMs = std::atoi(value.c_str());
             else if (key == "retry_interval_ms") config.retryIntervalMs = std::atoi(value.c_str());
