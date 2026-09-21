@@ -1,6 +1,7 @@
 #include "services/Media2Service.h"
 #include "services/MockSubscriptionManager.h"
 #include "auth/WsSecurityHandler.h"
+#include <algorithm>
 #include <iostream>
 #include <string>
 #include <sstream>
@@ -218,8 +219,12 @@ int Media2Service::GetProfiles(
                     if (vsc->Bounds) {
                         vsc->Bounds->x = 0;
                         vsc->Bounds->y = 0;
-                        vsc->Bounds->width = fp ? fp->videoConfig.resolution.width : 1920;
-                        vsc->Bounds->height = fp ? fp->videoConfig.resolution.height : 1080;
+                        // sourceBounds = vùng capture của nguồn vật lý, do
+                        // backend/adapter đảm bảo giống nhau cho mọi profile
+                        // cùng sourceToken — KHÔNG dùng videoConfig.resolution
+                        // (độ phân giải encode riêng của từng stream).
+                        vsc->Bounds->width = fp ? fp->sourceBounds.width : 1920;
+                        vsc->Bounds->height = fp ? fp->sourceBounds.height : 1080;
                     }
                     // MEDIA2-1-1-2 (stability): video_source_config có thể đã bị
                     // SetVideoSourceConfiguration (override sống xuyên test — không reset
@@ -511,9 +516,13 @@ int Media2Service::GetVideoSourceConfigurations(
         }
         if (match) {
             if (!match->sourceToken.empty()) beSourceToken = match->sourceToken;
-            if (match->videoConfig.resolution.width > 0 && match->videoConfig.resolution.height > 0) {
-                beWidth = match->videoConfig.resolution.width;
-                beHeight = match->videoConfig.resolution.height;
+            // sourceBounds = vùng capture của nguồn vật lý, backend/adapter
+            // đã đảm bảo giống nhau cho mọi profile cùng sourceToken — đọc
+            // thẳng field này, không dùng videoConfig.resolution (độ phân
+            // giải encode riêng của từng stream).
+            if (match->sourceBounds.width > 0 && match->sourceBounds.height > 0) {
+                beWidth = match->sourceBounds.width;
+                beHeight = match->sourceBounds.height;
             }
         }
     } catch (...) {}
@@ -951,6 +960,7 @@ int Media2Service::GetVideoEncoderConfigurationOptions(
                 beProfile = configToken.substr(std::string("video_encoder_config_").size());
         }
         int rw = 1920, rh = 1080;  // default: spare / dynamic / fallback
+        int beBitrate = 0;
         if (!beProfile.empty()) {
             try {
                 for (const auto& p : backend_->getProfiles()) {
@@ -959,6 +969,7 @@ int Media2Service::GetVideoEncoderConfigurationOptions(
                         rw = p.videoConfig.resolution.width;
                         rh = p.videoConfig.resolution.height;
                     }
+                    beBitrate = p.videoConfig.bitrate;
                     break;
                 }
             } catch (...) {}
@@ -976,7 +987,11 @@ int Media2Service::GetVideoEncoderConfigurationOptions(
         opt->BitrateRange = soap_new_tt__IntRange(soap);
         if (opt->BitrateRange) {
             opt->BitrateRange->Min = 64;
-            opt->BitrateRange->Max = 20000; // Bitrate tối đa cho 4K là 20000 kbps
+            // Trần mặc định 20000 (đủ cho 4K) nhưng phải bao trọn bitrate
+            // thật đang cấu hình cho profile này — options phải nhất quán với
+            // GetProfiles/GetVideoEncoderConfigurations (MEDIA2-2-3-3); DVR
+            // thật có thể báo bitrate vượt trần cũ (vd sub stream 35000).
+            opt->BitrateRange->Max = std::max(20000, beBitrate);
         }
 
         // FrameRatesSupported — bắt buộc để test tool validate "frame rate limit

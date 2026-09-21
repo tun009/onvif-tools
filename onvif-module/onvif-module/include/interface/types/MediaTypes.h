@@ -30,6 +30,12 @@ struct StreamProfile {
     StreamType         streamType  = StreamType::MAIN;
     std::string        sourceToken;
     VideoEncoderConfig videoConfig;
+    // Vùng capture của nguồn vật lý (VideoSourceConfiguration.Bounds) — KHÁC
+    // videoConfig.resolution (độ phân giải encode ra, hợp lệ khác nhau giữa
+    // main/sub cùng 1 nguồn). Mọi profile chia sẻ cùng sourceToken phải khai
+    // báo CÙNG giá trị sourceBounds, do backend/adapter tự đảm bảo — ONVIF
+    // service handler chỉ đọc thẳng field này, không tự suy luận.
+    Resolution          sourceBounds = RES_1080P;
 };
 
 struct StreamUri {

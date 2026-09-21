@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <sstream>
 #include <utility>
+#include <map>
 
 // Cùng kỹ thuật parse HTTP/JSON thủ công như HttpMgmtClient.cpp (không dùng
 // thư viện JSON ngoài) — copy lại vì các helper đó là file-local (anonymous
@@ -241,6 +242,27 @@ std::vector<StreamProfile> HttpDvrClient::getProfiles() {
 
         profiles.push_back(std::move(p));
     }
+
+    // Bounds của VideoSourceConfiguration phải giống nhau cho mọi profile
+    // chia sẻ cùng sourceToken (cùng 1 kênh vật lý DVR, ví dụ "0" và
+    // "0_sub") — dùng độ phân giải lớn nhất trong nhóm (thường là main
+    // stream), không dùng riêng độ phân giải encode của từng stream. ONVIF
+    // service handler chỉ đọc sourceBounds, không tự suy luận (MEDIA2-2-2-4).
+    {
+        std::map<std::string, Resolution> bestBySource;
+        for (const auto& p : profiles) {
+            auto it = bestBySource.find(p.sourceToken);
+            const long long area = static_cast<long long>(p.videoConfig.resolution.width) *
+                                    p.videoConfig.resolution.height;
+            if (it == bestBySource.end()) {
+                bestBySource[p.sourceToken] = p.videoConfig.resolution;
+            } else if (area > static_cast<long long>(it->second.width) * it->second.height) {
+                it->second = p.videoConfig.resolution;
+            }
+        }
+        for (auto& p : profiles) p.sourceBounds = bestBySource[p.sourceToken];
+    }
+
     return profiles;
 }
 
