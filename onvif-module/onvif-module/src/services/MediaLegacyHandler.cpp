@@ -1,9 +1,22 @@
 // MediaLegacyHandler.cpp — Media Service ver10 (Profile S/G/Q backward compat).
-// Toàn bộ ops trả XML thủ công. State đơn giản: 3 fixed profiles
-// (profile_main/sub1/sub2) khớp Media2, VideoSource src_main, VideoEncoder
-// per profile. Không backend real — profile CRUD chỉ ack (không persist Media1 riêng).
+// Toàn bộ ops trả XML thủ công. Profile/VideoSource/VideoEncoder config đọc
+// THẬT từ ICameraBackend (2026-09-22) — xem docs/onvif-alvis/
+// 01-IMPLEMENTATION_PLAN.md mục "Media1 (Profile S) vào backend thật".
+// Chỉ còn 2 phần state cục bộ KHÔNG có nguồn thật tương ứng:
+//   - g_dynProfiles/g_deletedFixed: CreateProfile/DeleteProfile (ONVIF không
+//     yêu cầu DVR phải biết những thay đổi này).
+//   - g_vecOverride/g_vscOverride: giá trị Set* client đã gửi, echo lại cho
+//     Get sau — KHÔNG áp dụng thật lên encoder DVR (giữ nguyên compromise đã
+//     dùng ở Media2Service::SetVideoEncoderConfiguration: Set chỉ là SOAP
+//     state, không respawn/reconfigure stream thật, tránh làm gián đoạn các
+//     stream đang được test streaming dùng chung).
+// Không còn profile JPEG: DVR mới đã bỏ hẳn MJPEG streaming liên tục (chỉ
+// còn mjpeg_codec dùng cho GetSnapshot ảnh tĩnh — xem AlvisOS/DVR/src/
+// controller/dvr_controller.cpp:57), nên các test Profile S JPEG
+// (RTSS-1-1-31..36/45/53, nhánh JPEG của MEDIA-2-1-9) chấp nhận FAIL.
 
 #include "services/MediaLegacyHandler.h"
+#include "interface/ICameraBackend.h"
 #include <sstream>
 #include <mutex>
 #include <map>
@@ -11,12 +24,6 @@
 #include <vector>
 #include <cstring>
 #include <cstdio>
-#ifdef __linux__
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <unistd.h>
-#endif
 
 namespace {
 const char* NS_MEDIA1 = "http://www.onvif.org/ver10/media/wsdl";
@@ -25,155 +32,143 @@ const char* ACT = "http://www.onvif.org/ver10/media/wsdl/Media/";
 std::string g_deviceIp = "127.0.0.1";
 int         g_httpPort = 8080;
 int         g_rtspPort = 8554;
-int         g_rtspHttpTunnelPort = 8555;
+CameraBackendPtr g_backend;
 
 std::string actUrl(const char* op) {
     return std::string(ACT) + op + "Response";
 }
 
-// ── mediamtx REST API (dynamic ffmpeg restart on Set) ──────────────────────
-// RTSS-1-1-46/48: tool set VEC resolution mới rồi verify frames. Cần restart
-// ffmpeg với resolution mới. mediamtx API :19997 PATCH path config → auto
-// kill old ffmpeg + spawn new (~3-5s). Cần OperationDelay >= 5000ms trong tool.
-static void patchMediamtxPath(const std::string& pathName,
-                               const std::string& encoding,
-                               int width, int height, int fps) {
-#ifdef __linux__
-    if (pathName.empty() || width <= 0 || height <= 0 || fps <= 0) return;
-    std::ostringstream cmd;
-    cmd << "ffmpeg -re -f lavfi -i testsrc2=size=" << width << "x" << height
-        << ":rate=" << fps << " ";
-    if (encoding == "JPEG") {
-        cmd << "-c:v mjpeg -huffman default -pix_fmt yuvj420p -q:v 5 ";
-    } else {
-        cmd << "-c:v libx264 -preset ultrafast -tune zerolatency ";
-    }
-    cmd << "-f rtsp -rtsp_transport tcp rtsp://127.0.0.1:8554/" << pathName;
-    // Escape JSON string
-    std::string cmdStr = cmd.str();
-    std::string esc;
-    for (char c : cmdStr) {
-        if (c == '"' || c == '\\') esc += '\\';
-        esc += c;
-    }
-    std::string body = "{\"runOnInit\":\"" + esc + "\",\"runOnInitRestart\":true}";
-    std::ostringstream req;
-    req << "PATCH /v3/config/paths/patch/" << pathName << " HTTP/1.1\r\n"
-        << "Host: 127.0.0.1:19997\r\n"
-        << "Content-Type: application/json\r\n"
-        << "Content-Length: " << body.size() << "\r\n"
-        << "Connection: close\r\n\r\n" << body;
-    std::string reqStr = req.str();
-
-    int sock = ::socket(AF_INET, SOCK_STREAM, 0);
-    if (sock < 0) return;
-    struct sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(19997);
-    inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
-    struct timeval tv{2, 0};
-    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    if (::connect(sock, (struct sockaddr*)&addr, sizeof(addr)) == 0) {
-        ::send(sock, reqStr.data(), reqStr.size(), 0);
-        char buf[256];
-        ::recv(sock, buf, sizeof(buf), 0);  // drain response
-    }
-    ::close(sock);
-#else
-    (void)pathName; (void)encoding; (void)width; (void)height; (void)fps;
-#endif
+// Quy ước đặt tên config token cho backend thật — CÙNG quy ước
+// Media2Service.cpp dùng cho nhánh backend thật (videoSourceConfigToken()),
+// giữ nhất quán token giữa Media1/Media2 cho cùng 1 nguồn vật lý.
+std::string videoSourceConfigToken(const std::string& sourceToken) {
+    return sourceToken.empty() ? "video_source_config" : ("video_source_config_" + sourceToken);
+}
+std::string videoEncoderConfigToken(const std::string& profileToken) {
+    return "video_encoder_config_" + profileToken;
 }
 
-// Map VEC token → mediamtx path name
-static const char* vecTokenToPath(const std::string& vecToken) {
-    if (vecToken == "video_encoder_config") return "main";
-    if (vecToken == "video_encoder_config_profile_sub1") return "sub1";
-    if (vecToken == "video_encoder_config_profile_sub2") return "sub2";
-    if (vecToken == "video_encoder_config_jpeg") return "jpeg";
-    return "main";
+// Gọi backend lấy danh sách profile thật. Không lock g_stateMtx khi gọi hàm
+// này (network call) — luôn fetch TRƯỚC khi lock để đọc state cục bộ.
+std::vector<StreamProfile> backendProfiles() {
+    if (!g_backend) return {};
+    try { return g_backend->getProfiles(); }
+    catch (const std::exception&) { return {}; }
 }
 
-// ── Media1 state tracking ───────────────────────────────────────────────────
-// Persist state qua các op để tool test consistency (Set→Get, Create→Get,...).
+// ── Media1 dynamic-profile + override state ────────────────────────────────
 struct DynProfile {
     std::string token;
     std::string name;
-    std::string vsToken;    // empty = no VideoSourceConfig attached
-    std::string veToken;    // empty = no VideoEncoderConfig
-    std::string mdToken;    // empty = no MetadataConfig
+    std::string vsToken;    // empty = chưa AddVideoSourceConfiguration
+    std::string veToken;    // empty = chưa AddVideoEncoderConfiguration
+    std::string mdToken;    // empty = chưa AddMetadataConfiguration
 };
-struct VECState {
-    std::string encoding = "H264";  // H264, JPEG, MPEG4
-    std::string name;
-    std::string h264Profile = "Main";
-    int width = 3840, height = 2160;
-    int frameRate = 30, bitrate = 20000;
-    int govLength = 30;
-    int quality = 5;
-    int encodingInterval = 1;
-    std::string multicastAddr = "239.0.0.1";
-    int multicastPort = 32000;
-    int multicastTTL = 1;
-    bool multicastAutoStart = false;
-    std::string sessionTimeout = "PT60S";
+struct VECOverride {
+    bool hasEncoding = false;   std::string encoding;
+    bool hasResolution = false; int width = 0, height = 0;
+    bool hasFrameRate = false;  int frameRate = 0;
+    bool hasBitrate = false;    int bitrate = 0;
+    bool hasGovLength = false;  int govLength = 0;
+    bool hasQuality = false;    int quality = 0;
+    bool hasH264Profile = false; std::string h264Profile;
 };
-struct VSCState {
-    int x=0, y=0, width=1920, height=1080;
+struct VSCOverride {
+    bool has = false;
+    int x = 0, y = 0, width = 0, height = 0;
 };
 
 std::mutex g_stateMtx;
-std::map<std::string, DynProfile> g_dynProfiles;   // token → dyn profile
-std::set<std::string> g_deletedFixed;              // fixed profile tokens deleted by tool
-std::map<std::string, VECState> g_vecState;        // vec token → state (persist Set)
-std::map<std::string, VSCState> g_vscState;
+std::map<std::string, DynProfile> g_dynProfiles;    // token -> dyn profile
+std::set<std::string> g_deletedFixed;               // token backend bị DeleteProfile (ẩn, không xoá thật)
+std::map<std::string, VECOverride> g_vecOverride;   // VEC token -> override
+std::map<std::string, VSCOverride> g_vscOverride;   // VSC token -> override
 
-// Init fixed VEC states (chỉ init 1 lần khi truy cập).
-void ensureFixedVecState() {
-    if (!g_vecState.empty()) return;
-    VECState m; m.name="VideoEncoderConfig";
-    m.width=3840; m.height=2160; m.frameRate=30; m.bitrate=20000;
-    g_vecState["video_encoder_config"] = m;
-    VECState s1; s1.name="VideoEncoderConfig_sub1";
-    s1.width=1280; s1.height=720; s1.frameRate=15; s1.bitrate=2000;
-    g_vecState["video_encoder_config_profile_sub1"] = s1;
-    VECState s2; s2.name="VideoEncoderConfig_sub2";
-    s2.width=640; s2.height=480; s2.frameRate=10; s2.bitrate=512;
-    g_vecState["video_encoder_config_profile_sub2"] = s2;
-    // JPEG encoder for Profile S JPEG test suite (RTSS-1-1-31..36/45/53, MEDIA-2-1-9)
-    VECState jp; jp.name="VideoEncoderConfig_jpeg"; jp.encoding="JPEG";
-    jp.width=640; jp.height=480; jp.frameRate=15; jp.bitrate=1000;
-    g_vecState["video_encoder_config_jpeg"] = jp;
-    // VSC
-    VSCState vsc;
-    g_vscState["video_source_config"] = vsc;
+// ── Baseline resolvers: kết hợp giá trị backend thật + override cục bộ ─────
+struct VecBaseline {
+    std::string encoding = "H264";
+    int width = 1920, height = 1080, frameRate = 25, bitrate = 4000;
+    int govLength = 30, quality = 5;
+    std::string h264Profile = "Main";
+};
+VecBaseline resolveVecBaseline(const std::string& vecToken,
+                                const std::vector<StreamProfile>& profiles) {
+    VecBaseline b;
+    static const std::string prefix = "video_encoder_config_";
+    std::string profileToken = vecToken.rfind(prefix, 0) == 0 ? vecToken.substr(prefix.size()) : std::string();
+    for (const auto& p : profiles) {
+        if (p.token != profileToken) continue;
+        b.encoding = (p.videoConfig.codec == Codec::H265) ? "H265" : "H264";
+        b.width = p.videoConfig.resolution.width;
+        b.height = p.videoConfig.resolution.height;
+        b.frameRate = p.videoConfig.framerate;
+        b.bitrate = p.videoConfig.bitrate;
+        if (!p.videoConfig.profile.empty()) b.h264Profile = p.videoConfig.profile;
+        break;
+    }
+    auto it = g_vecOverride.find(vecToken);
+    if (it != g_vecOverride.end()) {
+        const auto& o = it->second;
+        if (o.hasEncoding)    b.encoding = o.encoding;
+        if (o.hasResolution)  { b.width = o.width; b.height = o.height; }
+        if (o.hasFrameRate)   b.frameRate = o.frameRate;
+        if (o.hasBitrate)     b.bitrate = o.bitrate;
+        if (o.hasGovLength)   b.govLength = o.govLength;
+        if (o.hasQuality)     b.quality = o.quality;
+        if (o.hasH264Profile) b.h264Profile = o.h264Profile;
+    }
+    return b;
+}
+struct VscBaseline {
+    std::string sourceToken;
+    int width = 1920, height = 1080;
+};
+VscBaseline resolveVscBaseline(const std::string& vscToken,
+                                const std::vector<StreamProfile>& profiles) {
+    VscBaseline b;
+    static const std::string prefix = "video_source_config_";
+    b.sourceToken = vscToken.rfind(prefix, 0) == 0 ? vscToken.substr(prefix.size()) : std::string();
+    bool found = false;
+    for (const auto& p : profiles) {
+        if (p.sourceToken != b.sourceToken) continue;
+        b.width = p.sourceBounds.width;
+        b.height = p.sourceBounds.height;
+        found = true;
+        break;
+    }
+    if (!found && b.sourceToken.empty() && !profiles.empty()) {
+        b.sourceToken = profiles.front().sourceToken;
+        b.width = profiles.front().sourceBounds.width;
+        b.height = profiles.front().sourceBounds.height;
+    }
+    auto it = g_vscOverride.find(vscToken);
+    if (it != g_vscOverride.end() && it->second.has) {
+        b.width = it->second.width;
+        b.height = it->second.height;
+    }
+    return b;
 }
 
-// UseCount = số fixed profiles không bị delete + số dyn profiles reference config
-// (VSC dùng bởi tất cả fixed + jpeg; VEC dùng bởi 1 profile mỗi cái).
-int countVSCUsage(const std::string& vscToken) {
-    if (vscToken != "video_source_config") return 0;
+// UseCount = số profile (backend chưa bị Delete + dyn) đang tham chiếu config.
+int countVSCUsage(const std::string& vscToken, const std::vector<StreamProfile>& profiles) {
+    static const std::string prefix = "video_source_config_";
+    std::string sourceToken = vscToken.rfind(prefix, 0) == 0 ? vscToken.substr(prefix.size()) : std::string();
     int count = 0;
-    // 4 fixed profiles (main/sub1/sub2/jpeg) all use video_source_config
-    for (const char* p : {"profile_main","profile_sub1","profile_sub2","profile_jpeg"}) {
-        if (g_deletedFixed.count(p) == 0) count++;
+    for (const auto& p : profiles) {
+        if (p.sourceToken == sourceToken && !g_deletedFixed.count(p.token)) count++;
     }
     for (const auto& kv : g_dynProfiles) {
         if (kv.second.vsToken == vscToken) count++;
     }
     return count;
 }
-int countVECUsage(const std::string& vecToken) {
-    // Each VEC used by 1 fixed profile by default
+int countVECUsage(const std::string& vecToken, const std::vector<StreamProfile>& profiles) {
+    static const std::string prefix = "video_encoder_config_";
+    std::string profileToken = vecToken.rfind(prefix, 0) == 0 ? vecToken.substr(prefix.size()) : std::string();
     int count = 0;
-    static const std::map<std::string, std::string> vec2profile = {
-        {"video_encoder_config", "profile_main"},
-        {"video_encoder_config_profile_sub1", "profile_sub1"},
-        {"video_encoder_config_profile_sub2", "profile_sub2"},
-        {"video_encoder_config_jpeg", "profile_jpeg"},
-    };
-    auto it = vec2profile.find(vecToken);
-    if (it != vec2profile.end() && !g_deletedFixed.count(it->second)) count++;
+    for (const auto& p : profiles) {
+        if (p.token == profileToken && !g_deletedFixed.count(p.token)) count++;
+    }
     for (const auto& kv : g_dynProfiles) {
         if (kv.second.veToken == vecToken) count++;
     }
@@ -181,10 +176,14 @@ int countVECUsage(const std::string& vecToken) {
 }
 } // namespace
 
-void MediaLegacyHandler::setEndpoint(const std::string& ip, int port) {
+void MediaLegacyHandler::setEndpoint(const std::string& ip, int httpPort, int rtspPort) {
     g_deviceIp = ip;
-    g_httpPort = port;
-    // RTSP port config từ ServiceConfig — mock giữ 8554
+    g_httpPort = httpPort;
+    g_rtspPort = rtspPort;
+}
+
+void MediaLegacyHandler::setBackend(CameraBackendPtr backend) {
+    g_backend = std::move(backend);
 }
 
 std::string MediaLegacyHandler::extractMessageId(const std::string& xml) {
@@ -254,68 +253,83 @@ std::string MediaLegacyHandler::wrap(const std::string& action,
 }
 
 // ── Profile XML fragment ────────────────────────────────────────────────────
-// Media1 tt:Profile struct: VideoSourceConfiguration + VideoEncoderConfiguration
+// Media1 tt:Profile struct: VideoSourceConfiguration + VideoEncoderConfiguration.
+// fixed=true -> token là profile backend thật (đọc field trực tiếp từ
+// StreamProfile khớp token). fixed=false -> token là dyn profile, VSC/VEC
+// (nếu có) là token đã AddVideoSource/EncoderConfiguration trỏ tới.
 std::string MediaLegacyHandler::profileXml(const char* wrapperElem,
                                             const char* token, const char* name,
                                             bool fixed, bool includeVSC, bool includeVEC) {
-    std::lock_guard<std::mutex> lk(g_stateMtx);
-    ensureFixedVecState();
+    std::vector<StreamProfile> profiles =
+        (includeVSC || includeVEC) ? backendProfiles() : std::vector<StreamProfile>{};
     std::ostringstream os;
     os << "<trt:" << wrapperElem << " fixed=\"" << (fixed ? "true" : "false")
        << "\" token=\"" << token << "\">"
        << "<tt:Name>" << name << "</tt:Name>";
+
+    std::lock_guard<std::mutex> lk(g_stateMtx);
+
     if (includeVSC) {
-        const auto& vsc = g_vscState["video_source_config"];
-        int useCount = countVSCUsage("video_source_config");
-        os << "<tt:VideoSourceConfiguration token=\"video_source_config\">"
-             << "<tt:Name>VideoSourceConfig</tt:Name>"
-             << "<tt:UseCount>" << useCount << "</tt:UseCount>"
-             << "<tt:SourceToken>src_main</tt:SourceToken>"
-             << "<tt:Bounds x=\"" << vsc.x << "\" y=\"" << vsc.y
-                          << "\" width=\"" << vsc.width << "\" height=\"" << vsc.height << "\"/>"
-           << "</tt:VideoSourceConfiguration>";
+        std::string vscToken;
+        if (fixed) {
+            std::string sourceToken;
+            for (const auto& p : profiles) {
+                if (p.token == token) { sourceToken = p.sourceToken; break; }
+            }
+            vscToken = videoSourceConfigToken(sourceToken);
+        } else {
+            auto it = g_dynProfiles.find(token);
+            if (it != g_dynProfiles.end()) vscToken = it->second.vsToken;
+        }
+        if (!vscToken.empty()) {
+            VscBaseline b = resolveVscBaseline(vscToken, profiles);
+            os << "<tt:VideoSourceConfiguration token=\"" << vscToken << "\">"
+                 << "<tt:Name>VideoSourceConfig</tt:Name>"
+                 << "<tt:UseCount>" << countVSCUsage(vscToken, profiles) << "</tt:UseCount>"
+                 << "<tt:SourceToken>" << (b.sourceToken.empty() ? "src_main" : b.sourceToken) << "</tt:SourceToken>"
+                 << "<tt:Bounds x=\"0\" y=\"0\" width=\"" << b.width << "\" height=\"" << b.height << "\"/>"
+               << "</tt:VideoSourceConfiguration>";
+        }
     }
     if (includeVEC) {
-        // Determine VEC token cho profile
-        std::string vecToken = "video_encoder_config";
-        if (std::string(token) == "profile_sub1") vecToken = "video_encoder_config_profile_sub1";
-        else if (std::string(token) == "profile_sub2") vecToken = "video_encoder_config_profile_sub2";
-        else if (std::string(token) == "profile_jpeg") vecToken = "video_encoder_config_jpeg";
-        else {
-            // dyn profile: look up dyn state
+        std::string vecToken;
+        if (fixed) {
+            vecToken = videoEncoderConfigToken(token);
+        } else {
             auto it = g_dynProfiles.find(token);
-            if (it != g_dynProfiles.end() && !it->second.veToken.empty()) vecToken = it->second.veToken;
+            if (it != g_dynProfiles.end()) vecToken = it->second.veToken;
         }
-        const auto& v = g_vecState[vecToken];
-        int useCount = countVECUsage(vecToken);
-        os << "<tt:VideoEncoderConfiguration token=\"" << vecToken << "\">"
-           << "<tt:Name>" << v.name << "</tt:Name>"
-           << "<tt:UseCount>" << useCount << "</tt:UseCount>"
-           << "<tt:Encoding>" << v.encoding << "</tt:Encoding>"
-           << "<tt:Resolution>"
-             << "<tt:Width>" << v.width << "</tt:Width>"
-             << "<tt:Height>" << v.height << "</tt:Height>"
-           << "</tt:Resolution>"
-           << "<tt:Quality>" << v.quality << "</tt:Quality>"
-           << "<tt:RateControl>"
-             << "<tt:FrameRateLimit>" << v.frameRate << "</tt:FrameRateLimit>"
-             << "<tt:EncodingInterval>" << v.encodingInterval << "</tt:EncodingInterval>"
-             << "<tt:BitrateLimit>" << v.bitrate << "</tt:BitrateLimit>"
-           << "</tt:RateControl>";
-        if (v.encoding == "H264") {
-            os << "<tt:H264>"
-                 << "<tt:GovLength>" << v.govLength << "</tt:GovLength>"
-                 << "<tt:H264Profile>" << v.h264Profile << "</tt:H264Profile>"
-               << "</tt:H264>";
+        if (!vecToken.empty()) {
+            VecBaseline b = resolveVecBaseline(vecToken, profiles);
+            os << "<tt:VideoEncoderConfiguration token=\"" << vecToken << "\">"
+               << "<tt:Name>VideoEncoderConfig</tt:Name>"
+               << "<tt:UseCount>" << countVECUsage(vecToken, profiles) << "</tt:UseCount>"
+               << "<tt:Encoding>" << b.encoding << "</tt:Encoding>"
+               << "<tt:Resolution>"
+                 << "<tt:Width>" << b.width << "</tt:Width>"
+                 << "<tt:Height>" << b.height << "</tt:Height>"
+               << "</tt:Resolution>"
+               << "<tt:Quality>" << b.quality << "</tt:Quality>"
+               << "<tt:RateControl>"
+                 << "<tt:FrameRateLimit>" << b.frameRate << "</tt:FrameRateLimit>"
+                 << "<tt:EncodingInterval>1</tt:EncodingInterval>"
+                 << "<tt:BitrateLimit>" << b.bitrate << "</tt:BitrateLimit>"
+               << "</tt:RateControl>";
+            if (b.encoding == "H264") {
+                os << "<tt:H264>"
+                     << "<tt:GovLength>" << b.govLength << "</tt:GovLength>"
+                     << "<tt:H264Profile>" << b.h264Profile << "</tt:H264Profile>"
+                   << "</tt:H264>";
+            }
+            os << "<tt:Multicast>"
+                 << "<tt:Address><tt:Type>IPv4</tt:Type><tt:IPv4Address>239.0.0.1</tt:IPv4Address></tt:Address>"
+                 << "<tt:Port>32000</tt:Port>"
+                 << "<tt:TTL>1</tt:TTL>"
+                 << "<tt:AutoStart>false</tt:AutoStart>"
+               << "</tt:Multicast>"
+               << "<tt:SessionTimeout>PT60S</tt:SessionTimeout>"
+               << "</tt:VideoEncoderConfiguration>";
         }
-        os << "<tt:Multicast>"
-             << "<tt:Address><tt:Type>IPv4</tt:Type><tt:IPv4Address>" << v.multicastAddr << "</tt:IPv4Address></tt:Address>"
-             << "<tt:Port>" << v.multicastPort << "</tt:Port>"
-             << "<tt:TTL>" << v.multicastTTL << "</tt:TTL>"
-             << "<tt:AutoStart>" << (v.multicastAutoStart?"true":"false") << "</tt:AutoStart>"
-           << "</tt:Multicast>"
-           << "<tt:SessionTimeout>" << v.sessionTimeout << "</tt:SessionTimeout>"
-           << "</tt:VideoEncoderConfiguration>";
     }
     os << "</trt:" << wrapperElem << ">";
     return os.str();
@@ -336,13 +350,28 @@ std::string MediaLegacyHandler::handleGetServiceCapabilities() {
 }
 
 std::string MediaLegacyHandler::handleGetVideoSources() {
-    return
-        "<trt:GetVideoSourcesResponse>"
-          "<trt:VideoSources token=\"src_main\">"
-            "<tt:Framerate>30.0</tt:Framerate>"
-            "<tt:Resolution><tt:Width>1920</tt:Width><tt:Height>1080</tt:Height></tt:Resolution>"
-          "</trt:VideoSources>"
-        "</trt:GetVideoSourcesResponse>";
+    std::vector<StreamProfile> profiles = backendProfiles();
+    std::set<std::string> seen;
+    std::ostringstream os;
+    os << "<trt:GetVideoSourcesResponse>";
+    bool any = false;
+    for (const auto& p : profiles) {
+        if (p.sourceToken.empty() || !seen.insert(p.sourceToken).second) continue;
+        any = true;
+        os << "<trt:VideoSources token=\"" << p.sourceToken << "\">"
+             << "<tt:Framerate>" << p.videoConfig.framerate << ".0</tt:Framerate>"
+             << "<tt:Resolution><tt:Width>" << p.sourceBounds.width << "</tt:Width>"
+                             << "<tt:Height>" << p.sourceBounds.height << "</tt:Height></tt:Resolution>"
+           << "</trt:VideoSources>";
+    }
+    if (!any) {
+        os << "<trt:VideoSources token=\"src_main\">"
+             << "<tt:Framerate>30.0</tt:Framerate>"
+             << "<tt:Resolution><tt:Width>1920</tt:Width><tt:Height>1080</tt:Height></tt:Resolution>"
+           << "</trt:VideoSources>";
+    }
+    os << "</trt:GetVideoSourcesResponse>";
+    return os.str();
 }
 
 std::string MediaLegacyHandler::handleGetAudioSources() {
@@ -350,9 +379,7 @@ std::string MediaLegacyHandler::handleGetAudioSources() {
 }
 
 std::string MediaLegacyHandler::handleGetProfiles() {
-    std::ostringstream os;
-    os << "<trt:GetProfilesResponse>";
-    // Fixed profiles (skip if tool đã DeleteProfile)
+    std::vector<StreamProfile> profiles = backendProfiles();
     std::set<std::string> deleted;
     std::vector<DynProfile> dyns;
     {
@@ -360,15 +387,12 @@ std::string MediaLegacyHandler::handleGetProfiles() {
         deleted = g_deletedFixed;
         for (auto& kv : g_dynProfiles) dyns.push_back(kv.second);
     }
-    if (!deleted.count("profile_main"))
-        os << profileXml("Profiles", "profile_main", "Main 4K", true, true, true);
-    if (!deleted.count("profile_sub1"))
-        os << profileXml("Profiles", "profile_sub1", "Sub1 720p", true, true, true);
-    if (!deleted.count("profile_sub2"))
-        os << profileXml("Profiles", "profile_sub2", "Sub2 480p", true, true, true);
-    if (!deleted.count("profile_jpeg"))
-        os << profileXml("Profiles", "profile_jpeg", "JPEG", true, true, true);
-    // Dyn profiles: hiển thị VSC/VEC theo trạng thái đã Add
+    std::ostringstream os;
+    os << "<trt:GetProfilesResponse>";
+    for (const auto& p : profiles) {
+        if (deleted.count(p.token)) continue;
+        os << profileXml("Profiles", p.token.c_str(), p.name.c_str(), true, true, true);
+    }
     for (const auto& d : dyns) {
         bool hasVSC = !d.vsToken.empty();
         bool hasVEC = !d.veToken.empty();
@@ -381,20 +405,20 @@ std::string MediaLegacyHandler::handleGetProfiles() {
 
 std::string MediaLegacyHandler::handleGetProfile(const std::string& req) {
     std::string token = extractInnerTag(req, "ProfileToken");
-    // Fixed profiles
-    bool isFixed = false; const char* fname = nullptr;
-    if (token == "profile_main") { isFixed = true; fname = "Main 4K"; }
-    else if (token == "profile_sub1") { isFixed = true; fname = "Sub1 720p"; }
-    else if (token == "profile_sub2") { isFixed = true; fname = "Sub2 480p"; }
-    else if (token == "profile_jpeg") { isFixed = true; fname = "JPEG"; }
-    if (isFixed) {
-        std::lock_guard<std::mutex> lk(g_stateMtx);
-        if (g_deletedFixed.count(token)) isFixed = false;
+    std::vector<StreamProfile> profiles = backendProfiles();
+    const StreamProfile* bp = nullptr;
+    for (const auto& p : profiles) {
+        if (p.token == token) { bp = &p; break; }
     }
-    if (isFixed) {
+    bool deleted = false;
+    {
+        std::lock_guard<std::mutex> lk(g_stateMtx);
+        deleted = g_deletedFixed.count(token) > 0;
+    }
+    if (bp && !deleted) {
         std::ostringstream os;
         os << "<trt:GetProfileResponse>"
-           << profileXml("Profile", token.c_str(), fname, true, true, true)
+           << profileXml("Profile", bp->token.c_str(), bp->name.c_str(), true, true, true)
            << "</trt:GetProfileResponse>";
         return os.str();
     }
@@ -460,23 +484,28 @@ std::string MediaLegacyHandler::handleCreateProfile(const std::string& req) {
 
 std::string MediaLegacyHandler::handleDeleteProfile(const std::string& req) {
     std::string token = extractInnerTag(req, "ProfileToken");
-    // Kiểm tra profile tồn tại (fixed hoặc dyn); nếu không → fault ter:NoProfile.
     bool valid = false;
     {
         std::lock_guard<std::mutex> lk(g_stateMtx);
-        if ((token == "profile_main" || token == "profile_sub1" ||
-             token == "profile_sub2" || token == "profile_jpeg") &&
-            !g_deletedFixed.count(token)) {
-            valid = true;
-            g_deletedFixed.insert(token);
-        } else if (g_dynProfiles.count(token)) {
+        if (g_dynProfiles.count(token)) {
             valid = true;
             g_dynProfiles.erase(token);
         }
     }
     if (!valid) {
-        // Return SOAP fault manually via special marker — actual fault built in wrap
-        // dùng cơ chế đơn giản: return SOAP fault XML thay envelope.
+        bool isBackend = false;
+        for (const auto& p : backendProfiles()) {
+            if (p.token == token) { isBackend = true; break; }
+        }
+        if (isBackend) {
+            std::lock_guard<std::mutex> lk(g_stateMtx);
+            if (!g_deletedFixed.count(token)) {
+                g_deletedFixed.insert(token);
+                valid = true;
+            }
+        }
+    }
+    if (!valid) {
         return
             "<SOAP-ENV:Fault>"
               "<SOAP-ENV:Code>"
@@ -497,67 +526,114 @@ std::string MediaLegacyHandler::handleDeleteProfile(const std::string& req) {
 }
 
 std::string MediaLegacyHandler::handleGetVideoSourceConfigurations() {
-    std::lock_guard<std::mutex> lk(g_stateMtx);
-    ensureFixedVecState();
-    const auto& vsc = g_vscState["video_source_config"];
-    int useCount = countVSCUsage("video_source_config");
+    std::vector<StreamProfile> profiles = backendProfiles();
+    std::set<std::string> deleted;
+    { std::lock_guard<std::mutex> lk(g_stateMtx); deleted = g_deletedFixed; }
+    std::set<std::string> seen;
     std::ostringstream os;
-    os << "<trt:GetVideoSourceConfigurationsResponse>"
-       << "<trt:Configurations token=\"video_source_config\">"
-         << "<tt:Name>VideoSourceConfig</tt:Name>"
-         << "<tt:UseCount>" << useCount << "</tt:UseCount>"
-         << "<tt:SourceToken>src_main</tt:SourceToken>"
-         << "<tt:Bounds x=\"" << vsc.x << "\" y=\"" << vsc.y
-                       << "\" width=\"" << vsc.width << "\" height=\"" << vsc.height << "\"/>"
-       << "</trt:Configurations>"
-       << "</trt:GetVideoSourceConfigurationsResponse>";
+    os << "<trt:GetVideoSourceConfigurationsResponse>";
+    for (const auto& p : profiles) {
+        if (deleted.count(p.token)) continue;
+        if (!seen.insert(p.sourceToken).second) continue;
+        std::string vscToken = videoSourceConfigToken(p.sourceToken);
+        VscBaseline b;
+        { std::lock_guard<std::mutex> lk(g_stateMtx); b = resolveVscBaseline(vscToken, profiles); }
+        int useCount;
+        { std::lock_guard<std::mutex> lk(g_stateMtx); useCount = countVSCUsage(vscToken, profiles); }
+        os << "<trt:Configurations token=\"" << vscToken << "\">"
+             << "<tt:Name>VideoSourceConfig</tt:Name>"
+             << "<tt:UseCount>" << useCount << "</tt:UseCount>"
+             << "<tt:SourceToken>" << (b.sourceToken.empty() ? "src_main" : b.sourceToken) << "</tt:SourceToken>"
+             << "<tt:Bounds x=\"0\" y=\"0\" width=\"" << b.width << "\" height=\"" << b.height << "\"/>"
+           << "</trt:Configurations>";
+    }
+    os << "</trt:GetVideoSourceConfigurationsResponse>";
     return os.str();
 }
 
 std::string MediaLegacyHandler::handleGetVideoSourceConfiguration(const std::string& req) {
-    (void)req;
+    std::string cfgToken = extractInnerTag(req, "ConfigurationToken");
+    std::vector<StreamProfile> profiles = backendProfiles();
+    if (cfgToken.empty()) {
+        cfgToken = profiles.empty() ? "video_source_config"
+                                     : videoSourceConfigToken(profiles.front().sourceToken);
+    }
     std::lock_guard<std::mutex> lk(g_stateMtx);
-    ensureFixedVecState();
-    const auto& vsc = g_vscState["video_source_config"];
-    int useCount = countVSCUsage("video_source_config");
+    VscBaseline b = resolveVscBaseline(cfgToken, profiles);
+    int useCount = countVSCUsage(cfgToken, profiles);
     std::ostringstream os;
     os << "<trt:GetVideoSourceConfigurationResponse>"
-       << "<trt:Configuration token=\"video_source_config\">"
+       << "<trt:Configuration token=\"" << cfgToken << "\">"
          << "<tt:Name>VideoSourceConfig</tt:Name>"
          << "<tt:UseCount>" << useCount << "</tt:UseCount>"
-         << "<tt:SourceToken>src_main</tt:SourceToken>"
-         << "<tt:Bounds x=\"" << vsc.x << "\" y=\"" << vsc.y
-                       << "\" width=\"" << vsc.width << "\" height=\"" << vsc.height << "\"/>"
+         << "<tt:SourceToken>" << (b.sourceToken.empty() ? "src_main" : b.sourceToken) << "</tt:SourceToken>"
+         << "<tt:Bounds x=\"0\" y=\"0\" width=\"" << b.width << "\" height=\"" << b.height << "\"/>"
        << "</trt:Configuration>"
        << "</trt:GetVideoSourceConfigurationResponse>";
     return os.str();
 }
 
-std::string MediaLegacyHandler::handleGetVideoSourceConfigurationOptions() {
-    return
-        "<trt:GetVideoSourceConfigurationOptionsResponse>"
+std::string MediaLegacyHandler::handleGetVideoSourceConfigurationOptions(const std::string& req) {
+    std::string cfgToken = extractInnerTag(req, "ConfigurationToken");
+    std::string profToken = extractInnerTag(req, "ProfileToken");
+    std::vector<StreamProfile> profiles = backendProfiles();
+
+    std::string targetSource;
+    if (!profToken.empty()) {
+        for (const auto& p : profiles) {
+            if (p.token == profToken) { targetSource = p.sourceToken; break; }
+        }
+    } else if (!cfgToken.empty()) {
+        static const std::string prefix = "video_source_config_";
+        if (cfgToken.rfind(prefix, 0) == 0) targetSource = cfgToken.substr(prefix.size());
+    }
+
+    int w = 1920, h = 1080;
+    bool found = false;
+    for (const auto& p : profiles) {
+        if (p.sourceToken == targetSource) { w = p.sourceBounds.width; h = p.sourceBounds.height; found = true; break; }
+    }
+    if (!found && !profiles.empty()) { w = profiles.front().sourceBounds.width; h = profiles.front().sourceBounds.height; }
+
+    std::set<std::string> sources;
+    for (const auto& p : profiles) if (!p.sourceToken.empty()) sources.insert(p.sourceToken);
+    std::ostringstream tokens;
+    bool first = true;
+    for (const auto& s : sources) { if (!first) tokens << " "; tokens << s; first = false; }
+    if (sources.empty()) tokens << "src_main";
+
+    std::ostringstream os;
+    os << "<trt:GetVideoSourceConfigurationOptionsResponse>"
           "<trt:Options>"
             "<tt:BoundsRange>"
               "<tt:XRange><tt:Min>0</tt:Min><tt:Max>0</tt:Max></tt:XRange>"
               "<tt:YRange><tt:Min>0</tt:Min><tt:Max>0</tt:Max></tt:YRange>"
-              "<tt:WidthRange><tt:Min>1920</tt:Min><tt:Max>1920</tt:Max></tt:WidthRange>"
-              "<tt:HeightRange><tt:Min>1080</tt:Min><tt:Max>1080</tt:Max></tt:HeightRange>"
+              "<tt:WidthRange><tt:Min>" << w << "</tt:Min><tt:Max>" << w << "</tt:Max></tt:WidthRange>"
+              "<tt:HeightRange><tt:Min>" << h << "</tt:Min><tt:Max>" << h << "</tt:Max></tt:HeightRange>"
             "</tt:BoundsRange>"
-            "<tt:VideoSourceTokensAvailable>src_main</tt:VideoSourceTokensAvailable>"
+            "<tt:VideoSourceTokensAvailable>" << tokens.str() << "</tt:VideoSourceTokensAvailable>"
           "</trt:Options>"
         "</trt:GetVideoSourceConfigurationOptionsResponse>";
+    return os.str();
 }
 
 std::string MediaLegacyHandler::handleGetCompatibleVideoSourceConfigurations() {
-    return
-        "<trt:GetCompatibleVideoSourceConfigurationsResponse>"
-          "<trt:Configurations token=\"video_source_config\">"
-            "<tt:Name>VideoSourceConfig</tt:Name>"
-            "<tt:UseCount>3</tt:UseCount>"
-            "<tt:SourceToken>src_main</tt:SourceToken>"
-            "<tt:Bounds x=\"0\" y=\"0\" width=\"1920\" height=\"1080\"/>"
-          "</trt:Configurations>"
-        "</trt:GetCompatibleVideoSourceConfigurationsResponse>";
+    std::vector<StreamProfile> profiles = backendProfiles();
+    std::string vscToken = profiles.empty() ? "video_source_config"
+                                             : videoSourceConfigToken(profiles.front().sourceToken);
+    std::lock_guard<std::mutex> lk(g_stateMtx);
+    VscBaseline b = resolveVscBaseline(vscToken, profiles);
+    int useCount = countVSCUsage(vscToken, profiles);
+    std::ostringstream os;
+    os << "<trt:GetCompatibleVideoSourceConfigurationsResponse>"
+       << "<trt:Configurations token=\"" << vscToken << "\">"
+         << "<tt:Name>VideoSourceConfig</tt:Name>"
+         << "<tt:UseCount>" << useCount << "</tt:UseCount>"
+         << "<tt:SourceToken>" << (b.sourceToken.empty() ? "src_main" : b.sourceToken) << "</tt:SourceToken>"
+         << "<tt:Bounds x=\"0\" y=\"0\" width=\"" << b.width << "\" height=\"" << b.height << "\"/>"
+       << "</trt:Configurations>"
+       << "</trt:GetCompatibleVideoSourceConfigurationsResponse>";
+    return os.str();
 }
 
 std::string MediaLegacyHandler::handleAddVideoSourceConfiguration(const std::string& req) {
@@ -589,6 +665,20 @@ std::string MediaLegacyHandler::handleSetVideoSourceConfiguration(const std::str
         if (e == std::string::npos) return -1;
         try { return std::stoi(xml.substr(p, e - p)); } catch (...) { return -1; }
     };
+    std::string cfgToken;
+    {
+        auto cp = req.find("<tt:Configuration");
+        if (cp == std::string::npos) cp = req.find("<Configuration");
+        if (cp != std::string::npos) {
+            auto ce = req.find('>', cp);
+            std::string cfgTag = req.substr(cp, ce - cp + 1);
+            auto tp = cfgTag.find("token=\"");
+            if (tp != std::string::npos) {
+                auto te = cfgTag.find('"', tp + 7);
+                if (te != std::string::npos) cfgToken = cfgTag.substr(tp + 7, te - (tp + 7));
+            }
+        }
+    }
     auto bp = req.find("<tt:Bounds");
     if (bp == std::string::npos) bp = req.find("<Bounds");
     if (bp != std::string::npos) {
@@ -599,7 +689,7 @@ std::string MediaLegacyHandler::handleSetVideoSourceConfiguration(const std::str
         int tx = attrVal(bTag, "x");      if (tx >= 0) xv = tx;
         int ty = attrVal(bTag, "y");      if (ty >= 0) yv = ty;
     }
-    if (w <= 0 || w > 1920 || h <= 0 || h > 1080 || xv < 0 || yv < 0) {
+    if (w <= 0 || h <= 0 || xv < 0 || yv < 0) {
         return
             "<SOAP-ENV:Fault>"
               "<SOAP-ENV:Code>"
@@ -612,44 +702,53 @@ std::string MediaLegacyHandler::handleSetVideoSourceConfiguration(const std::str
               "<SOAP-ENV:Reason><SOAP-ENV:Text xml:lang=\"en\">Bounds out of range</SOAP-ENV:Text></SOAP-ENV:Reason>"
             "</SOAP-ENV:Fault>";
     }
-    // Persist bounds
+    if (cfgToken.empty()) {
+        std::vector<StreamProfile> profiles = backendProfiles();
+        cfgToken = profiles.empty() ? "video_source_config"
+                                     : videoSourceConfigToken(profiles.front().sourceToken);
+    }
     std::lock_guard<std::mutex> lk(g_stateMtx);
-    ensureFixedVecState();
-    auto& vsc = g_vscState["video_source_config"];
-    if (w > 0) vsc.width = w;
-    if (h > 0) vsc.height = h;
+    auto& ov = g_vscOverride[cfgToken];
+    ov.has = true; ov.x = xv; ov.y = yv; ov.width = w; ov.height = h;
     return "<trt:SetVideoSourceConfigurationResponse/>";
 }
 
 std::string MediaLegacyHandler::handleGetVideoEncoderConfigurations() {
-    // Build từ state map — include JPEG + persisted Set values.
-    std::lock_guard<std::mutex> lk(g_stateMtx);
-    ensureFixedVecState();
+    std::vector<StreamProfile> profiles = backendProfiles();
+    std::set<std::string> deleted;
+    { std::lock_guard<std::mutex> lk(g_stateMtx); deleted = g_deletedFixed; }
     std::ostringstream os;
     os << "<trt:GetVideoEncoderConfigurationsResponse>";
-    for (const auto& kv : g_vecState) {
-        const auto& v = kv.second;
-        int useCount = countVECUsage(kv.first);
-        os << "<trt:Configurations token=\"" << kv.first << "\">"
-           << "<tt:Name>" << v.name << "</tt:Name>"
+    for (const auto& p : profiles) {
+        if (deleted.count(p.token)) continue;
+        std::string vecToken = videoEncoderConfigToken(p.token);
+        VecBaseline b;
+        int useCount;
+        {
+            std::lock_guard<std::mutex> lk(g_stateMtx);
+            b = resolveVecBaseline(vecToken, profiles);
+            useCount = countVECUsage(vecToken, profiles);
+        }
+        os << "<trt:Configurations token=\"" << vecToken << "\">"
+           << "<tt:Name>VideoEncoderConfig</tt:Name>"
            << "<tt:UseCount>" << useCount << "</tt:UseCount>"
-           << "<tt:Encoding>" << v.encoding << "</tt:Encoding>"
-           << "<tt:Resolution><tt:Width>" << v.width << "</tt:Width>"
-           << "<tt:Height>" << v.height << "</tt:Height></tt:Resolution>"
-           << "<tt:Quality>" << v.quality << "</tt:Quality>"
-           << "<tt:RateControl><tt:FrameRateLimit>" << v.frameRate << "</tt:FrameRateLimit>"
-           << "<tt:EncodingInterval>" << v.encodingInterval << "</tt:EncodingInterval>"
-           << "<tt:BitrateLimit>" << v.bitrate << "</tt:BitrateLimit></tt:RateControl>";
-        if (v.encoding == "H264") {
-            os << "<tt:H264><tt:GovLength>" << v.govLength
-               << "</tt:GovLength><tt:H264Profile>" << v.h264Profile << "</tt:H264Profile></tt:H264>";
+           << "<tt:Encoding>" << b.encoding << "</tt:Encoding>"
+           << "<tt:Resolution><tt:Width>" << b.width << "</tt:Width>"
+           << "<tt:Height>" << b.height << "</tt:Height></tt:Resolution>"
+           << "<tt:Quality>" << b.quality << "</tt:Quality>"
+           << "<tt:RateControl><tt:FrameRateLimit>" << b.frameRate << "</tt:FrameRateLimit>"
+           << "<tt:EncodingInterval>1</tt:EncodingInterval>"
+           << "<tt:BitrateLimit>" << b.bitrate << "</tt:BitrateLimit></tt:RateControl>";
+        if (b.encoding == "H264") {
+            os << "<tt:H264><tt:GovLength>" << b.govLength
+               << "</tt:GovLength><tt:H264Profile>" << b.h264Profile << "</tt:H264Profile></tt:H264>";
         }
         os << "<tt:Multicast><tt:Address><tt:Type>IPv4</tt:Type>"
-           << "<tt:IPv4Address>" << v.multicastAddr << "</tt:IPv4Address></tt:Address>"
-           << "<tt:Port>" << v.multicastPort << "</tt:Port>"
-           << "<tt:TTL>" << v.multicastTTL << "</tt:TTL>"
-           << "<tt:AutoStart>" << (v.multicastAutoStart?"true":"false") << "</tt:AutoStart></tt:Multicast>"
-           << "<tt:SessionTimeout>" << v.sessionTimeout << "</tt:SessionTimeout>"
+           << "<tt:IPv4Address>239.0.0.1</tt:IPv4Address></tt:Address>"
+           << "<tt:Port>32000</tt:Port>"
+           << "<tt:TTL>1</tt:TTL>"
+           << "<tt:AutoStart>false</tt:AutoStart></tt:Multicast>"
+           << "<tt:SessionTimeout>PT60S</tt:SessionTimeout>"
            << "</trt:Configurations>";
     }
     os << "</trt:GetVideoEncoderConfigurationsResponse>";
@@ -658,10 +757,23 @@ std::string MediaLegacyHandler::handleGetVideoEncoderConfigurations() {
 
 std::string MediaLegacyHandler::handleGetVideoEncoderConfiguration(const std::string& req) {
     std::string token = extractInnerTag(req, "ConfigurationToken");
-    std::lock_guard<std::mutex> lk(g_stateMtx);
-    ensureFixedVecState();
-    auto it = g_vecState.find(token);
-    if (it == g_vecState.end()) {
+    std::vector<StreamProfile> profiles = backendProfiles();
+    static const std::string prefix = "video_encoder_config_";
+    std::string profileToken = token.rfind(prefix, 0) == 0 ? token.substr(prefix.size()) : std::string();
+
+    bool exists = false;
+    {
+        std::lock_guard<std::mutex> lk(g_stateMtx);
+        for (const auto& p : profiles) {
+            if (p.token == profileToken && !g_deletedFixed.count(p.token)) { exists = true; break; }
+        }
+        if (!exists) {
+            for (const auto& kv : g_dynProfiles) {
+                if (kv.second.veToken == token) { exists = true; break; }
+            }
+        }
+    }
+    if (!exists) {
         return
             "<SOAP-ENV:Fault>"
               "<SOAP-ENV:Code><SOAP-ENV:Value>SOAP-ENV:Sender</SOAP-ENV:Value>"
@@ -672,83 +784,67 @@ std::string MediaLegacyHandler::handleGetVideoEncoderConfiguration(const std::st
               "<SOAP-ENV:Reason><SOAP-ENV:Text xml:lang=\"en\">Unknown VideoEncoderConfig</SOAP-ENV:Text></SOAP-ENV:Reason>"
             "</SOAP-ENV:Fault>";
     }
-    const auto& v = it->second;
-    int useCount = countVECUsage(token);
+
+    std::lock_guard<std::mutex> lk(g_stateMtx);
+    VecBaseline b = resolveVecBaseline(token, profiles);
+    int useCount = countVECUsage(token, profiles);
     std::ostringstream os;
     os << "<trt:GetVideoEncoderConfigurationResponse>"
        << "<trt:Configuration token=\"" << token << "\">"
-         << "<tt:Name>" << v.name << "</tt:Name>"
+         << "<tt:Name>VideoEncoderConfig</tt:Name>"
          << "<tt:UseCount>" << useCount << "</tt:UseCount>"
-         << "<tt:Encoding>" << v.encoding << "</tt:Encoding>"
+         << "<tt:Encoding>" << b.encoding << "</tt:Encoding>"
          << "<tt:Resolution>"
-           << "<tt:Width>" << v.width << "</tt:Width>"
-           << "<tt:Height>" << v.height << "</tt:Height>"
+           << "<tt:Width>" << b.width << "</tt:Width>"
+           << "<tt:Height>" << b.height << "</tt:Height>"
          << "</tt:Resolution>"
-         << "<tt:Quality>" << v.quality << "</tt:Quality>"
+         << "<tt:Quality>" << b.quality << "</tt:Quality>"
          << "<tt:RateControl>"
-           << "<tt:FrameRateLimit>" << v.frameRate << "</tt:FrameRateLimit>"
-           << "<tt:EncodingInterval>" << v.encodingInterval << "</tt:EncodingInterval>"
-           << "<tt:BitrateLimit>" << v.bitrate << "</tt:BitrateLimit>"
+           << "<tt:FrameRateLimit>" << b.frameRate << "</tt:FrameRateLimit>"
+           << "<tt:EncodingInterval>1</tt:EncodingInterval>"
+           << "<tt:BitrateLimit>" << b.bitrate << "</tt:BitrateLimit>"
          << "</tt:RateControl>";
-    if (v.encoding == "H264") {
-        os << "<tt:H264><tt:GovLength>" << v.govLength
-           << "</tt:GovLength><tt:H264Profile>" << v.h264Profile << "</tt:H264Profile></tt:H264>";
+    if (b.encoding == "H264") {
+        os << "<tt:H264><tt:GovLength>" << b.govLength
+           << "</tt:GovLength><tt:H264Profile>" << b.h264Profile << "</tt:H264Profile></tt:H264>";
     }
     os << "<tt:Multicast><tt:Address><tt:Type>IPv4</tt:Type>"
-         << "<tt:IPv4Address>" << v.multicastAddr << "</tt:IPv4Address></tt:Address>"
-         << "<tt:Port>" << v.multicastPort << "</tt:Port>"
-         << "<tt:TTL>" << v.multicastTTL << "</tt:TTL>"
-         << "<tt:AutoStart>" << (v.multicastAutoStart?"true":"false") << "</tt:AutoStart></tt:Multicast>"
-       << "<tt:SessionTimeout>" << v.sessionTimeout << "</tt:SessionTimeout>"
+         << "<tt:IPv4Address>239.0.0.1</tt:IPv4Address></tt:Address>"
+         << "<tt:Port>32000</tt:Port>"
+         << "<tt:TTL>1</tt:TTL>"
+         << "<tt:AutoStart>false</tt:AutoStart></tt:Multicast>"
+       << "<tt:SessionTimeout>PT60S</tt:SessionTimeout>"
        << "</trt:Configuration>"
        << "</trt:GetVideoEncoderConfigurationResponse>";
     return os.str();
 }
 
 std::string MediaLegacyHandler::handleGetVideoEncoderConfigurationOptions(const std::string& req) {
-    // RTSS-1-1-48 (H.264 RESOLUTION) iterate qua MỌI H.264 encoder config
-    // (main/sub1/sub2), mỗi config PLAY rồi decode frame để verify highest/
-    // median/lowest resolution trong ResolutionsAvailable. Streaming stack:
-    //   - main: GetStreamUri route Option D → 4K (relay 8555/main), 720
-    //     (main720), 640 (main640) — pre-warmed stream riêng → cả 3 pass.
-    //   - sub1/sub2: KHÔNG có stream đa resolution; GetStreamUri → relay
-    //     8555/subX phục vụ ĐÚNG default (sub1=720, sub2=480, SDP cache trong
-    //     SPS, relay không rebuild được). Nếu options liệt kê 4K/1280/640 cho
-    //     subX → DTT test 4K/640 → relay vẫn trả default → mismatch → FAILED.
-    //
-    // Fix: options TRẢ THEO TOKEN. main giữ full list (Option D lo được các mức
-    // được test). sub1/sub2 chỉ quảng bá ĐÚNG 1 resolution = default thật của
-    // stream → highest=median=lowest → DTT chỉ test mức relay phục vụ được →
-    // PASS, và khớp GetVideoEncoderConfigurations (consistency). Không đụng main
-    // (đang pass) + không cần cascade stream sub1_4k/sub2_4k...
-    std::string h264Res;
-    if (req.find("sub2") != std::string::npos) {
-        h264Res = "<tt:ResolutionsAvailable><tt:Width>640</tt:Width><tt:Height>480</tt:Height></tt:ResolutionsAvailable>";
-    } else if (req.find("sub1") != std::string::npos) {
-        h264Res = "<tt:ResolutionsAvailable><tt:Width>1280</tt:Width><tt:Height>720</tt:Height></tt:ResolutionsAvailable>";
-    } else {
-        // main / no-token: full list. Option D phục vụ 4K/720/640 (mức DTT
-        // chọn làm highest/median/lowest). 1920 giữ để không đổi hành vi đang
-        // pass (không nằm trong highest/median/lowest nên không bị stream-test).
-        h264Res =
-            "<tt:ResolutionsAvailable><tt:Width>3840</tt:Width><tt:Height>2160</tt:Height></tt:ResolutionsAvailable>"
-            "<tt:ResolutionsAvailable><tt:Width>1920</tt:Width><tt:Height>1080</tt:Height></tt:ResolutionsAvailable>"
-            "<tt:ResolutionsAvailable><tt:Width>1280</tt:Width><tt:Height>720</tt:Height></tt:ResolutionsAvailable>"
-            "<tt:ResolutionsAvailable><tt:Width>640</tt:Width><tt:Height>480</tt:Height></tt:ResolutionsAvailable>";
+    std::string cfgToken = extractInnerTag(req, "ConfigurationToken");
+    std::string profToken = extractInnerTag(req, "ProfileToken");
+    std::vector<StreamProfile> profiles = backendProfiles();
+
+    std::string targetProfile = profToken;
+    if (targetProfile.empty() && !cfgToken.empty()) {
+        static const std::string prefix = "video_encoder_config_";
+        if (cfgToken.rfind(prefix, 0) == 0) targetProfile = cfgToken.substr(prefix.size());
     }
-    return
-        "<trt:GetVideoEncoderConfigurationOptionsResponse>"
+    int w = 1920, h = 1080;
+    bool found = false;
+    for (const auto& p : profiles) {
+        if (p.token == targetProfile) { w = p.videoConfig.resolution.width; h = p.videoConfig.resolution.height; found = true; break; }
+    }
+    if (!found && !profiles.empty()) {
+        w = profiles.front().videoConfig.resolution.width;
+        h = profiles.front().videoConfig.resolution.height;
+    }
+
+    std::ostringstream os;
+    os << "<trt:GetVideoEncoderConfigurationOptionsResponse>"
           "<trt:Options>"
             "<tt:QualityRange><tt:Min>0</tt:Min><tt:Max>10</tt:Max></tt:QualityRange>"
-            "<tt:JPEG>"
-              "<tt:ResolutionsAvailable><tt:Width>1920</tt:Width><tt:Height>1080</tt:Height></tt:ResolutionsAvailable>"
-              "<tt:ResolutionsAvailable><tt:Width>1280</tt:Width><tt:Height>720</tt:Height></tt:ResolutionsAvailable>"
-              "<tt:ResolutionsAvailable><tt:Width>640</tt:Width><tt:Height>480</tt:Height></tt:ResolutionsAvailable>"
-              "<tt:FrameRateRange><tt:Min>1</tt:Min><tt:Max>30</tt:Max></tt:FrameRateRange>"
-              "<tt:EncodingIntervalRange><tt:Min>1</tt:Min><tt:Max>1</tt:Max></tt:EncodingIntervalRange>"
-            "</tt:JPEG>"
             "<tt:H264>"
-              + h264Res +
+              "<tt:ResolutionsAvailable><tt:Width>" << w << "</tt:Width><tt:Height>" << h << "</tt:Height></tt:ResolutionsAvailable>"
               "<tt:GovLengthRange><tt:Min>1</tt:Min><tt:Max>60</tt:Max></tt:GovLengthRange>"
               "<tt:FrameRateRange><tt:Min>1</tt:Min><tt:Max>30</tt:Max></tt:FrameRateRange>"
               "<tt:EncodingIntervalRange><tt:Min>1</tt:Min><tt:Max>1</tt:Max></tt:EncodingIntervalRange>"
@@ -758,6 +854,7 @@ std::string MediaLegacyHandler::handleGetVideoEncoderConfigurationOptions(const 
             "</tt:H264>"
           "</trt:Options>"
         "</trt:GetVideoEncoderConfigurationOptionsResponse>";
+    return os.str();
 }
 
 std::string MediaLegacyHandler::handleGetCompatibleVideoEncoderConfigurations() {
@@ -791,10 +888,11 @@ std::string MediaLegacyHandler::handleRemoveVideoEncoderConfiguration(const std:
 }
 
 std::string MediaLegacyHandler::handleSetVideoEncoderConfiguration(const std::string& req) {
-    // Persist VEC settings để Get sau trả cùng giá trị (MEDIA-2-3-12 H264Profile).
+    // Echo lại giá trị Set vào override map để Get sau trả cùng giá trị
+    // (MEDIA-2-3-12 H264Profile) — KHÔNG áp dụng thật lên encoder DVR, giữ
+    // đúng compromise Media2Service đã dùng (xem đầu file).
     std::string cfgTok = extractInnerTag(req, "token");  // attribute on Configuration
     if (cfgTok.empty()) {
-        // Fallback: look for token= in body
         size_t p = req.find("token=\"");
         if (p != std::string::npos) {
             size_t q = req.find('"', p + 7);
@@ -803,10 +901,6 @@ std::string MediaLegacyHandler::handleSetVideoEncoderConfiguration(const std::st
     }
     if (cfgTok.empty()) return "<trt:SetVideoEncoderConfigurationResponse/>";
 
-    // MEDIA-2-1-9/11 negative: validate BEFORE persist. Nếu out-of-range so với
-    // Options → fault ter:InvalidArgVal/ConfigModify. Case đã bắt được:
-    //  - JPEG Height=1081 (max 1080)   (MEDIA-2-1-9)
-    //  - GovLength=61 (max 60)         (MEDIA-2-1-11)
     std::string enc = extractInnerTag(req, "Encoding");
     std::string ws = extractInnerTag(req, "Width");
     std::string hs = extractInnerTag(req, "Height");
@@ -818,15 +912,13 @@ std::string MediaLegacyHandler::handleSetVideoEncoderConfiguration(const std::st
     };
     int nw = toi(ws, 0), nh = toi(hs, 0);
     int nfr = toi(fr, 0), ngv = toi(gv, 0), nql = toi(ql, -1);
+
+    // Backend thật (DVR) chỉ hỗ trợ H264 (không còn JPEG streaming — xem
+    // comment đầu file) — mọi Encoding khác coi là không hợp lệ.
     bool invalid = false;
-    if (enc == "JPEG") {
-        // JPEG allowed: 1920x1080, 1280x720, 640x480
-        if (nw > 1920 || nh > 1080) invalid = true;
-    } else if (enc == "H264") {
-        // H264 allowed: max 3840x2160
-        if (nw > 3840 || nh > 2160) invalid = true;
-        if (ngv > 60 || ngv < 0) invalid = true;
-    }
+    if (!enc.empty() && enc != "H264") invalid = true;
+    if (nw > 3840 || nh > 2160) invalid = true;
+    if (!gv.empty() && (ngv > 60 || ngv < 0)) invalid = true;
     if (nfr > 30 || nfr < 0) invalid = true;
     if (nql > 10 || nql < -1) invalid = true;
     if (invalid) {
@@ -842,131 +934,84 @@ std::string MediaLegacyHandler::handleSetVideoEncoderConfiguration(const std::st
     }
 
     std::lock_guard<std::mutex> lk(g_stateMtx);
-    ensureFixedVecState();
-    auto& v = g_vecState[cfgTok];
-    if (!enc.empty()) v.encoding = enc;
-    if (!ws.empty()) v.width = nw;
-    if (!hs.empty()) v.height = nh;
-    if (!fr.empty()) v.frameRate = nfr;
+    auto& ov = g_vecOverride[cfgTok];
+    if (!enc.empty()) { ov.hasEncoding = true; ov.encoding = enc; }
+    if (!ws.empty() && !hs.empty()) { ov.hasResolution = true; ov.width = nw; ov.height = nh; }
+    if (!fr.empty()) { ov.hasFrameRate = true; ov.frameRate = nfr; }
     std::string br = extractInnerTag(req, "BitrateLimit");
-    try { if (!br.empty()) v.bitrate = std::stoi(br); } catch (...) {}
-    if (!gv.empty()) v.govLength = ngv;
+    if (!br.empty()) { try { ov.hasBitrate = true; ov.bitrate = std::stoi(br); } catch (...) {} }
+    if (!gv.empty()) { ov.hasGovLength = true; ov.govLength = ngv; }
     std::string h264p = extractInnerTag(req, "H264Profile");
-    if (!h264p.empty()) v.h264Profile = h264p;
-    if (!ql.empty()) v.quality = nql;
-    // A: PATCH mediamtx path để ffmpeg restart với resolution/encoding mới
-    // (unlock RTSS-1-1-46/48). Snapshot state để tránh lock trong network call.
-    std::string mtxPath = vecTokenToPath(cfgTok);
-    std::string mtxEnc = v.encoding;
-    int mtxW = v.width, mtxH = v.height, mtxFps = v.frameRate;
-    // Keep MediaMTX paths codec-stable. DTT may apply a JPEG encoder
-    // configuration to a profile whose original token maps to "main"; never
-    // restart the H.264 main path as MJPEG. JPEG is served by the dedicated
-    // jpeg path, while H.264 remains on the corresponding video path.
-    if (mtxEnc == "JPEG") mtxPath = "jpeg";
-    // CHỈ reconfigure stream cho jpeg/sub2. KHÔNG đụng main/sub1: chúng là stream
-    // mà các test streaming (MEDIA2_RTSS-1-1-2/4-1-2) đọc. Trong full run, test
-    // Media1 RESOLUTION (RTSS-1-1-24/25/26...) set fps thấp cho main/sub1 →
-    // patchMediamtxPath restart ffmpeg mediamtx ở fps thấp → stream kẹt fps thấp
-    // → streaming test SAU đói frame (fail phụ thuộc trình tự; verified: Set sub1
-    // fps=5 → /sub1 thành 5fps). Giữ main/sub1 ổn định default cho streaming.
-    // (jpeg giữ nguyên cho RTSS-1-1-46 JPEG RESOLUTION.)
-    if (mtxPath == "jpeg" || mtxPath == "sub2") {
-        patchMediamtxPath(mtxPath, mtxEnc, mtxW, mtxH, mtxFps);
-    }
+    if (!h264p.empty()) { ov.hasH264Profile = true; ov.h264Profile = h264p; }
+    if (!ql.empty()) { ov.hasQuality = true; ov.quality = nql; }
     return "<trt:SetVideoEncoderConfigurationResponse/>";
 }
 
 std::string MediaLegacyHandler::handleGetGuaranteedNumberOfVideoEncoderInstances(const std::string& req) {
     (void)req;
-    // Declare JPEG + H264 support (server có profile_jpeg và profile_main/sub1/sub2).
+    // Chỉ còn H264 — DVR mới đã bỏ MJPEG streaming liên tục (không còn profile_jpeg).
     return
         "<trt:GetGuaranteedNumberOfVideoEncoderInstancesResponse>"
-          "<trt:TotalNumber>2</trt:TotalNumber>"
-          "<trt:JPEG>1</trt:JPEG>"
+          "<trt:TotalNumber>1</trt:TotalNumber>"
           "<trt:H264>1</trt:H264>"
         "</trt:GetGuaranteedNumberOfVideoEncoderInstancesResponse>";
 }
 
 std::string MediaLegacyHandler::handleGetStreamUri(const std::string& req) {
     std::string token = extractInnerTag(req, "ProfileToken");
-    // MEDIA-7-1-4: validate token, fault ter:NoProfile nếu invalid.
-    {
-        std::lock_guard<std::mutex> lk(g_stateMtx);
-        bool isFixed = (token == "profile_main" || token == "profile_sub1" ||
-                        token == "profile_sub2" || token == "profile_jpeg");
-        bool isDyn = g_dynProfiles.count(token) > 0;
-        bool deleted = g_deletedFixed.count(token) > 0;
-        if (token.empty() || (!isFixed && !isDyn) || deleted) {
-            return
-                "<SOAP-ENV:Fault>"
-                  "<SOAP-ENV:Code><SOAP-ENV:Value>SOAP-ENV:Sender</SOAP-ENV:Value>"
-                    "<SOAP-ENV:Subcode><SOAP-ENV:Value>ter:InvalidArgVal</SOAP-ENV:Value>"
-                      "<SOAP-ENV:Subcode><SOAP-ENV:Value>ter:NoProfile</SOAP-ENV:Value></SOAP-ENV:Subcode>"
-                    "</SOAP-ENV:Subcode>"
-                  "</SOAP-ENV:Code>"
-                  "<SOAP-ENV:Reason><SOAP-ENV:Text xml:lang=\"en\">No profile with the given token</SOAP-ENV:Text></SOAP-ENV:Reason>"
-                "</SOAP-ENV:Fault>";
-        }
-    }
-    // Map stream theo VEC encoding hiện tại của profile — nếu tool đã Add JPEG
-    // VEC vào profile_main, phải return path "jpeg" (không phải "main").
-    // Otherwise fixed mapping theo profile token.
-    std::string stream = "main";
-    int mainW = 0, mainH = 0;   // resolution VEC của /main (cho RTSS-1-1-48 route)
-    {
-        std::lock_guard<std::mutex> lk(g_stateMtx);
-        ensureFixedVecState();
-        std::string vecToken;
-        if (token == "profile_main")      vecToken = "video_encoder_config";
-        else if (token == "profile_sub1") vecToken = "video_encoder_config_profile_sub1";
-        else if (token == "profile_sub2") vecToken = "video_encoder_config_profile_sub2";
-        else if (token == "profile_jpeg") vecToken = "video_encoder_config_jpeg";
-        else {
-            auto it = g_dynProfiles.find(token);
-            if (it != g_dynProfiles.end()) vecToken = it->second.veToken;
-        }
-        auto vit = g_vecState.find(vecToken);
-        if (vit != g_vecState.end() && vit->second.encoding == "JPEG") {
-            stream = "jpeg";
-        } else if (token == "profile_sub1") stream = "sub1";
-        else if (token == "profile_sub2") stream = "sub2";
-        else if (token == "profile_jpeg") stream = "jpeg";
-        if (stream == "main" && vit != g_vecState.end()) {
-            mainW = vit->second.width; mainH = vit->second.height;
-        }
-    }
-    // Transport/Protocol (ONVIF ver10 enum: UDP/TCP/RTSP/HTTP/HTTPS). HTTP = RTSP
-    // tunneled over HTTP. MediaMTX itself does not expose this tunnel, so a
-    // small gortsplib relay handles HTTP tunnel requests on 8555.
-    std::string protocol = extractInnerTag(req, "Protocol");
-    std::string scheme = "rtsp://";
-    // Route legacy video RTSP through the authenticated gortsplib relay.
-    int port = 8555;
-    if (protocol == "HTTP")       { scheme = "http://";  port = g_rtspHttpTunnelPort; }
-    else if (protocol == "HTTPS") { scheme = "https://"; port = g_rtspHttpTunnelPort; }
+    std::vector<StreamProfile> profiles = backendProfiles();
 
-    // RTSS-1-1-48 (H.264 RESOLUTION) — mức lowest 640x480: relay 8555 cache SDP
-    // 4K của /main lần đầu và không refresh được (relay không rebuild được) →
-    // không phục vụ đúng 640 (H.264 nhét resolution trong SPS/SDP). Phục vụ 640
-    // từ stream RIÊNG main640 (pre-warmed 640x480@30) TRỰC TIẾP qua mediamtx 8554
-    // → DTT decode đúng 640. KHÔNG đụng /main dùng chung → relay + MEDIA2_RTSS
-    // streaming không ảnh hưởng. Chỉ áp cho RTSP thường (không HTTP tunnel), đúng
-    // transport RTSS-1-1-48 dùng. mediamtx 8554 mở (unauth) + reachable từ DTT.
-    if (stream == "main" && protocol != "HTTP" && protocol != "HTTPS") {
-        // RTSS-1-1-48 kiểm 3 mức: 4K (relay), median 1280x720, lowest 640x480.
-        // Non-4K phục vụ từ stream pre-warmed riêng qua mediamtx 8554.
-        if (mainW == 640 && mainH == 480) {
-            stream = "main640"; scheme = "rtsp://"; port = 8554;
-        } else if (mainW == 1280 && mainH == 720) {
-            stream = "main720"; scheme = "rtsp://"; port = 8554;
+    bool valid = false;
+    {
+        std::lock_guard<std::mutex> lk(g_stateMtx);
+        if (!token.empty() && !g_deletedFixed.count(token)) {
+            if (g_dynProfiles.count(token)) {
+                valid = true;
+            } else {
+                for (const auto& p : profiles) {
+                    if (p.token == token) { valid = true; break; }
+                }
+            }
+        }
+    }
+    if (!valid) {
+        return
+            "<SOAP-ENV:Fault>"
+              "<SOAP-ENV:Code><SOAP-ENV:Value>SOAP-ENV:Sender</SOAP-ENV:Value>"
+                "<SOAP-ENV:Subcode><SOAP-ENV:Value>ter:InvalidArgVal</SOAP-ENV:Value>"
+                  "<SOAP-ENV:Subcode><SOAP-ENV:Value>ter:NoProfile</SOAP-ENV:Value></SOAP-ENV:Subcode>"
+                "</SOAP-ENV:Subcode>"
+              "</SOAP-ENV:Code>"
+              "<SOAP-ENV:Reason><SOAP-ENV:Text xml:lang=\"en\">No profile with the given token</SOAP-ENV:Text></SOAP-ENV:Reason>"
+            "</SOAP-ENV:Fault>";
+    }
+
+    std::string uri;
+    if (g_backend) {
+        try { uri = g_backend->getStreamUri(token, StreamProtocol::RTSP).uri; }
+        catch (const std::exception&) {}
+    }
+
+    // Transport/Protocol (ONVIF ver10 enum: UDP/TCP/RTSP/HTTP/HTTPS). HTTP/HTTPS
+    // = RTSP tunnel qua chính port web service (xử lý thật ở
+    // OnvifServer::proxyRtspHttpTunnel, dựa trên header x-rtsp-tunnelled —
+    // không phụ thuộc URI path, chỉ cần đổi port/scheme cho đúng ở đây).
+    std::string protocol = extractInnerTag(req, "Protocol");
+    if (!uri.empty() && (protocol == "HTTP" || protocol == "HTTPS")) {
+        std::string rtspPortStr = ":" + std::to_string(g_rtspPort);
+        size_t pos = uri.find(rtspPortStr);
+        if (pos != std::string::npos) {
+            uri.replace(pos, rtspPortStr.length(), ":" + std::to_string(g_httpPort));
+        }
+        if (uri.rfind("rtsp://", 0) == 0) {
+            uri.replace(0, 7, protocol == "HTTPS" ? "https://" : "http://");
         }
     }
 
     std::ostringstream os;
     os << "<trt:GetStreamUriResponse>"
        << "<trt:MediaUri>"
-         << "<tt:Uri>" << scheme << g_deviceIp << ":" << port << "/" << stream << "</tt:Uri>"
+         << "<tt:Uri>" << uri << "</tt:Uri>"
          << "<tt:InvalidAfterConnect>false</tt:InvalidAfterConnect>"
          << "<tt:InvalidAfterReboot>false</tt:InvalidAfterReboot>"
          << "<tt:Timeout>PT60S</tt:Timeout>"
@@ -977,12 +1022,15 @@ std::string MediaLegacyHandler::handleGetStreamUri(const std::string& req) {
 
 std::string MediaLegacyHandler::handleGetSnapshotUri(const std::string& req) {
     std::string token = extractInnerTag(req, "ProfileToken");
-    if (token.empty()) token = "profile_main";
+    std::string uri;
+    if (g_backend) {
+        try { uri = g_backend->getSnapshotUri(token).uri; }
+        catch (const std::exception&) {}
+    }
     std::ostringstream os;
     os << "<trt:GetSnapshotUriResponse>"
        << "<trt:MediaUri>"
-         << "<tt:Uri>http://" << g_deviceIp << ":" << g_httpPort
-                                  << "/snapshot?token=" << token << "</tt:Uri>"
+         << "<tt:Uri>" << uri << "</tt:Uri>"
          << "<tt:InvalidAfterConnect>false</tt:InvalidAfterConnect>"
          << "<tt:InvalidAfterReboot>false</tt:InvalidAfterReboot>"
          << "<tt:Timeout>PT60S</tt:Timeout>"
@@ -1028,7 +1076,7 @@ std::string MediaLegacyHandler::dispatch(const std::string& req) {
 
     // Video Source Config ops
     if (req.find("GetVideoSourceConfigurationOptions") != std::string::npos)
-        return wrap(actUrl("GetVideoSourceConfigurationOptions"), rel, handleGetVideoSourceConfigurationOptions());
+        return wrap(actUrl("GetVideoSourceConfigurationOptions"), rel, handleGetVideoSourceConfigurationOptions(req));
     if (req.find("GetCompatibleVideoSourceConfigurations") != std::string::npos)
         return wrap(actUrl("GetCompatibleVideoSourceConfigurations"), rel, handleGetCompatibleVideoSourceConfigurations());
     if (req.find("GetVideoSourceConfigurations") != std::string::npos)

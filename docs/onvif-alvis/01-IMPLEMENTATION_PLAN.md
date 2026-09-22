@@ -925,15 +925,14 @@ tương tự với UDP 3702 ở phần Discovery).
   trạng thái production dự kiến — production sau này vẫn cần bật lại
   `DVR_TOKEN_CHECK=1` và có cơ chế lấy token thật cho onvif-module. Việc này
   **chưa giải quyết**, chỉ tạm gỡ để code/test Phase 4 không bị chặn.
-- **Vấn đề riêng, vẫn còn treo cho `GetSnapshotUri`**: dù tắt token trên
-  `.125` giúp onvif-module tự gọi DVR nội bộ được, nhưng `GetSnapshotUri`
-  trả `Uri` cho **VMS bên ngoài tự gọi trực tiếp** — nếu sau này production
-  bật lại `DVR_TOKEN_CHECK=1`, VMS sẽ không biết cách đính token nội bộ này,
-  bị 401. Cần 1 trong: (a) thêm `/dvr/v1.0/GetSnapshot` vào `publicPaths()`
-  phía DVR, (b) DVR nhận token qua query string thay vì chỉ header (để nhúng
-  vào URI trả về), hoặc (c) onvif-module tự proxy ảnh (mở thêm 1 endpoint
-  HTTP thường ngoài SOAP, tự gọi DVR kèm token thật rồi relay JPEG lại cho
-  VMS). Chưa chọn hướng, cần bàn với team DVR khi tới lúc bật lại token thật.
+- **Vấn đề riêng cho `GetSnapshotUri` — ĐÃ RESOLVE (2026-09-22), không cần
+  hướng workaround nữa**: từng lo ngại nếu production bật lại
+  `DVR_TOKEN_CHECK=1`, VMS gọi thẳng `Uri` trả về sẽ không biết đính token,
+  bị 401 (3 hướng workaround (a)/(b)/(c) từng cân nhắc: thêm public path,
+  nhận token qua query string, hoặc onvif-module tự proxy ảnh). **Đã confirm
+  trực tiếp với team DVR: cơ chế Token này là logic cũ, chắc chắn sẽ bị bỏ
+  đi** — nên không cần thiết kế workaround, giữ nguyên `GetSnapshotUri` xây
+  URI gọi thẳng DVR như hiện tại.
 - **Dữ liệu thật thu được từ `.125` — lưu ý khi code**:
   - `token` theo đúng convention đã giả định: `"0"`/`"0_sub"`/`"1"`/`"1_sub"`
     (số kênh + hậu tố `_sub`), khớp logic tách `channel_id` cho
@@ -945,6 +944,102 @@ tương tự với UDP 3702 ở phần Discovery).
     `554` — không được hardcode port RTSP, phải lấy động từ chính field
     `StreamUri` DVR trả về (parse port ra) hoặc từ 1 API riêng, không suy
     đoán cố định.
+
+#### Port ONVIF/RTSP động từ MGMT + fix RTSP-over-HTTP tunnel — DONE, chờ DVR bật Digest (2026-09-22)
+
+- **Đã code + build + verify trên `.125` (DTT r10.xml)**:
+  - `main.cpp`: sau smoke test, nếu `backendMode != Mock` thì gọi
+    `mgmtClient->getNetworkProtocols()` (SQLite `mgmt_network_config.db`,
+    không phải đọc file config) để ghi đè `cfg.httpPort`/`cfg.rtspPort` đọc
+    tĩnh từ `onvif.conf` — map theo tên entry `"ONVIF"` (port SOAP web
+    service) và `"RTSP"` (port stream DVR thật). Lỗi/thiếu entry → giữ
+    nguyên giá trị `onvif.conf` (fallback chủ đích, không phải bug). Mock
+    giữ nguyên cfg tĩnh.
+  - `ServiceConfig` (`DeviceService.h`) thêm `useMockRtspRelay` (true chỉ
+    khi capability `media` = Mock) — `Media2Service::GetStreamUri` chỉ
+    route qua relay Digest giả `RTSP_RELAY_PORT=8555` khi cờ này bật; với
+    DVR thật thì trả thẳng URI backend cung cấp (MediaMTX tự lo Digest).
+  - `RtspOverHttp`/`RtspOverHttps`: port đích tunnel đổi từ hằng cứng sang
+    `cfg_.httpPort` (giá trị đã lấy động ở trên) — tự động đúng port web
+    service dù MGMT trả số nào.
+  - `OnvifServer::proxyRtspHttpTunnel` nhận `relayPort` làm tham số thay vì
+    hardcode; điều kiện nhận diện tunnel ở `listenLoop()` bỏ hẳn check
+    `streamPath` theo path mock (`/main`, `/sub1`,...) — chỉ còn dựa vào
+    header `x-rtsp-tunnelled`, vì path DVR thật (`/live/ch100`,...) không
+    khớp whitelist cũ nên trước đây tunnel không bao giờ kích hoạt được cho
+    stream thật.
+  - Verify build: `192.168.8.36` không dùng được (nhánh git ở đó cũ, lịch sử
+    Profile-G, không liên quan `onvif-v4.0.0`) → build-check thật thực hiện
+    trên chính `.125` (copy tạm `/tmp/build_check_local`, không đụng repo
+    thật) — build sạch, không lỗi/warning.
+  - Verify DTT (r10.xml, full run trên `.125`): log khởi động in đúng
+    `[main] Port from MGMT: ONVIF=8000, RTSP=554`; `MEDIA2_RTSS-1-1-2` STEP
+    12 ("same port with web service") và STEP 13 (same scheme) chuyển từ
+    FAIL → PASS; STEP 14 (Describe qua tunnel) nhận SDP thật từ MediaMTX
+    (không còn liên quan port/tunnel, chỉ còn fail vì Digest — xem dưới);
+    `MEDIA2_RTSS-1-1-1`/`1-1-3` (RTSP thường) vẫn trả đúng
+    `rtsp://192.168.8.125:554/live/ch100`, không bị route nhầm qua relay
+    mock 8555 — không hồi quy. Toàn bộ Media2 SOAP layer trước đó
+    (MEDIA2-1-1-4, 2-2-4, 2-2-7, 2-3-3, 5-1-1) vẫn PASS.
+- **Còn lại — ngoài phạm vi onvif-module, đã bàn giao DVR/MGMT team**:
+  `MEDIA2_RTSS-1-1-1/1-1-2/1-1-3` vẫn FAIL vì MediaMTX (RTSP server thật
+  của DVR) không bắt buộc Digest — DESCRIBE trả thẳng `200 OK` thay vì `401
+  + WWW-Authenticate: Digest` (bắt buộc với Profile T/M). Đã gửi tài liệu
+  chi tiết cho DVR team: `docs/Camera-alvis/rtsp-digest-and-http-tunnel-issue.md`
+  (nêu rõ cần bật `rtspAuthMethods: [digest]` trên MediaMTX + 1 endpoint
+  xác thực mới ở MGMT dựa trên `UserService::verifyOnvifHttpDigest()` có
+  sẵn). **Trạng thái (2026-09-22): đã báo DVR team, họ đang làm, sẽ báo lại
+  khi xong** — không còn việc gì phía onvif-module có thể làm tiếp cho tới
+  lúc đó. Khi có báo lại: chạy lại DTT xác nhận 3 case trên để đóng nốt
+  Media2/Profile T streaming.
+
+#### Quyết định: đưa Media1 (Profile S, `MediaLegacyHandler`) vào backend thật ngay trong Phase 4 (2026-09-22)
+
+- **Trước đó**: Media1 hoàn toàn mock — comment đầu `MediaLegacyHandler.cpp`
+  ghi rõ *"Không backend real"*, toàn bộ state (4 fixed profile
+  `profile_main/sub1/sub2/jpeg`, VSC/VEC) sống trong biến static ở file,
+  không hề gọi `ICameraBackend`/`AlvisBackendFacade`/DVR. `MediaLegacyService`
+  (adapter đăng ký vào `ServiceRegistry`, `pathPrefix "/onvif/media"`) cũng
+  được tạo không kèm backend (`std::make_unique<MediaLegacyService>()`,
+  `OnvifServer.cpp:259`) — khác hẳn `Media2Service`/`ImagingService`/
+  `DeviceService` đều nhận `backend_` qua constructor.
+- **Quyết định người dùng (2026-09-22)**: làm Media1 thật ngay trong Phase 4
+  này, không để lại đợt sau.
+- **Rủi ro/khoảng trống kiến trúc đã phát hiện khi nghiên cứu, cần chốt
+  hướng trước khi code**:
+  1. **Mô hình profile khác nhau giữa mock và DVR thật**: mock Media1 mô
+     phỏng 1 nguồn vật lý (`src_main`) → 3 tier độ phân giải (main 4K/sub1
+     720p/sub2 480p) + 1 profile JPEG riêng. DVR thật (`HttpDvrClient::
+     getProfiles()`, đã verify trên `.125`) trả token dạng kênh vật lý
+     (`"0"`, `"0_sub"`, `"1"`, `"1_sub"` — 2 kênh, mỗi kênh main+sub, tổng
+     4 profile) — cấu trúc khác hẳn, không phải 3 tier cùng 1 nguồn.
+     `Media2Service` ở nhánh backend thật đã dùng thẳng token DVR trả về
+     (không ép về tên `profile_main`/`profile_sub1` như nhánh mock).
+  2. **`ICameraBackend`/`Codec` enum KHÔNG có JPEG** (`MediaTypes.h`: `enum
+     class Codec { H264, H265 }`) — toàn bộ pipeline `getProfiles()` (cả
+     `HttpDvrClient` lẫn `AlvisBackendFacade`) không có chỗ cho encoding
+     JPEG. Mock Media1 hiện có hẳn 1 profile JPEG riêng phục vụ bộ test
+     Profile S JPEG (RTSS-1-1-31..36/45/53, MEDIA-2-1-9 negative). Nếu
+     route Media1 qua `ICameraBackend` như hiện trạng, profile JPEG sẽ
+     không có nguồn dữ liệu thật tương ứng.
+  3. `MediaLegacyHandler` hiện 100% `static` (hàm + state toàn cục), không
+     có constructor nhận `backend_`/`cfg_` — cần refactor sang instance
+     (giống pattern `Media2Service`) hoặc truyền `backend_` qua tham số
+     tĩnh, đồng thời sửa `MediaLegacyService` để nhận và truyền `backend_`
+     xuống khi `registry_.registerService(...)` ở `OnvifServer.cpp:259`.
+- **Đã chốt hướng (2026-09-22)**:
+  1. **Token**: dùng thẳng token DVR trả về (giống Media2 ở nhánh backend
+     thật) — không map ngược về tên cũ `profile_main/sub1/sub2`. `GetProfiles`
+     Media1 sẽ trả đúng các profile thật DVR có (2 kênh × main/sub).
+  2. **JPEG**: bỏ hẳn `profile_jpeg` — verify trực tiếp source DVR
+     (`dvr_controller.cpp:57`: *"MJPEG web streaming has been removed in
+     favor of H264/WebRTC via MediaMTX"*) xác nhận DVR mới không còn hỗ trợ
+     MJPEG streaming liên tục (chỉ còn `mjpeg_codec` dùng cho
+     `GetSnapshot` — ảnh tĩnh, không phải stream). Đây là giới hạn thật của
+     DVR, không phải thiếu sót `ICameraBackend`. Theo nguyên tắc ưu tiên
+     thay full bằng camera thật, chấp nhận các test JPEG của Profile S
+     (RTSS-1-1-31..36/45/53, MEDIA-2-1-9 nhánh JPEG) chuyển từ PASS sang
+     FAIL/không áp dụng ở lần chạy đầu.
 
 ### Operation ưu tiên
 

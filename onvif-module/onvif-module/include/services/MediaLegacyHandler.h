@@ -1,17 +1,22 @@
 #pragma once
 // MediaLegacyHandler — implement Media Service ver10 (Profile S / G / Q).
 // Trả XML thủ công vì Profile T dùng Media2 (ver20); Media1 chỉ dùng để claim
-// Profile S. Tất cả ops Media1 map ra state Media2 (cùng 3 profiles fixed).
+// Profile S. Profile/config thật đọc từ ICameraBackend (2026-09-22: chuyển
+// từ mock fixed-profile sang backend thật, xem docs/onvif-alvis/
+// 01-IMPLEMENTATION_PLAN.md mục "Media1 (Profile S) vào backend thật").
 
 #include <string>
+#include "interface/ICameraBackend.h"
 
 class MediaLegacyHandler {
 public:
     // Nhận diện request Media ver10 trong body; trả response XML nếu match,
     // "" nếu không phải op ver10 (fallback cho Media2 dispatcher).
     static std::string dispatch(const std::string& rawRequest);
-    // Đặt deviceIp + httpPort để build URL trong response (GetStreamUri...).
-    static void setEndpoint(const std::string& ip, int port);
+    // Đặt deviceIp + port để build URL trong response (GetStreamUri RtspOverHttp...).
+    static void setEndpoint(const std::string& ip, int httpPort, int rtspPort);
+    // Backend thật để đọc profile/config — nullptr = chưa sẵn sàng (trả rỗng/fault).
+    static void setBackend(CameraBackendPtr backend);
 
 private:
     // Discovery + info
@@ -28,7 +33,7 @@ private:
     // Video Source Config
     static std::string handleGetVideoSourceConfigurations();
     static std::string handleGetVideoSourceConfiguration(const std::string& req);
-    static std::string handleGetVideoSourceConfigurationOptions();
+    static std::string handleGetVideoSourceConfigurationOptions(const std::string& req);
     static std::string handleGetCompatibleVideoSourceConfigurations();
     static std::string handleAddVideoSourceConfiguration(const std::string& req);
     static std::string handleRemoveVideoSourceConfiguration(const std::string& req);
