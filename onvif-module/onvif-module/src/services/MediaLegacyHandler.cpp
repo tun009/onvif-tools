@@ -10,10 +10,14 @@
 //     dùng ở Media2Service::SetVideoEncoderConfiguration: Set chỉ là SOAP
 //     state, không respawn/reconfigure stream thật, tránh làm gián đoạn các
 //     stream đang được test streaming dùng chung).
-// Không còn profile JPEG: DVR mới đã bỏ hẳn MJPEG streaming liên tục (chỉ
-// còn mjpeg_codec dùng cho GetSnapshot ảnh tĩnh — xem AlvisOS/DVR/src/
-// controller/dvr_controller.cpp:57), nên các test Profile S JPEG
-// (RTSS-1-1-31..36/45/53, nhánh JPEG của MEDIA-2-1-9) chấp nhận FAIL.
+// MJPEG (2026-09-24): DVR team đã bổ sung lại continuous MJPEG streaming
+// (commit AlvisOS/DVR 2c74b09, do ONVIF Profile S bắt buộc — Device
+// MANDATORY, xem ONVIF Profile S Specification v1.3 mục 7.9). Mỗi kênh có
+// thêm 1 profile "<channel>_mjpeg" (token DVR thật, VD "0_mjpeg"/"1_mjpeg"),
+// Codec::JPEG, kích thước/FPS cố định theo HAL
+// (AlvisOS/DVR include/encoder_worker/encoder_worker.h: kMjpegWidth/Height,
+// kMjpegMinFps/MaxFps=1-20) — không cho SetVideoEncoderConfiguration đổi
+// chéo giữa profile MJPEG và profile H264/H265 (đúng khoá của chính DVR).
 
 #include "services/MediaLegacyHandler.h"
 #include "interface/ICameraBackend.h"
@@ -98,7 +102,8 @@ VecBaseline resolveVecBaseline(const std::string& vecToken,
     std::string profileToken = vecToken.rfind(prefix, 0) == 0 ? vecToken.substr(prefix.size()) : std::string();
     for (const auto& p : profiles) {
         if (p.token != profileToken) continue;
-        b.encoding = (p.videoConfig.codec == Codec::H265) ? "H265" : "H264";
+        b.encoding = (p.videoConfig.codec == Codec::JPEG) ? "JPEG"
+                   : (p.videoConfig.codec == Codec::H265) ? "H265" : "H264";
         b.width = p.videoConfig.resolution.width;
         b.height = p.videoConfig.resolution.height;
         b.frameRate = p.videoConfig.framerate;
@@ -831,8 +836,13 @@ std::string MediaLegacyHandler::handleGetVideoEncoderConfigurationOptions(const 
     }
     int w = 1920, h = 1080;
     bool found = false;
+    Codec targetCodec = Codec::H264;
     for (const auto& p : profiles) {
-        if (p.token == targetProfile) { w = p.videoConfig.resolution.width; h = p.videoConfig.resolution.height; found = true; break; }
+        if (p.token == targetProfile) {
+            w = p.videoConfig.resolution.width; h = p.videoConfig.resolution.height;
+            targetCodec = p.videoConfig.codec;
+            found = true; break;
+        }
     }
     if (!found && !profiles.empty()) {
         w = profiles.front().videoConfig.resolution.width;
@@ -842,8 +852,19 @@ std::string MediaLegacyHandler::handleGetVideoEncoderConfigurationOptions(const 
     std::ostringstream os;
     os << "<trt:GetVideoEncoderConfigurationOptionsResponse>"
           "<trt:Options>"
-            "<tt:QualityRange><tt:Min>0</tt:Min><tt:Max>10</tt:Max></tt:QualityRange>"
-            "<tt:H264>"
+            "<tt:QualityRange><tt:Min>0</tt:Min><tt:Max>10</tt:Max></tt:QualityRange>";
+    if (targetCodec == Codec::JPEG) {
+        // DVR MJPEG profile (AlvisOS/DVR include/encoder_worker/encoder_worker.h):
+        // kích thước cố định (đọc động từ backend ở trên, không hardcode), FPS
+        // 1-20 (kMjpegMinFps/kMjpegMaxFps). Không có GovLength/H264Profile —
+        // JPEG không có khái niệm GOP/profile như H264.
+        os << "<tt:JPEG>"
+              "<tt:ResolutionsAvailable><tt:Width>" << w << "</tt:Width><tt:Height>" << h << "</tt:Height></tt:ResolutionsAvailable>"
+              "<tt:FrameRateRange><tt:Min>1</tt:Min><tt:Max>20</tt:Max></tt:FrameRateRange>"
+              "<tt:EncodingIntervalRange><tt:Min>1</tt:Min><tt:Max>1</tt:Max></tt:EncodingIntervalRange>"
+            "</tt:JPEG>";
+    } else {
+        os << "<tt:H264>"
               "<tt:ResolutionsAvailable><tt:Width>" << w << "</tt:Width><tt:Height>" << h << "</tt:Height></tt:ResolutionsAvailable>"
               "<tt:GovLengthRange><tt:Min>1</tt:Min><tt:Max>60</tt:Max></tt:GovLengthRange>"
               "<tt:FrameRateRange><tt:Min>1</tt:Min><tt:Max>30</tt:Max></tt:FrameRateRange>"
@@ -851,8 +872,9 @@ std::string MediaLegacyHandler::handleGetVideoEncoderConfigurationOptions(const 
               "<tt:H264ProfilesSupported>Baseline</tt:H264ProfilesSupported>"
               "<tt:H264ProfilesSupported>Main</tt:H264ProfilesSupported>"
               "<tt:H264ProfilesSupported>High</tt:H264ProfilesSupported>"
-            "</tt:H264>"
-          "</trt:Options>"
+            "</tt:H264>";
+    }
+    os << "</trt:Options>"
         "</trt:GetVideoEncoderConfigurationOptionsResponse>";
     return os.str();
 }
@@ -913,13 +935,40 @@ std::string MediaLegacyHandler::handleSetVideoEncoderConfiguration(const std::st
     int nw = toi(ws, 0), nh = toi(hs, 0);
     int nfr = toi(fr, 0), ngv = toi(gv, 0), nql = toi(ql, -1);
 
-    // Backend thật (DVR) chỉ hỗ trợ H264 (không còn JPEG streaming — xem
-    // comment đầu file) — mọi Encoding khác coi là không hợp lệ.
+    // Suy ngược profile token thật từ cfgTok (đúng quy ước
+    // videoEncoderConfigToken()) để biết baseline codec DVR thật đang là gì.
+    // DVR thật khoá cứng: profile MJPEG chỉ nhận Encoding=JPEG, profile
+    // H264 chỉ nhận Encoding=H264 — không cho đổi chéo (xem AlvisOS/DVR
+    // src/controller/api/rest/routes_live_profiles.cpp, log
+    // "SET-ENC-REJECT ... JPEG is only available on the MJPEG profile").
+    static const std::string vecPrefix = "video_encoder_config_";
+    std::string profTok = cfgTok.rfind(vecPrefix, 0) == 0 ? cfgTok.substr(vecPrefix.size()) : std::string();
+    bool baselineIsJpeg = false;
+    int baseW = 0, baseH = 0;
+    for (const auto& p : backendProfiles()) {
+        if (p.token != profTok) continue;
+        baselineIsJpeg = (p.videoConfig.codec == Codec::JPEG);
+        baseW = p.videoConfig.resolution.width;
+        baseH = p.videoConfig.resolution.height;
+        break;
+    }
+
     bool invalid = false;
-    if (!enc.empty() && enc != "H264") invalid = true;
-    if (nw > 3840 || nh > 2160) invalid = true;
+    if (!enc.empty()) {
+        if (enc != "H264" && enc != "JPEG") invalid = true;
+        else if ((enc == "JPEG") != baselineIsJpeg) invalid = true;
+    }
+    if (baselineIsJpeg) {
+        // MJPEG DVR thật: kích thước cố định (không cho đổi), FPS 1-20
+        // (AlvisOS/DVR include/encoder_worker/encoder_worker.h:
+        // kMjpegMinFps/kMjpegMaxFps).
+        if (!ws.empty() && !hs.empty() && (nw != baseW || nh != baseH)) invalid = true;
+        if (!fr.empty() && (nfr > 20 || nfr < 1)) invalid = true;
+    } else {
+        if (nw > 3840 || nh > 2160) invalid = true;
+        if (nfr > 30 || nfr < 0) invalid = true;
+    }
     if (!gv.empty() && (ngv > 60 || ngv < 0)) invalid = true;
-    if (nfr > 30 || nfr < 0) invalid = true;
     if (nql > 10 || nql < -1) invalid = true;
     if (invalid) {
         return
@@ -949,7 +998,11 @@ std::string MediaLegacyHandler::handleSetVideoEncoderConfiguration(const std::st
 
 std::string MediaLegacyHandler::handleGetGuaranteedNumberOfVideoEncoderInstances(const std::string& req) {
     (void)req;
-    // Chỉ còn H264 — DVR mới đã bỏ MJPEG streaming liên tục (không còn profile_jpeg).
+    // GIỮ NGUYÊN 1/H264 — dù DVR giờ chạy JPEG thường trực song song H264,
+    // RTSS-1-1-27..30 (đang PASS) dùng chính TotalNumber này để quyết định mở
+    // bao nhiêu RTSP session đồng thời; đổi lên 2 là thay đổi hành vi test
+    // chưa verify được (không có DTT tool ở đây) — để riêng, không đụng vào
+    // trong lần sửa JPEG này.
     return
         "<trt:GetGuaranteedNumberOfVideoEncoderInstancesResponse>"
           "<trt:TotalNumber>1</trt:TotalNumber>"

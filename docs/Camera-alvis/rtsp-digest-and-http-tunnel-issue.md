@@ -1,6 +1,31 @@
 # RTSP live streaming: cần bật Digest auth bắt buộc trên MediaMTX
 
-## Bối cảnh
+> **RESOLVED (2026-09-22) — đề xuất bên dưới KHÔNG phải cách DVR team đã làm,
+> giữ tài liệu này chỉ để tham khảo lịch sử.**
+>
+> DVR team không dùng MediaMTX cho RTSP live như tài liệu này giả định lúc
+> viết. RTSP server thật của DVR là **GStreamer `gst-rtsp-server` tự viết**
+> (`AlvisOS/DVR/src/stream_server/rtsp_server.cpp`, xác nhận qua header
+> response `Server: GStreamer RTSP server`), bật thẳng
+> `gst_rtsp_auth_set_supported_methods(auth_, GST_RTSP_AUTH_DIGEST)` với
+> realm cố định `"onvif"` (khớp `UserService` bên MGMT). Tài khoản được nạp
+> bằng class mới `OnvifUserStore`
+> (`AlvisOS/DVR/include/database/onvif_user_store.h`) — **đọc thẳng, read-only,
+> file SQLite `/media/database/mgmt.db` của MGMT**, tự giải mã password
+> (AES-256-GCM) rồi gọi `gst_rtsp_auth_add_digest(...)` cho từng account.
+> **Không hề có endpoint HTTP callback nào** — không cần MGMT lộ thêm API như
+> phương án `authHTTPAddress` đề xuất ở dưới, vì DVR và MGMT chạy chung 1
+> thiết bị, cùng quyền truy cập filesystem.
+>
+> Verify bằng DTT thật `r11.xml` (2026-09-22): `MEDIA2_RTSS-1-1-1/1-1-2/1-1-3`
+> đều `TEST PASSED`, request RTSP mang đúng
+> `Authorization: Digest username="admin", realm="onvif", ...`.
+>
+> Chi tiết đầy đủ: `docs/onvif-alvis/01-IMPLEMENTATION_PLAN.md`, mục "RTSP
+> Digest authentication (Profile T/M) — RESOLVED, DTT xác nhận PASS (r11.xml,
+> 2026-09-22)". Không cần hành động gì thêm cho hạng mục này.
+
+## Bối cảnh (lịch sử — đề xuất ban đầu, không phải cách đã triển khai)
 
 Đang tích hợp ONVIF service với DVR thật. Chạy ONVIF Device Test Tool (DTT), toàn bộ Media2 SOAP layer (GetProfiles, VideoSource/VideoEncoder Configuration, SnapshotUri, RtspOverHttp URI/port/tunnel) đã **PASS**.
 

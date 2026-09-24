@@ -1040,6 +1040,55 @@ tương tự với UDP 3702 ở phần Discovery).
      thay full bằng camera thật, chấp nhận các test JPEG của Profile S
      (RTSS-1-1-31..36/45/53, MEDIA-2-1-9 nhánh JPEG) chuyển từ PASS sang
      FAIL/không áp dụng ở lần chạy đầu.
+- **Đã code xong, build sạch trên `.125`** (`/tmp/build_check_media1`,
+  `EXIT_CODE=0`, không đè repo thật) — `MediaLegacyHandler` giờ đọc
+  `backend_->getProfiles()/getStreamUri()/getSnapshotUri()` thật thay vì
+  state tĩnh; thêm `MediaLegacyHandler::setBackend()`, gọi cùng chỗ với
+  `setEndpoint()` trong `OnvifServer::listenLoop()`. Người dùng đã pull +
+  build + restart trên `.125` thật (build 2026-09-22 10:53, PID mới, log xác
+  nhận cấu hình đúng).
+
+#### RTSP Digest authentication (Profile T/M) — RESOLVED, DTT xác nhận PASS (r11.xml, 2026-09-22)
+
+- **Trạng thái cũ**: `MEDIA2_RTSS-1-1-1/1-1-2/1-1-3` fail vì RTSP DESCRIBE
+  trả `200 OK` thẳng, không yêu cầu Digest — đã bàn giao DVR/MGMT team qua
+  `docs/Camera-alvis/rtsp-digest-and-http-tunnel-issue.md` (đề xuất
+  MediaMTX + `authHTTPAddress` callback về MGMT).
+- **Cách DVR team thực tế đã làm — KHÁC với đề xuất trong tài liệu bàn giao**:
+  đối chiếu trực tiếp source DVR mới nhất (`AlvisOS/DVR`):
+  - RTSP server thật của DVR là **RTSP server GStreamer tự viết**
+    (`src/stream_server/rtsp_server.cpp`), không phải MediaMTX đứng sau
+    Digest như đã giả định trước đó — response header `Server: GStreamer
+    RTSP server` (thấy rõ trong `r11.xml`) xác nhận điều này, không phải
+    `Server: mediamtx`.
+  - DVR bật thẳng `gst_rtsp_auth_set_supported_methods(auth_,
+    GST_RTSP_AUTH_DIGEST)` (realm cố định `"onvif"`, khớp đúng realm
+    `UserService` bên MGMT dùng — có comment ghi rõ 2 bên phải khớp).
+  - Tài khoản nạp trực tiếp bằng `OnvifUserStore` (file mới:
+    `include/database/onvif_user_store.h` /
+    `src/database/onvif_user_store.cpp`) — **đọc thẳng file SQLite
+    `/media/database/mgmt.db` của MGMT (read-only)**, tự giải mã password
+    (AES-256-GCM, cùng key lưu trong DB) rồi gọi
+    `gst_rtsp_auth_add_digest(auth_, username, password, ...)` cho từng
+    account — **không hề có endpoint HTTP callback nào cả**, không cần MGMT
+    lộ thêm API gì, không đúng như phương án `authHTTPAddress` đã đề xuất
+    trong tài liệu bàn giao trước đó. DVR tự đọc thẳng DB MGMT vì 2 service
+    chạy chung 1 thiết bị, cùng quyền truy cập filesystem.
+  - Có thêm 1 nguồn nạp tài khoản qua biến môi trường (dòng
+    `user:pass`), dùng cho fallback/dev, không phải đường chính.
+- **Verify bằng DTT thật (`r11.xml`, chạy 2026-09-22)**: `MEDIA2_RTSS-1-1-1`
+  (RTP-Unicast/UDP), `MEDIA2_RTSS-1-1-2` (RTP-Unicast/RTSP/HTTP/TCP — cả
+  bước "same port/scheme with web service" lẫn tunnel Describe qua port
+  8000), `MEDIA2_RTSS-1-1-3` (RTP/RTSP/TCP) — **cả 3 đều `TEST PASSED`**,
+  request RTSP DESCRIBE/SETUP/PLAY/TEARDOWN đều mang đúng
+  `Authorization: Digest username="admin", realm="onvif", ...` và server trả
+  `200 OK` hợp lệ (không còn `200 OK` trần trụi không auth như trước).
+- **Kết luận**: đây là hạng mục cuối cùng còn treo của Media2/Profile T
+  streaming trong Đợt 1 — **giờ đã đóng hoàn toàn**, không còn việc gì phía
+  onvif-module hay MGMT cần làm thêm cho mục này. Tài liệu
+  `docs/Camera-alvis/rtsp-digest-and-http-tunnel-issue.md` coi như đã lỗi
+  thời (đề xuất kỹ thuật trong đó không phải cách được chọn) — có thể đánh
+  dấu resolved/archived khi cần dọn dẹp docs.
 
 ### Operation ưu tiên
 

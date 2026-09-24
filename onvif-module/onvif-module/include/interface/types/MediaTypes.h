@@ -2,7 +2,7 @@
 #include <string>
 #include <vector>
 
-enum class Codec           { H264 = 0, H265 = 1 };
+enum class Codec           { H264 = 0, H265 = 1, JPEG = 2 };
 enum class StreamProtocol  { RTSP = 0, RTP_UNICAST = 1, RTP_MULTICAST = 2 };
 enum class StreamType      { MAIN = 0, SUB1 = 1, SUB2 = 2 };
 

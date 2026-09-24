@@ -142,6 +142,7 @@ StreamType parseStreamType(const std::string& type) {
 
 Codec parseCodec(const std::string& encoding) {
     if (encoding == "H265") return Codec::H265;
+    if (encoding == "JPEG") return Codec::JPEG;
     return Codec::H264;
 }
 

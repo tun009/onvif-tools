@@ -271,7 +271,8 @@ int Media2Service::GetProfiles(
                         vec->token = (e.token == "profile_main") ? "video_encoder_config" : ("video_encoder_config_" + e.token);
                         vec->Name  = (e.token == "profile_main") ? "VideoEncoderConfig" : ("VideoEncoderConfig_" + e.token);
                     }
-                    vec->Encoding = (fp && fp->videoConfig.codec == Codec::H265) ? "H265" : "H264";
+                    vec->Encoding = (fp && fp->videoConfig.codec == Codec::JPEG) ? "JPEG"
+                                  : (fp && fp->videoConfig.codec == Codec::H265) ? "H265" : "H264";
                     vec->Quality = 50.0f;
                     vec->Resolution = soap_new_tt__VideoResolution2(soap);
                     if (vec->Resolution) {
@@ -700,9 +701,11 @@ int Media2Service::GetVideoEncoderConfigurations(
                 enc->Name = (p.token == "profile_main")
                           ? "VideoEncoderConfig"
                           : "VideoEncoderConfig_" + p.token;
-                // H.265 is not implemented by the mock publishers. Never
-                // advertise it for a configuration whose stream is H.264.
-                enc->Encoding = "H264";
+                // Đọc đúng codec thật từ backend — DVR thật giờ có cả profile
+                // MJPEG (Codec::JPEG) bên cạnh H264 (xem AlvisOS/DVR commit
+                // 2c74b09). H.265 chưa được publisher nào phát ra.
+                enc->Encoding = (p.videoConfig.codec == Codec::JPEG) ? "JPEG"
+                              : (p.videoConfig.codec == Codec::H265) ? "H265" : "H264";
                 enc->Quality = 50.0f;
                 enc->Resolution = soap_new_tt__VideoResolution2(soap);
                 if (enc->Resolution) {
@@ -974,13 +977,16 @@ int Media2Service::GetVideoEncoderConfigurationOptions(
     std::cout << "[Media2Service] GetVideoEncoderConfigurationOptions called for configToken="
               << configToken << ", profileToken=" << profileToken << std::endl;
 
-    // Helper lambda để tạo Option cho một codec cụ thể
-    auto createOption = [&](const std::string& codecName) {
+    // Helper lambda để tạo Option — tự suy ra codec thật từ backend (không
+    // nhận tham số codec cố định nữa) vì DVR thật giờ có cả profile MJPEG
+    // (Codec::JPEG) khoá cứng, không thể đổi qua lại với H264/H265 (xem
+    // AlvisOS/DVR commit 2c74b09, routes_live_profiles.cpp "JPEG is only
+    // available on the MJPEG profile") — Options phải phản ánh đúng codec
+    // profile đang có, không phải luôn quảng bá H264.
+    auto createOption = [&]() {
         auto opt = soap_new_tt__VideoEncoder2ConfigurationOptions(soap);
         if (!opt) return (tt__VideoEncoder2ConfigurationOptions*)nullptr;
-        
-        opt->Encoding = codecName;
-        
+
         opt->QualityRange = soap_new_tt__FloatRange(soap);
         if (opt->QualityRange) {
             opt->QualityRange->Min = 0.0f;
@@ -1012,6 +1018,7 @@ int Media2Service::GetVideoEncoderConfigurationOptions(
         }
         int rw = 1920, rh = 1080;  // default: spare / dynamic / fallback
         int beBitrate = 0;
+        Codec beCodec = Codec::H264;  // default: spare/dynamic/unknown vẫn quảng bá H264
         if (!beProfile.empty()) {
             try {
                 for (const auto& p : backend_->getProfiles()) {
@@ -1021,10 +1028,14 @@ int Media2Service::GetVideoEncoderConfigurationOptions(
                         rh = p.videoConfig.resolution.height;
                     }
                     beBitrate = p.videoConfig.bitrate;
+                    beCodec = p.videoConfig.codec;
                     break;
                 }
             } catch (...) {}
         }
+        const std::string codecName = (beCodec == Codec::JPEG) ? "JPEG"
+                                     : (beCodec == Codec::H265) ? "H265" : "H264";
+        opt->Encoding = codecName;
         resolutions.push_back({rw, rh});
         for (const auto& r : resolutions) {
             auto res = soap_new_tt__VideoResolution2(soap);
@@ -1047,24 +1058,31 @@ int Media2Service::GetVideoEncoderConfigurationOptions(
 
         // FrameRatesSupported — bắt buộc để test tool validate "frame rate limit
         // mapping" (MEDIA2-2-3-2/3). Cung cấp danh sách rời rạc phổ biến.
+        // JPEG DVR thật giới hạn 1-20fps (kMjpegMinFps/MaxFps), khác hẳn range
+        // H264/H265 — không dùng chung 1 danh sách.
         opt->FrameRatesSupported = soap_new_std__string(soap);
-        *opt->FrameRatesSupported = "30 25 15 10 5";
+        *opt->FrameRatesSupported = (codecName == "JPEG") ? "20 15 10 5 1" : "30 25 15 10 5";
 
-        // ProfilesSupported (H.264/H.265 profile constants)
-        opt->ProfilesSupported = soap_new_std__string(soap);
-        *opt->ProfilesSupported = (codecName == "H265")
-                                ? "Main"
-                                : "Baseline Main High";
+        // ProfilesSupported/GovLengthRange chỉ có ý nghĩa với H264/H265 (GOP,
+        // H264 profile constants) — JPEG không có khái niệm này, để trống
+        // (field optional trong schema ONVIF) thay vì quảng bá sai.
+        if (codecName != "JPEG") {
+            opt->ProfilesSupported = soap_new_std__string(soap);
+            *opt->ProfilesSupported = (codecName == "H265")
+                                    ? "Main"
+                                    : "Baseline Main High";
 
-        opt->GovLengthRange = soap_new_std__string(soap);
-        *opt->GovLengthRange = "1 60";
+            opt->GovLengthRange = soap_new_std__string(soap);
+            *opt->GovLengthRange = "1 60";
+        }
 
         return opt;
     };
 
-    // Keep options aligned with the configuration registry. All mock video
-    // publishers currently emit H.264; H.265 is not an available option.
-    auto option = createOption("H264");
+    // Options phản ánh đúng codec thật của profile đang hỏi (H264 hoặc JPEG
+    // cho profile MJPEG) — createOption() tự suy ra từ backend, không còn
+    // hardcode "H264".
+    auto option = createOption();
     if (option) resp.Options.push_back(option);
 
     return SOAP_OK;
@@ -1145,11 +1163,6 @@ int Media2Service::SetVideoEncoderConfiguration(
         MockSubscriptionManager::getInstance().fireConfigurationChanged(configToken, "VideoEncoder");
     };
 
-    // Ánh xạ configToken về profileToken tương ứng
-    std::string profileToken = "profile_main";
-    if (configToken.find("profile_sub1") != std::string::npos) profileToken = "profile_sub1";
-    else if (configToken.find("profile_sub2") != std::string::npos) profileToken = "profile_sub2";
-
     // The spare configuration is intentionally unassigned.  It is a
     // capability/configuration-pool entry, not an alias for profile_main.
     // Reconfiguring the main publisher while DTT validates the spare token
@@ -1161,37 +1174,31 @@ int Media2Service::SetVideoEncoderConfiguration(
         persistAndNotify();
         return SOAP_OK;
     }
-    
-    // Lấy cấu hình cũ làm gốc
-    std::vector<StreamProfile> profiles;
-    try {
-        profiles = backend_->getProfiles();
-    } catch (...) {}
-    
-    VideoEncoderConfig vecConfig;
-    for (const auto& p : profiles) {
-        if (p.token == profileToken) {
-            vecConfig = p.videoConfig;
-            break;
-        }
-    }
 
-    // Cập nhật các trường mới nhận được từ request
+    // DVR thật khoá cứng: profile MJPEG chỉ nhận Encoding=JPEG, mọi profile
+    // khác chỉ nhận H264 — không cho đổi chéo (xem AlvisOS/DVR
+    // routes_live_profiles.cpp "JPEG is only available on the MJPEG
+    // profile" / "the MJPEG profile only encodes JPEG"). Suy ngược profile
+    // token thật từ configToken (đúng quy ước "video_encoder_config_" +
+    // token) để biết baseline codec đang là gì.
     if (!newEnc->Encoding.empty()) {
-        if (newEnc->Encoding != "H264") {
+        if (newEnc->Encoding != "H264" && newEnc->Encoding != "JPEG") {
             return soap_sender_fault(this->soap, "Unsupported video encoding", nullptr);
         }
-        vecConfig.codec = Codec::H264;
-    }
-    
-    if (newEnc->Resolution) {
-        vecConfig.resolution.width = newEnc->Resolution->Width;
-        vecConfig.resolution.height = newEnc->Resolution->Height;
-    }
-    
-    if (newEnc->RateControl) {
-        vecConfig.framerate = (int)newEnc->RateControl->FrameRateLimit;
-        vecConfig.bitrate = newEnc->RateControl->BitrateLimit;
+        static const std::string vecPrefix = "video_encoder_config_";
+        std::string profTok = configToken.rfind(vecPrefix, 0) == 0
+                             ? configToken.substr(vecPrefix.size()) : configToken;
+        bool baselineIsJpeg = false;
+        try {
+            for (const auto& p : backend_->getProfiles()) {
+                if (p.token != profTok) continue;
+                baselineIsJpeg = (p.videoConfig.codec == Codec::JPEG);
+                break;
+            }
+        } catch (...) {}
+        if ((newEnc->Encoding == "JPEG") != baselineIsJpeg) {
+            return soap_sender_fault(this->soap, "Unsupported video encoding", nullptr);
+        }
     }
 
     // KHÔNG gọi backend_->setVideoEncoderConfig ở đây. Hàm đó chạy
@@ -1201,9 +1208,8 @@ int Media2Service::SetVideoEncoderConfiguration(
     // trình tự. Không test Media2 nào verify RESOLUTION stream (test đó là
     // RTSS-1-1-48 = Media1); readback sau Set (MEDIA2-2-3-4) đã dùng SOAP override
     // store (persistAndNotify). Giữ /main ổn định 4K 30fps để streaming luôn pass.
-    (void)vecConfig;
     std::cout << "[Media2Service] SetVideoEncoderConfiguration (SOAP state only, "
-                 "no /main respawn) token=" << profileToken << std::endl;
+                 "no /main respawn) token=" << configToken << std::endl;
 
     // MEDIA2-2-3-4: lưu field đã set + phát ConfigurationChanged.
     persistAndNotify();

@@ -47,6 +47,26 @@ Giao tiếp qua `include/interface/` (shared contract giữa 2 repo).
 
 ## Server & SSH
 
+> ⚠️ **`192.168.8.36` KHÔNG dùng để build-check cho nhánh `onvif-v4.0.0` nữa**
+> (xác nhận 2026-09-22, xem `docs/onvif-alvis/01-IMPLEMENTATION_PLAN.md` mục
+> Phase 4): nhánh git trên `.36` cũ, thuộc giai đoạn Profile-G, không liên
+> quan tới công việc tích hợp MGMT/DVR hiện tại. Server thật đang dùng để
+> build-check + chạy DTT thật là **`192.168.8.125`** (dưới đây).
+
+| Thông tin | Giá trị |
+|-----------|---------|
+| Host | `192.168.8.125` (port 22) |
+| User / Pass | `alvis` / `8yV9jBv4` |
+| Repo onvif-module | `/home/alvis/tungdt/onvif/onvif-tools/onvif-module/onvif-module` |
+| Log onvif-server (runtime) | `/tmp/onvif-server-8001.log` (đặt tên theo `http_port` tĩnh trong `onvif.conf` lúc `nohup` khởi động — port thật lúc chạy có thể khác nếu MGMT override, xem log dòng `[main] Port from MGMT: ...`) |
+| Log archive cũ | `/media/log_archive_20260921/onvif-server-8001.log` (và `mgmt_private.log` cùng thư mục) — log ngày cũ được xoay ra đây, không phải log runtime hiện tại |
+| Build temp | Không có thư mục cố định — script `ssh_check.py` (mục 1 bên dưới) tự tạo `/tmp/build_check` (hoặc `/tmp/build_check_<tên task>` khi cần giữ song song nhiều lần build-check) bằng cách copy sạch repo vào đó rồi build; **tuyệt đối không đè lên** `/home/alvis/tungdt/onvif/onvif-tools/onvif-module/onvif-module` (repo thật, user tự `git pull`) |
+| Khởi động hiện tại | Không phải systemd — chạy tay bằng `nohup ./onvif-server config/onvif.conf < /dev/null > /tmp/onvif-server-8001.log 2>&1 &` trong `setsid bash -c` từ repo thật |
+| DVR service thật | `dvr_new.service` (systemd), binary `/opt/dvr_apps/dvr`, config `/opt/dvr_apps/dvr_new.env` |
+| MediaMTX (web UI/WHEP, không phải RTSP ONVIF) | `/opt/dvr_apps/mediamtx` + `/opt/dvr_apps/mediamtx.yml` |
+
+**192.168.8.36 (cũ, chỉ tham khảo lịch sử — không dùng cho nhánh hiện tại):**
+
 | Thông tin | Giá trị |
 |-----------|---------|
 | Host | `192.168.8.36` (port 22) |
@@ -67,9 +87,9 @@ Cách: copy repo sang `/tmp/build_check` → upload **file vừa sửa** vào đ
 ```python
 # scripts/ssh_check.py — chạy: python scripts/ssh_check.py
 import paramiko
-HOST='192.168.8.36'; USER='tomotech'; PW='Tomotech@123'
+HOST='192.168.8.125'; USER='alvis'; PW='8yV9jBv4'
 BASE='D:/Elcom/Ovif-mock/projects/onvif-module/onvif-module'
-REPO='/home/tomotech/tungdt/onvif-tools/onvif-module/onvif-module'
+REPO='/home/alvis/tungdt/onvif/onvif-tools/onvif-module/onvif-module'
 
 # ⬇️ Chỉ liệt kê file BẠN VỪA SỬA (không cần toàn bộ)
 FILES = [
@@ -102,9 +122,9 @@ Kết quả: nếu chỉ thấy `=== END ===` (không có dòng `error:`) → **
 # scripts/ssh_status.py
 import paramiko
 c = paramiko.SSHClient(); c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-c.connect('192.168.8.36','22','tomotech','Tomotech@123',timeout=15)
+c.connect('192.168.8.125','22','alvis','8yV9jBv4',timeout=15)
 _,so,_ = c.exec_command(
-    'cd ~/tungdt/onvif-tools/onvif-module/onvif-module && git status --porcelain src include && '
+    'cd ~/tungdt/onvif/onvif-tools/onvif-module/onvif-module && git status --porcelain src include && '
     'echo === && rm -rf /tmp/build_check && echo cleaned', timeout=30)
 print(so.read().decode())   # rỗng trước === = repo sạch
 c.close()
@@ -116,10 +136,10 @@ c.close()
 # scripts/ssh_log.py — đọc log sau khi user chạy DTT test
 import paramiko
 c = paramiko.SSHClient(); c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-c.connect('192.168.8.36', username='tomotech', password='Tomotech@123', timeout=15)
+c.connect('192.168.8.125', username='alvis', password='8yV9jBv4', timeout=15)
 # Lọc theo pattern cần debug (VD SOAP action, token, event topic)
 _,so,_ = c.exec_command(
-    'grep -E "GetProfiles|SetVideoEncoder|\\[Tunnel\\]|error" /tmp/onvif-server.log | tail -60',
+    'grep -E "GetProfiles|SetVideoEncoder|\\[Tunnel\\]|error" /tmp/onvif-server-8001.log | tail -60',
     timeout=15)
 print(so.read().decode())
 c.close()
@@ -130,7 +150,23 @@ Grep pattern hữu ích: SOAP action (`GetProfiles`), token (`profile_main`), tu
 ### 4. Kiểm tra trạng thái process (khi test fail bất thường)
 
 ```python
-# Phát hiện stale process giữ port 8080 (bài học sự cố 09/07)
+# .125 — không có mock-camera-server (DVR/MGMT thật chạy sẵn qua systemd,
+# chỉ mình onvif-server là process chạy tay/nohup)
+import paramiko
+c = paramiko.SSHClient(); c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+c.connect('192.168.8.125', username='alvis', password='8yV9jBv4', timeout=15)
+_,so,_ = c.exec_command(
+    'echo "=== onvif-server processes ==="; ps -o pid,lstart,cmd -C onvif-server 2>/dev/null; '
+    'echo "=== port 8000/8001/554/8554 ==="; ss -ltnp 2>/dev/null | grep -E ":(8000|8001|554|8554)\\b"; '
+    'echo "=== dvr_new / MGMT ==="; systemctl is-active dvr_new mgmt 2>/dev/null', timeout=15)
+print(so.read().decode())
+c.close()
+```
+
+Nếu thấy **>1 onvif-server** hoặc process khởi động từ ngày cũ → stale, cần restart sạch (mục 5).
+
+Trên `.36` (cũ, mock-camera-server) có bài học stale process giữ port 8080 (09/07) — script gốc:
+```python
 import paramiko
 c = paramiko.SSHClient(); c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 c.connect('192.168.8.36', username='tomotech', password='Tomotech@123', timeout=15)
@@ -142,15 +178,23 @@ print(so.read().decode())
 c.close()
 ```
 
-Nếu thấy **>1 onvif-server** hoặc process khởi động từ ngày cũ → stale, cần restart sạch (mục 5).
-
 ## Build & deploy
 
 ```bash
 make full                                    # build local / trên server
 ```
 
-**Deploy chuẩn** (tránh stale process giữ port 8080 — bài học 09/07):
+**Deploy trên `.125`** (repo thật, không phải `/tmp/build_check`):
+```bash
+cd /home/alvis/tungdt/onvif/onvif-tools/onvif-module/onvif-module
+git pull
+make clean && make full   # camera từng gặp link nhầm object cũ nếu chỉ `make full` — luôn clean trước
+pkill -f onvif-server; sleep 1
+ps aux | grep onvif-server | grep -v grep   # verify rỗng
+setsid nohup ./onvif-server config/onvif.conf < /dev/null > /tmp/onvif-server-8001.log 2>&1 &
+```
+
+**Deploy trên `.36`** (cũ, có thêm mock-camera-server — tránh stale process giữ port 8080, bài học 09/07):
 ```bash
 pkill -f onvif-server; pkill -f mock-camera-server
 sleep 1
