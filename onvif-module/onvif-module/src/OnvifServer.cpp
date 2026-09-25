@@ -254,7 +254,7 @@ OnvifServer::OnvifServer(const ServiceConfig& cfg,
       authClient_(std::move(authClient)) {
     // ── Đăng ký service string-based vào registry (Phase 2+3 refactor) ──
     // Thêm service mới: chỉ registerService() ở đây, KHÔNG sửa listenLoop.
-    registry_.registerService(std::make_unique<DeviceIOService>());
+    registry_.registerService(std::make_unique<DeviceIOService>(backend_));
     // M2: Media2 metadata/analytics config (chain sau MediaLegacy, cùng /onvif/media).
     registry_.registerService(std::make_unique<Media2MetadataService>());
     registry_.registerService(std::make_unique<MediaLegacyService>());

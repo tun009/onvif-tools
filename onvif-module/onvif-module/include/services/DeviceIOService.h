@@ -10,10 +10,15 @@
 
 class DeviceIOService : public IOnvifService {
 public:
+    explicit DeviceIOService(CameraBackendPtr backend) : backend_(std::move(backend)) {}
+
     std::string pathPrefix() const override { return "/onvif/deviceIO"; }
     std::string name() const override { return "DeviceIOService"; }
 
     std::string handle(const std::string& rawRequest) override {
-        return DeviceIOHandler::dispatch(rawRequest);
+        return DeviceIOHandler::dispatch(rawRequest, backend_);
     }
+
+private:
+    CameraBackendPtr backend_;
 };

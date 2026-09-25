@@ -2,6 +2,7 @@
 // Cần cho Profile T §7.10.3 (GetVideoSources mandatory qua DeviceIO namespace).
 
 #include "services/DeviceIOHandler.h"
+#include <set>
 #include <sstream>
 
 namespace {
@@ -67,14 +68,32 @@ std::string DeviceIOHandler::handleGetServiceCapabilities() {
         "</tmd:GetServiceCapabilitiesResponse>";
 }
 
-std::string DeviceIOHandler::handleGetVideoSources() {
+std::string DeviceIOHandler::handleGetVideoSources(const CameraBackendPtr& backend) {
     // DeviceIO WSDL: response chứa list <tmd:Token> (tt:ReferenceToken).
     // KHÁC Media1 (trt) format <trt:VideoSources token="..."/>. IMAGING-1-1-*
     // tests validate strict theo schema DeviceIO.
-    return
-        "<tmd:GetVideoSourcesResponse>"
-          "<tmd:Token>src_main</tmd:Token>"
-        "</tmd:GetVideoSourcesResponse>";
+    //
+    // Đọc sourceToken thật từ backend (2026-09-25) — trước đây hardcode
+    // "src_main", một token mock không tồn tại trên backend thật. Hậu quả:
+    // IMAGING-2-1-16 (MOVE – INVALID VIDEOSOURCETOKEN) lấy token "src_main" từ
+    // đây làm baseline, rồi coi mọi token KHÁC là "invalid" — nhưng token đó
+    // (VD "1") lại là VideoSource thật hợp lệ trên DVR, nên server chấp nhận
+    // đúng thay vì trả fault như DTT kỳ vọng ("No SOAP fault received").
+    std::set<std::string> tokens;
+    if (backend) {
+        try {
+            for (const auto& p : backend->getProfiles()) tokens.insert(p.sourceToken);
+        } catch (const std::exception&) {}
+    }
+    if (tokens.empty()) {
+        // Fallback (mock/lỗi backend) — giữ hành vi cũ để không phá mock mode.
+        tokens.insert("src_main");
+    }
+    std::ostringstream os;
+    os << "<tmd:GetVideoSourcesResponse>";
+    for (const auto& tok : tokens) os << "<tmd:Token>" << tok << "</tmd:Token>";
+    os << "</tmd:GetVideoSourcesResponse>";
+    return os.str();
 }
 
 std::string DeviceIOHandler::handleGetAudioSources() {
@@ -89,7 +108,8 @@ std::string DeviceIOHandler::handleGetDigitalInputs() {
     return "<tmd:GetDigitalInputsResponse/>";
 }
 
-std::string DeviceIOHandler::dispatch(const std::string& req) {
+std::string DeviceIOHandler::dispatch(const std::string& req,
+                                      const CameraBackendPtr& backend) {
     // Chỉ xử lý request có namespace DeviceIO.
     if (req.find(NS_DEVICEIO) == std::string::npos) return "";
     std::string rel = extractMessageId(req);
@@ -97,7 +117,7 @@ std::string DeviceIOHandler::dispatch(const std::string& req) {
     if (req.find("GetServiceCapabilities") != std::string::npos)
         return wrap(ACT_CAPS_RESP, rel, handleGetServiceCapabilities());
     if (req.find("GetVideoSources") != std::string::npos)
-        return wrap(ACT_GET_VS_RESP, rel, handleGetVideoSources());
+        return wrap(ACT_GET_VS_RESP, rel, handleGetVideoSources(backend));
     if (req.find("GetAudioSources") != std::string::npos)
         return wrap(ACT_GET_AS_RESP, rel, handleGetAudioSources());
     if (req.find("GetRelayOutputs") != std::string::npos)

@@ -181,6 +181,23 @@ int countVECUsage(const std::string& vecToken, const std::vector<StreamProfile>&
 }
 } // namespace
 
+// Tra sourceToken của 1 profile tạo động qua Media1 CreateProfile (g_dynProfiles
+// ở trên). Dùng bởi PtzService — các case PTZ-* (không phải MEDIA2_PTZ-*) dùng
+// Media1 legacy CreateProfile (xmlns=".../ver10/media/wsdl") để tạo profile
+// test, backend_->getProfiles() (DVR thật) không biết profile này (PTZ-3-1-1/
+// 3-1-2/3-1-4/3-1-5/5-1-3/7-1-3/7-2-3 fail "No profile with the given token"
+// ở r20.xml — cùng nguyên nhân đã fix cho Media2Service.cpp::g_dynProfiles,
+// nhưng đây là kho lưu RIÊNG của Media1, phải export thêm 1 hàm nữa).
+std::string resolveLegacyDynProfileSourceToken(const std::string& profileToken) {
+    std::lock_guard<std::mutex> lk(g_stateMtx);
+    auto it = g_dynProfiles.find(profileToken);
+    if (it == g_dynProfiles.end()) return "";
+    static const std::string prefix = "video_source_config_";
+    const std::string& vs = it->second.vsToken;
+    if (vs.rfind(prefix, 0) == 0) return vs.substr(prefix.size());
+    return "";
+}
+
 void MediaLegacyHandler::setEndpoint(const std::string& ip, int httpPort, int rtspPort) {
     g_deviceIp = ip;
     g_httpPort = httpPort;

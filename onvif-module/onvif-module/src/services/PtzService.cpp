@@ -5,12 +5,17 @@
 #include "utils/FaultBuilder.h"
 #include <ctime>
 #include <iostream>
+#include <map>
+#include <mutex>
 #include <set>
 #include <sstream>
 
-// Định nghĩa thật: Media2Service.cpp (tra g_dynProfiles — profile tạo động
-// qua CreateProfile, backend_->getProfiles() KHÔNG biết những profile này).
+// Định nghĩa thật: Media2Service.cpp / MediaLegacyHandler.cpp (tra
+// g_dynProfiles — profile tạo động qua CreateProfile, backend_->getProfiles()
+// KHÔNG biết những profile này). 2 kho RIÊNG BIỆT vì Media1 (ver10) và Media2
+// (ver20) CreateProfile là 2 handler khác nhau, không share state.
 extern std::string resolveDynProfileSourceToken(const std::string& profileToken);
+extern std::string resolveLegacyDynProfileSourceToken(const std::string& profileToken);
 
 namespace {
 // Generic normalized zoom space [0,1] — AlvisBackendFacade tự quy đổi sang/từ
@@ -55,6 +60,36 @@ const char* moveStatusStr(MoveStatus s) {
         default: return "IDLE";
     }
 }
+
+// DefaultPTZTimeout do SetConfiguration ghi — configuration không có field nào
+// khác user-configurable (không pan/tilt, không đổi default space), nhưng
+// PTZ-2-1-9 đòi GetConfiguration echo lại đúng timeout vừa Set (round-trip
+// check chuẩn ONVIF cho MỌI field client gửi, kể cả field ta không thực sự
+// dùng tới vì zoom-only không có timeout-based move).
+std::mutex g_cfgMtx;
+std::map<std::string, std::string> g_cfgTimeout;  // configToken -> DefaultPTZTimeout
+
+std::string ptzConfigurationXml(const std::string& src, const std::string& nodeTok,
+                                const std::string& cfgTok) {
+    std::string timeout;
+    {
+        std::lock_guard<std::mutex> lk(g_cfgMtx);
+        auto it = g_cfgTimeout.find(cfgTok);
+        if (it != g_cfgTimeout.end()) timeout = it->second;
+    }
+    std::ostringstream os;
+    os << "<tptz:PTZConfiguration token=\"" << escapeXml(cfgTok) << "\">"
+          "<tt:Name>PTZ Configuration " << escapeXml(src) << "</tt:Name>"
+          "<tt:UseCount>1</tt:UseCount>"
+          "<tt:NodeToken>" << escapeXml(nodeTok) << "</tt:NodeToken>";
+    if (!timeout.empty()) {
+        os << "<tt:DefaultPTZTimeout>" << escapeXml(timeout) << "</tt:DefaultPTZTimeout>";
+    }
+    os << "<tt:DefaultAbsoluteZoomPositionSpace>" << kZoomSpaceUri
+       << "</tt:DefaultAbsoluteZoomPositionSpace>"
+          "</tptz:PTZConfiguration>";
+    return os.str();
+}
 } // namespace
 
 PtzService::PtzService(struct soap* soap, const ServiceConfig& cfg,
@@ -87,9 +122,11 @@ std::string PtzService::resolveProfileToSource(const std::string& profileToken) 
             }
         } catch (const std::exception&) {}
     }
-    // Fallback: profile tạo động qua CreateProfile (Media2/Media1) — không có
-    // trong backend_->getProfiles() (xem resolveDynProfileSourceToken).
-    return resolveDynProfileSourceToken(profileToken);
+    // Fallback: profile tạo động qua CreateProfile — không có trong
+    // backend_->getProfiles(). Thử cả 2 kho (Media2 rồi Media1, độc lập nhau).
+    std::string src = resolveDynProfileSourceToken(profileToken);
+    if (!src.empty()) return src;
+    return resolveLegacyDynProfileSourceToken(profileToken);
 }
 
 int PtzService::sendXml(const std::string& body) {
@@ -215,13 +252,7 @@ int PtzService::GetConfigurations(_tptz__GetConfigurations*, _tptz__GetConfigura
     std::ostringstream body;
     body << "<tptz:GetConfigurationsResponse>";
     for (const auto& src : sources) {
-        body << "<tptz:PTZConfiguration token=\"" << escapeXml(configToken(src)) << "\">"
-              "<tt:Name>PTZ Configuration " << escapeXml(src) << "</tt:Name>"
-              "<tt:UseCount>1</tt:UseCount>"
-              "<tt:NodeToken>" << escapeXml(nodeToken(src)) << "</tt:NodeToken>"
-              "<tt:DefaultAbsoluteZoomPositionSpace>" << kZoomSpaceUri
-                << "</tt:DefaultAbsoluteZoomPositionSpace>"
-             "</tptz:PTZConfiguration>";
+        body << ptzConfigurationXml(src, nodeToken(src), configToken(src));
     }
     body << "</tptz:GetConfigurationsResponse>";
     return sendXml(body.str());
@@ -238,14 +269,8 @@ int PtzService::GetConfiguration(_tptz__GetConfiguration *req, _tptz__GetConfigu
     }
     std::ostringstream body;
     body << "<tptz:GetConfigurationResponse>"
-          "<tptz:PTZConfiguration token=\"" << escapeXml(configToken(src)) << "\">"
-            "<tt:Name>PTZ Configuration " << escapeXml(src) << "</tt:Name>"
-            "<tt:UseCount>1</tt:UseCount>"
-            "<tt:NodeToken>" << escapeXml(nodeToken(src)) << "</tt:NodeToken>"
-            "<tt:DefaultAbsoluteZoomPositionSpace>" << kZoomSpaceUri
-              << "</tt:DefaultAbsoluteZoomPositionSpace>"
-          "</tptz:PTZConfiguration>"
-         "</tptz:GetConfigurationResponse>";
+         << ptzConfigurationXml(src, nodeToken(src), configToken(src))
+         << "</tptz:GetConfigurationResponse>";
     return sendXml(body.str());
 }
 
@@ -286,8 +311,14 @@ int PtzService::SetConfiguration(_tptz__SetConfiguration *req, _tptz__SetConfigu
                                               "Invalid PTZConfigurationToken"));
     }
     // Configuration cố định 1:1 theo sourceToken thật, không có field nào
-    // user-configurable (không pan/tilt, không đổi default space) — chấp nhận
-    // request hợp lệ nhưng không đổi gì, khớp docs Phase 5 "chưa làm".
+    // user-configurable thật sự (không pan/tilt, không đổi default space) —
+    // riêng DefaultPTZTimeout: không dùng tới (zoom-only, không continuous
+    // move) nhưng vẫn phải lưu + echo lại đúng ở GetConfiguration (PTZ-2-1-9
+    // round-trip check chuẩn ONVIF cho field client gửi).
+    if (req->PTZConfiguration->DefaultPTZTimeout) {
+        std::lock_guard<std::mutex> lk(g_cfgMtx);
+        g_cfgTimeout[tok] = req->PTZConfiguration->DefaultPTZTimeout;
+    }
     return sendXml("<tptz:SetConfigurationResponse/>");
 }
 
@@ -301,13 +332,7 @@ int PtzService::GetCompatibleConfigurations(_tptz__GetCompatibleConfigurations *
 
     return sendXml(
         "<tptz:GetCompatibleConfigurationsResponse>"
-          "<tptz:PTZConfiguration token=\"" + escapeXml(configToken(src)) + "\">"
-            "<tt:Name>PTZ Configuration " + escapeXml(src) + "</tt:Name>"
-            "<tt:UseCount>1</tt:UseCount>"
-            "<tt:NodeToken>" + escapeXml(nodeToken(src)) + "</tt:NodeToken>"
-            "<tt:DefaultAbsoluteZoomPositionSpace>" + std::string(kZoomSpaceUri) +
-              "</tt:DefaultAbsoluteZoomPositionSpace>"
-          "</tptz:PTZConfiguration>"
+        + ptzConfigurationXml(src, nodeToken(src), configToken(src)) +
         "</tptz:GetCompatibleConfigurationsResponse>");
 }
 
