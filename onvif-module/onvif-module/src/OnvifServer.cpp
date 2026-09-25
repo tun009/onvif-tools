@@ -1,6 +1,7 @@
 #include "OnvifServer.h"
 #include "services/Media2Service.h"
 #include "services/ImagingService.h"
+#include "services/PtzService.h"
 #include "services/MediaLegacyHandler.h"
 #include "services/DeviceIOHandler.h"
 #include "services/DeviceIOService.h"
@@ -431,6 +432,7 @@ void OnvifServer::listenLoop() {
         DeviceService deviceSvc(soap, cfg_, backend_);
         Media2Service media2Svc(soap, cfg_, backend_);
         ImagingService imagingSvc(soap, cfg_, backend_);
+        PtzService ptzSvc(soap, cfg_, backend_);
 
         // Thiết lập cấu hình lại cho soap context sau khi bị Service constructors ghi đè/reset
         soap->namespaces = get_custom_namespaces();
@@ -448,6 +450,7 @@ void OnvifServer::listenLoop() {
         reconfigure(deviceSvc.soap);
         reconfigure(media2Svc.soap);
         reconfigure(imagingSvc.soap);
+        reconfigure(ptzSvc.soap);
         // ── Dispatch dựa trên URL path ────────────────────────────────
         g_current_headers.clear();
         g_http_digest_authenticated = false;
@@ -592,6 +595,11 @@ void OnvifServer::listenLoop() {
                     serveResult = imagingSvc.dispatch();
                     soap->error = imagingSvc.soap->error;
                     soap->fault = imagingSvc.soap->fault;
+                } else if (path.find("/onvif/ptz") != std::string::npos) {
+                    // Yêu cầu đến PtzService (zoom-only)
+                    serveResult = ptzSvc.dispatch();
+                    soap->error = ptzSvc.soap->error;
+                    soap->fault = ptzSvc.soap->fault;
                 } else {
                     // Mặc định: DeviceService (/onvif/device hoặc /onvif/device_service)
                     serveResult = deviceSvc.dispatch();

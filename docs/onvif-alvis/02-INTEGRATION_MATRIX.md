@@ -24,9 +24,9 @@ UNSUPPORTED       Sản phẩm quyết định không hỗ trợ và không adve
 | Date/time/NTP | S/T/M/G | MGMT | Internal REST/IPC | REAL_DTT | GetSystemDateAndTime + SetSystemDateAndTime (case Manual) đã nối MGMT thật, DTT pass trên camera `192.168.8.124` 2026-09-15 (`3-1-1/3-1-4/3-1-5/3-1-11`). NTP (GetNTP/SetNTP) không mandatory, source viết xong nhưng chưa build/test |
 | Discovery/scopes | S/T/M/G | MGMT desired state + onvif-module runtime | REST/IPC + WS-Discovery | REAL_IN_PROGRESS | MGMT persist Discovery Mode/scopes; onvif-module phải là WS-Discovery responder duy nhất và phục hồi state sau restart |
 | ONVIF users/RBAC | S/T/M/G | MGMT/Security | Internal REST | REAL_IN_PROGRESS | HTTP Digest `REAL_VERIFIED` bằng DTT trên camera `192.168.8.127` ngày 2026-09-15: user `type=onvif` từ SQLite MGMT xác thực qua `onvif-module:8001 -> MGMT:8086`, `GetDeviceInformation` thành công; WSSE runtime evidence và RBAC chưa hoàn tất |
-| Media profiles | S/T/M | DVR | Internal API/IPC | REAL_IN_PROGRESS | Backend mới đã có stream/profile một phần; cần chốt contract/token |
-| Live RTSP | S/T | DVR | RTSP | REAL_IN_PROGRESS | Cần xác minh URI/SDP/auth với ONVIF profile |
-| Snapshot | S/T | DVR | HTTP/media API | MOCK | Cần xác nhận backend thật |
+| Media profiles | S/T/M | DVR | Internal API/IPC | REAL_DTT | Media1+Media2 GetProfiles/VideoSource/VideoEncoderConfig(Options) đã nối DVR thật, gồm cả profile MJPEG mới (`0_mjpeg`/`1_mjpeg`, Device MANDATORY Profile S). `r17.xml` (2026-09-24): 24/25 pass, chỉ còn `RTSS-1-1-48` fail (root cause: `1_sub` bị `enabled=false` trong DB DVR, không liên quan onvif-module — xem 01-IMPLEMENTATION_PLAN.md). Chưa test VMS/restart-failure nên chưa `REAL_VERIFIED` |
+| Live RTSP | S/T | DVR | RTSP | REAL_DTT | Digest auth + port động + RtspOverHttp tunnel + MJPEG đều pass DTT thật (`r11.xml`, `r17.xml`) trên `.125`. `1_sub` (channel 1 sub-stream) hiện 404 do DB DVR, không phải RTSP layer |
+| Snapshot | S/T | DVR | HTTP/media API | REAL_DTT | `GetSnapshotUri` build URI tĩnh trỏ thẳng `GET /dvr/v1.0/GetSnapshot` thật của DVR (JPEG thật từ `mjpeg_codec`, không phải mock). `MEDIA-6-1-1` pass trong `g13.xml`/`r12-r17` |
 | Metadata configuration | M/T | DVR/VPU | API/IPC | MOCK | Cần canonical metadata profile |
 | Imaging | S/T | MGMT + HAL | REST + control IPC | REAL_IN_PROGRESS | MGMT có ImagingSettings, phụ thuộc HAL capability |
 | PTZ/zoom/focus | S/T | HAL | BUS control IPC | REAL_IN_PROGRESS | Zoom/focus đã có một phần; pan/tilt tùy hardware |
@@ -60,9 +60,9 @@ UNSUPPORTED       Sản phẩm quyết định không hỗ trợ và không adve
 | GetScopes | Device | `IDeviceBackend::getScopes` | MGMT Discovery | REAL_IN_PROGRESS | Chưa ghi |
 | GetDiscoveryMode | Device | `IDeviceBackend::getDiscoveryMode` | MGMT Discovery | REAL_IN_PROGRESS | Cần bỏ state memory-only và phục hồi persistent state khi restart |
 | SetDiscoveryMode | Device | `IDeviceBackend::setDiscoveryMode` | MGMT Discovery + onvif-module `DiscoveryService` | REAL_IN_PROGRESS | MGMT persist; onvif-module apply Probe/Resolve behavior, không chạy `wsdd` song song |
-| GetProfiles | Media1/2 | `IMediaBackend::getProfiles` | DVR | REAL_IN_PROGRESS | Chưa ghi |
-| GetStreamUri | Media1/2 | `IMediaBackend::getStreamUri` | DVR RTSP | REAL_IN_PROGRESS | Chưa ghi |
-| GetSnapshotUri | Media | `IMediaBackend::getSnapshotUri` | DVR | MOCK | Chưa ghi |
+| GetProfiles | Media1/2 | `IMediaBackend::getProfiles` | DVR | REAL_DTT | `r17.xml` (2026-09-24): PASS, gồm cả 2 profile MJPEG mới `0_mjpeg`/`1_mjpeg` |
+| GetStreamUri | Media1/2 | `IMediaBackend::getStreamUri` | DVR RTSP | REAL_DTT | PASS cho mọi token trừ `1_sub` (404, DB DVR `enabled=false`, không phải bug onvif-module — xem 01-IMPLEMENTATION_PLAN.md mục RTSS-1-1-48) |
+| GetSnapshotUri | Media | `IMediaBackend::getSnapshotUri` | DVR | REAL_DTT | `MEDIA-6-1-1` PASS (`g13.xml`, `r12-r17`), URI trỏ thẳng `GET /dvr/v1.0/GetSnapshot` thật |
 | GetImagingSettings | Imaging | `IImagingBackend::getSettings` | MGMT/HAL | REAL_IN_PROGRESS | Chưa ghi |
 | SetImagingSettings | Imaging | `IImagingBackend::setSettings` | MGMT/HAL | REAL_IN_PROGRESS | Chưa ghi |
 | ContinuousMove/Stop | PTZ | `IPtzBackend` | HAL/BUS | REAL_IN_PROGRESS | Chưa ghi |

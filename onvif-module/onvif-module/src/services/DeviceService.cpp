@@ -337,7 +337,7 @@ int DeviceService::GetCapabilities(
     // KHÔNG hỗ trợ: Media (chỉ có Media2/ver20), PTZ, Analytics → phải trả fault.
     bool wantAll = false, wantDevice = false, wantEvents = false,
          wantMedia = false, wantImaging = false, wantAnalytics = false,
-         reqUnsupported = false;
+         wantPTZ = false, reqUnsupported = false;
     if (!tds__GetCapabilities || tds__GetCapabilities->Category.empty()) {
         wantAll = true;
     } else {
@@ -349,7 +349,9 @@ int DeviceService::GetCapabilities(
                 case tt__CapabilityCategory::Imaging:   wantImaging = true; break;
                 // Media1 declared cho Profile S — Category=Media trả caps.
                 case tt__CapabilityCategory::Media:     wantMedia = true; break;
-                case tt__CapabilityCategory::PTZ:       reqUnsupported = true; break;
+                // PTZ zoom-only (lens thật, không pan/tilt — xem
+                // docs/onvif-alvis/01-IMPLEMENTATION_PLAN.md Phase 5).
+                case tt__CapabilityCategory::PTZ:       wantPTZ = true; break;
                 // Analytics declared cho Profile M (§7.10 Analytics Module).
                 case tt__CapabilityCategory::Analytics: wantAnalytics = true; break;
             }
@@ -472,7 +474,11 @@ int DeviceService::GetCapabilities(
         caps->Analytics->AnalyticsModuleSupport = true;
     }
 
-    // PTZ KHÔNG quảng bá: đây là Fixed Camera, không hỗ trợ PTZ trong Profile T.
+    // ── PTZ (zoom-only node, lens thật qua MGMT — không pan/tilt) ─────────
+    if (wantAll || wantPTZ) {
+        caps->PTZ = soap_new_tt__PTZCapabilities(soap);
+        caps->PTZ->XAddr = base + "/onvif/ptz";
+    }
 
     tds__GetCapabilitiesResponse.Capabilities = caps;
 
@@ -503,6 +509,7 @@ int DeviceService::GetServices(
            << " xmlns:tt=\"http://www.onvif.org/ver10/schema\""
            << " xmlns:trt=\"http://www.onvif.org/ver10/media/wsdl\""
            << " xmlns:tr2=\"http://www.onvif.org/ver20/media/wsdl\""
+           << " xmlns:tptz=\"http://www.onvif.org/ver20/ptz/wsdl\""
            << " xmlns:tev=\"http://www.onvif.org/ver10/events/wsdl\""
            << " xmlns:timg=\"http://www.onvif.org/ver20/imaging/wsdl\""
            << " xmlns:tmd=\"http://www.onvif.org/ver10/deviceIO/wsdl\""
@@ -580,6 +587,14 @@ int DeviceService::GetServices(
         svc("http://www.onvif.org/ver20/imaging/wsdl", "/onvif/imaging",
             21, 12, imgCaps);
 
+        // PTZ (zoom-only node, không pan/tilt/EFlip/Reverse — lens thật qua MGMT)
+        std::string ptzCaps =
+            "<tptz:Capabilities EFlip=\"false\" Reverse=\"false\" "
+             "GetCompatibleConfigurations=\"true\" MoveStatus=\"true\" "
+             "StatusPosition=\"true\"/>";
+        svc("http://www.onvif.org/ver20/ptz/wsdl", "/onvif/ptz",
+            21, 12, ptzCaps);
+
         // DeviceIO (Profile T §7.10.3 mandate GetVideoSources).
         // Fix MEDIA2-2-2-1: tool helper HelperConfigureMediaProfileWithVideoSource
         // gọi DeviceIO.GetVideoSources — nếu không có service crash NullRef.
@@ -647,6 +662,7 @@ int DeviceService::GetServices(
     add("http://www.onvif.org/ver20/media/wsdl",   "/onvif/media",          21, 12); // Media2 (Profile T)
     add("http://www.onvif.org/ver10/events/wsdl",  "/onvif/event",          21, 12); // Events (Profile T)
     add("http://www.onvif.org/ver20/imaging/wsdl", "/onvif/imaging",        21, 12); // Imaging (Profile T)
+    add("http://www.onvif.org/ver20/ptz/wsdl",     "/onvif/ptz",            21, 12); // PTZ (zoom-only, lens thật)
     add("http://www.onvif.org/ver10/deviceIO/wsdl", "/onvif/deviceIO",       21, 12); // DeviceIO (Profile T §7.10.3)
     add("http://www.onvif.org/ver20/analytics/wsdl", "/onvif/analytics",     21, 12); // Analytics (Profile M)
     add("http://www.onvif.org/ver10/recording/wsdl", "/onvif/recording",     21, 12); // Recording (Profile G)

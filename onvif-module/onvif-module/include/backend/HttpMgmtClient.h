@@ -24,6 +24,14 @@ public:
         const WssePasswordDigest& credential) override;
     OnvifAuthenticationResult verifyHttpDigest(
         const HttpDigestCredential& credential) override;
+
+    ImagingSettings getImagingSettings(const std::string& sourceToken) override;
+    void setImagingSettings(const std::string& sourceToken,
+                             const ImagingSettings& settings) override;
+    ZoomFocusState getZoomFocus(const std::string& sourceToken) override;
+    void setZoomFocus(const std::string& sourceToken,
+                       const ZoomFocusState& state) override;
+    LensBounds getLensBounds(const std::string& sourceToken) override;
 private:
     struct HttpResponse { int status = 0; std::string body; };
     HttpResponse request(const std::string& method, const std::string& path,

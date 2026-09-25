@@ -1,6 +1,7 @@
 #pragma once
 
 #include "interface/types/DeviceTypes.h"
+#include "interface/types/ImagingTypes.h"
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -41,6 +42,32 @@ struct OnvifAuthenticationResult {
     std::string userLevel;
 };
 
+// Zoom/focus lens thật — MGMT LensApiController (GET/PUT /mgmt/v1/Config/ZoomFocus,
+// GET /mgmt/v1/Config/LensInfo). Đây là contract riêng của MGMT (3 field luôn
+// gửi cùng nhau, FocusMode quyết định field nào áp dụng — xem
+// docs/onvif-alvis/01-IMPLEMENTATION_PLAN.md mục Phase 5), không map thẳng
+// 1-1 vào PTZVector/ImagingSettings nên tách struct riêng; AlvisBackendFacade
+// là nơi dịch sang/từ PTZVector cho ONVIF PTZ service.
+enum class ZoomFocusMode { AUTO_FOCUS = 0, MANUAL_FOCUS = 1, RUN_AF = 2, ZF_SYNC = 3 };
+
+struct ZoomFocusState {
+    float zoomValue  = 1.0f;   // tỉ lệ quang học, 1.0-4.0 (MGMT ZoomValue)
+    float focusValue = 50.0f;  // 0-100 (MGMT FocusValue)
+    ZoomFocusMode focusMode = ZoomFocusMode::AUTO_FOCUS;
+    bool zoomMoving  = false;  // MGMT ZMActive — motor zoom đang bận
+    bool focusMoving = false;  // MGMT FMActive — motor focus đang bận
+};
+
+// Biên độ zoom/focus thật của lens đang gắn (MGMT GET /mgmt/v1/Config/LensInfo).
+struct LensBounds {
+    float minZoom = 1.0f;
+    float maxZoom = 4.0f;
+    float stepZoom = 0.1f;
+    float minFocus = 0.0f;
+    float maxFocus = 100.0f;
+    float stepFocus = 1.0f;
+};
+
 class IMgmtClient {
 public:
     virtual ~IMgmtClient() = default;
@@ -66,4 +93,20 @@ public:
         const WssePasswordDigest& credential) = 0;
     virtual OnvifAuthenticationResult verifyHttpDigest(
         const HttpDigestCredential& credential) = 0;
+
+    // Imaging (Profile T §7.9 mandatory) — MGMT ImagingSettingsApiController.
+    // sourceToken: "0" (context) / "1" (ALPR), khớp VideoSourceToken thật.
+    // Chỉ map field đã có tương ứng rõ ràng cả 2 phía (Brightness/Contrast/
+    // ColorSaturation/Sharpness/BLC/WDR) — Exposure/WhiteBalance/IrCutFilter
+    // vẫn giữ echo cache cục bộ ở ImagingService (xem plan doc), không đụng ở
+    // đây.
+    virtual ImagingSettings getImagingSettings(const std::string& sourceToken) = 0;
+    virtual void setImagingSettings(const std::string& sourceToken,
+                                     const ImagingSettings& settings) = 0;
+
+    // Zoom/focus lens thật — MGMT LensApiController. sourceToken: "0"/"1".
+    virtual ZoomFocusState getZoomFocus(const std::string& sourceToken) = 0;
+    virtual void setZoomFocus(const std::string& sourceToken,
+                               const ZoomFocusState& state) = 0;
+    virtual LensBounds getLensBounds(const std::string& sourceToken) = 0;
 };

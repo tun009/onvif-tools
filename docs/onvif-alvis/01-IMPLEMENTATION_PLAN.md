@@ -1040,6 +1040,13 @@ tương tự với UDP 3702 ở phần Discovery).
      thay full bằng camera thật, chấp nhận các test JPEG của Profile S
      (RTSS-1-1-31..36/45/53, MEDIA-2-1-9 nhánh JPEG) chuyển từ PASS sang
      FAIL/không áp dụng ở lần chạy đầu.
+     > **ĐÍNH CHÍNH (2026-09-24)**: quyết định "chấp nhận FAIL" ở trên dựa
+     > trên giả định JPEG chỉ là optional — **sai**, đã tra lại đúng
+     > `ONVIF Profile S Specification v1.3` (không phải Profile T) và xác
+     > nhận MJPEG streaming là **Device MANDATORY** thật của Profile S. Đây
+     > là 1 regression thật, không phải đánh đổi vô hại. Đã yêu cầu DVR
+     > team bổ sung lại và fix xong hoàn toàn — xem mục "MJPEG streaming —
+     > RESOLVED" phía dưới, `r17.xml` xác nhận PASS toàn bộ.
 - **Đã code xong, build sạch trên `.125`** (`/tmp/build_check_media1`,
   `EXIT_CODE=0`, không đè repo thật) — `MediaLegacyHandler` giờ đọc
   `backend_->getProfiles()/getStreamUri()/getSnapshotUri()` thật thay vì
@@ -1090,6 +1097,152 @@ tương tự với UDP 3702 ở phần Discovery).
   thời (đề xuất kỹ thuật trong đó không phải cách được chọn) — có thể đánh
   dấu resolved/archived khi cần dọn dẹp docs.
 
+#### MJPEG streaming — RESOLVED, Profile S Device MANDATORY đã đóng hoàn toàn (r17.xml, 2026-09-24)
+
+**Đính chính quyết định trước đó (2026-09-22, mục "JPEG" ở phần "Đã chốt
+hướng" phía trên)**: lúc đó ghi "chấp nhận các test JPEG chuyển từ PASS sang
+FAIL" dựa trên đọc `ONVIF_Profile_T_Specification_v1-0.md` (chỉ yêu cầu ≥1
+trong H264/H265, không nhắc JPEG) — **kết luận đó SAI khi áp dụng cho Media1/
+Profile S**. Tra trực tiếp bản PDF gốc `ONVIF Profile S Specification v1.3`
+tải từ chính `onvif.org`
+(https://www.onvif.org/wp-content/uploads/2019/12/ONVIF_Profile_-S_Specification_v1-3.pdf),
+mục 7.9 "Video Streaming – MJPEG":
+
+```
+Video Streaming – MJPEG          Device MANDATORY
+MJPEG Media streaming using RTSP  | Streaming | M
+Device shall declare MJPEG Option in VideoEncoderConfigurationOptions.
+Device shall be able to stream MJPEG according to the Streaming Specification.
+```
+
+So với H.264 trong CHÍNH tài liệu Profile S đó (mục 8.2): H.264 chỉ là
+`Device CONDITIONAL` ("if supported"). Tức là Profile S coi MJPEG là baseline
+bắt buộc, H.264 chỉ là bổ sung — ngược thiết kế trực giác hiện đại. Việc bỏ
+MJPEG trước đó là **regression thật với 1 yêu cầu Mandatory chính thức**, đã
+được vá lại đầy đủ, không phải "chấp nhận fail vì optional" như ghi nhầm
+trước đây.
+
+**Phía DVR đã làm** (commit `AlvisOS/DVR` `2c74b09 Add MJPEG RTSP stream for
+ONVIF`, 2026-09-24): thêm 1 stream role `mjpeg` mới cho MỖI kênh (không đụng
+4 tier `main/sub/third/fourth` cũ), mã hoá bằng HAL JPEG hardware (NVJPG trên
+Jetson, `#ifndef PLATFORM_AMBARELLA` — không bật trên CV25 vì HAL không có
+JPEG sink riêng). Kích thước cố định 640×360, FPS 1-20 (mặc định ban đầu 5,
+sau nâng lên 15 — xem bên dưới). Mount RTSP tại offset cố định
+`channel_id + 200` (`ch200`/`ch201`), pipeline
+`appsrc ! jpegparse ! rtpjpegpay pt=26` (payload type tĩnh theo RFC 2435).
+`GetProfiles` trả thêm 2 profile mới `0_mjpeg`/`1_mjpeg`, `Encoding: "JPEG"`.
+WHEP (web live view) bị bỏ qua cho profile này vì WebRTC không tải được JPEG.
+`SetVideoEncoderConfiguration` phía DVR khoá cứng: không cho đổi qua lại giữa
+profile MJPEG và H264/H265.
+
+**Phía onvif-module đã sửa** (không chỉ thêm mới — phát hiện thêm 2 bug tiềm
+ẩn khi rà soát trước khi sửa):
+- `include/interface/types/MediaTypes.h` (2 bản, sync `onvif-module` +
+  `mock-camera-backend`): thêm `Codec::JPEG`.
+- `src/backend/HttpDvrClient.cpp::parseCodec`: nhận diện chuỗi `"JPEG"` từ
+  response DVR thật.
+- `src/services/MediaLegacyHandler.cpp`:
+  - **Bug tìm thấy**: `resolveVecBaseline` map MỌI codec khác `H265` thành
+    `"H264"` — nếu không fix, dù DVR đã có JPEG thật, Media1 vẫn báo sai
+    `Encoding=H264` cho profile MJPEG. Đã sửa thêm nhánh JPEG.
+  - `GetVideoEncoderConfigurationOptions`: thêm nhánh `<tt:JPEG>` (đọc động
+    resolution/FPS range từ backend) thay vì luôn `<tt:H264>`.
+  - `SetVideoEncoderConfiguration`: chấp nhận `Encoding=JPEG` nhưng khoá
+    chéo đúng ràng buộc DVR thật (không cho đổi 1 config đang là JPEG sang
+    H264 và ngược lại — suy profile token thật từ config token để biết
+    baseline codec).
+- `src/services/Media2Service.cpp`:
+  - **Bug tìm thấy #1**: 1 ternary encoding chỉ phân biệt H264/H265, bỏ sót
+    JPEG (nhánh dynamic-profile fallback).
+  - **Bug tìm thấy #2**: 1 chỗ hardcode tuyệt đối `enc->Encoding = "H264"`
+    trong nhánh profile thật (static branch của `GetVideoEncoderConfigurations`)
+    — sẽ luôn báo sai cho bất kỳ profile JPEG nào backend trả về.
+  - Viết lại `createOption()` trong `GetVideoEncoderConfigurationOptions`:
+    tự suy codec thật từ backend thay vì luôn hardcode `"H264"`; bỏ
+    `ProfilesSupported`/`GovLengthRange` cho JPEG (không áp dụng, chỉ có ý
+    nghĩa với H264/H265); `FrameRatesSupported` JPEG dùng range riêng
+    (1-20fps) khác H264.
+  - `SetVideoEncoderConfiguration`: cùng logic khoá chéo JPEG↔H264 như Media1.
+  - **Chủ động KHÔNG đổi** `GetGuaranteedNumberOfVideoEncoderInstances` (dù
+    có thể thêm `<tt:JPEG>1</tt:JPEG>` cho đúng thực tế DVR chạy cả 2 đồng
+    thời) — rủi ro phá `RTSS-1-1-27..30` đang pass mà không verify được lúc
+    đó; để nguyên `TotalNumber=1/H264=1`.
+- Build-check thật trên `.125` (`/tmp/build_check_jpeg`, xoá sau khi xong):
+  link sạch, `[LINK]`/`[DONE]`, không lỗi.
+
+**Bài học vận hành phát sinh trong lúc làm** (không phải code, nhưng ảnh
+hưởng trực tiếp evidence):
+1. DVR encoder mặc định `kMjpegDefaultFps=5` — quá thấp so với ngưỡng DTT
+   tính động (`frames_cần ≈ FrameRateLimit_đã_Set × 5s ÷ 2`; onvif-module
+   chấp nhận Set tối đa 20fps cho JPEG nên DTT luôn yêu cầu ~50 frame/5s ≈
+   10fps tối thiểu). `SetVideoEncoderConfiguration` của ONVIF hiện chỉ lưu
+   SOAP state (không forward xuống DVR thật — compromise đã có sẵn từ trước
+   cho H264 để tránh gián đoạn stream), nên DVR luôn chạy đúng fps mặc định
+   bất kể client Set gì.
+2. Lần đầu nhờ DVR nâng fps default lên 15, **không có hiệu lực** — vì
+   profile `0_mjpeg`/`1_mjpeg` đã được tạo trong DB từ lần test trước đó
+   ("Anything previously stored in the DB for this profile token wins" —
+   đọc trực tiếp code); đổi hằng số nguồn chỉ áp dụng cho profile MỚI tạo
+   lần đầu, không áp dụng lại lên hàng đã có sẵn trong DB. DVR team sau đó
+   cập nhật đúng giá trị lưu trong DB (không phải chỉ đổi constant) → có
+   hiệu lực thật.
+3. DTT (`r16.xml`) xác nhận nguyên nhân bằng số liệu chính xác: đo được
+   ~5.1fps thật dù đã "nâng" — khớp hoàn toàn giả thuyết DB cũ. Sau khi DVR
+   sửa đúng dòng DB (`r17.xml`): đo được 15-16fps thật, đủ margin qua ngưỡng.
+
+**Bằng chứng DTT — tiến trình từng bước** (tất cả file trong
+`docs/dtt-result/`):
+- `r12.xml`/`r13.xml` (22/09, trước khi có MJPEG): 8-9 case JPEG fail đúng
+  dự kiến ("Profile with JPEG Video encoder configuration not found").
+- `r14.xml` (24/09, ngay sau khi DVR thêm MJPEG + onvif-module vá xong):
+  11 fail — JPEG chuyển sang fail kiểu mới ("Frames waiting timeout", đã
+  tìm thấy profile) + 2 case H264 fail thoáng qua (cold-start, tự hết).
+- `r15.xml`: 10 fail — xác nhận DVR MJPEG thật chạy ổn định ~5.1fps
+  ("Only 26 frames captured (5.1 FPS)"), không đủ ngưỡng 50 frame/5s.
+- `r16.xml`: 8 fail — H264 cold-start đã tự hết (`RTSS-1-1-43/44` pass lại);
+  JPEG vẫn 5.1fps y hệt (fix DB chưa có hiệu lực, xem bài học #2 trên).
+- `r17.xml`: **24/25 PASS** — toàn bộ 8 case JPEG
+  (`RTSS-1-1-31/32/33/34/35/36/45`, `MEDIA-2-1-9`) pass với margin an toàn
+  (15-16 FPS thật, DVR đã cập nhật đúng DB). **Chỉ còn 1 fail:
+  `RTSS-1-1-48`, không liên quan JPEG** (xem mục riêng bên dưới).
+
+**Kết luận**: yêu cầu Device MANDATORY của Profile S (MJPEG streaming) đã
+đóng hoàn toàn, có bằng chứng DTT thật `r17.xml`. Không còn việc gì cần làm
+thêm cho hạng mục này trừ khi có regression mới.
+
+#### `RTSS-1-1-48` — OPEN, root cause đã xác định, chưa xử lý (2026-09-24)
+
+Không liên quan JPEG/MJPEG — case này về `SetVideoEncoderConfiguration`/
+`GetStreamUri` cho **H.264 profile `1_sub`** (sub-stream kênh 1, không phải
+main). Fail tái lập ổn định qua nhiều lần chạy (`r12` → `r17`):
+`GetStreamUri(1_sub)` trả `rtsp://192.168.8.125:554/live/ch1`, nhưng
+`DESCRIBE` vào path đó luôn `404 Not Found`.
+
+**Root cause xác định chắc chắn** (đọc trực tiếp log khởi động DVR thật,
+`journalctl -u dvr_new`):
+
+```
+[DVR_CONTROLLER] [DVR_CTRL-DB] Loaded sub profile from DB | channel: 1 | token: 1_sub | enabled: false
+[DVR_CONTROLLER] [DVR_CTRL-STREAM-OFF] Stream disabled, encoder not started | channel: 1 | stream: 1 (sub)
+```
+
+So với kênh 0 cùng vai trò (`0_sub`): `enabled: true`, encoder khởi động
+bình thường, mount RTSP hoạt động. **Đây thuần là 1 dòng dữ liệu trong
+database của DVR bị đánh dấu `enabled=false`** cho riêng `1_sub` — không
+phải bug code, không phải race condition ở tầng RTSP mount. DVR đọc đúng cờ
+này và chủ động không khởi động encoder (đúng thiết kế), nên không có gì để
+mount → `ch1` luôn 404 bất kể restart bao nhiêu lần vì DB luôn nạp lại đúng
+giá trị cũ.
+
+**Cách sửa đã xác định, chưa thực hiện** (theo yêu cầu người dùng, chưa cần
+làm gấp): DVR đã có sẵn REST endpoint (`SetVideoEncoderConfiguration` phía
+DVR, `routes_live_profiles.cpp`) nhận field `"Enabled": true/false`, tự lưu
+qua `context_->setProfileEnabled()` + `db->saveProfileEnabled()` — chỉ cần
+1 lệnh gọi API bật lại `enabled=true` cho token `1_sub` (khớp `0_sub`),
+**không cần DVR sửa code gì cả**. Chưa rõ vì sao cờ này bị tắt (có thể do 1
+lần gọi API/migration nào đó trước đây vô tình đổi) — nếu cần điều tra tiếp
+thì nên hỏi DVR team đã từng chạy script/API nào đụng tới `1_sub` gần đây.
+
 ### Operation ưu tiên
 
 - Media1/Media2 `GetProfiles`
@@ -1120,22 +1273,206 @@ tương tự với UDP 3702 ở phần Discovery).
 
 ### Nguồn thật
 
-- Imaging: MGMT Imaging API + HAL/ISP.
-- PTZ/zoom/focus: BUS control IPC + HAL.
+- **Imaging: đi qua MGMT** (`ImagingSettingsApiController`), MGMT tự gọi
+  xuống HAL/ISP bên trong — `onvif-module` KHÔNG tự nói chuyện với HAL.
+- **Zoom (PTZ): cũng đi qua MGMT** (`LensApiController`, `/Config/ZoomFocus`),
+  KHÔNG phải "BUS control IPC + HAL" trực tiếp như ghi ban đầu — đã đính
+  chính sau khi đọc thật (xem mục nghiên cứu bên dưới). MGMT đã có sẵn cầu
+  nối `IHalBridge`/`DirectHalBridge` xuống `libhal.so`.
+- **Pan/tilt cơ khí: KHÔNG làm** — xem quyết định + bằng chứng ở mục
+  "Nghiên cứu Phase 5" bên dưới. Đường thật (nếu có) là thẳng HAL qua BUS
+  control IPC, không qua MGMT — nhưng chưa dùng tới vì bỏ hẳn pan/tilt.
 
 ### Công việc
 
-- Map ImagingSettings và ImagingOptions đúng range/default/step của HAL.
-- Chỉ advertise control thực sự hỗ trợ.
-- Tách optical zoom/focus khỏi external pan/tilt.
-- Chuẩn hóa coordinate/range PTZ.
-- Kiểm tra behavior khi không có active lens hoặc HAL unavailable.
+- Map ImagingSettings và ImagingOptions đúng field MGMT thật trả về (không
+  phải "range/default/step của HAL" — MGMT là lớp trung gian duy nhất
+  `onvif-module` được phép gọi).
+- Chỉ advertise control thực sự hỗ trợ (Zoom có, Pan/Tilt không).
+- Tách Zoom (PTZ service, node chỉ có trục Zoom) khỏi Focus (Imaging
+  service, đã có sẵn khung `Move/Stop/GetStatus`) — 2 service ONVIF khác
+  nhau, không phải cùng 1 chỗ.
+- Sửa bug `isValidToken()` hardcode token mock cũ trong `ImagingService.cpp`
+  trước khi làm gì khác (xem chi tiết bên dưới).
+- Dựng mới hoàn toàn `PtzService.cpp` (hiện chỉ có header rỗng, chưa có
+  file .cpp, chưa đăng ký service, `DeviceService` đang chủ động trả fault
+  PTZ) — không phải "chỉnh sửa", mà là code từ đầu.
+- Kiểm tra behavior khi HAL/MGMT unavailable (map lỗi sang SOAP Fault đúng
+  chuẩn, không fallback mock âm thầm — nguyên tắc #6 README).
 
 ### Gate
 
-- Get/Set imaging dùng state thật.
-- PTZ command đến hardware thật.
-- Imaging/PTZ test không regression.
+- Get/Set imaging dùng state thật qua MGMT, không còn echo cache cục bộ
+  cho các field đã có real API tương ứng.
+- PTZ Zoom command đến MGMT/HAL thật (không advertise Pan/Tilt).
+- Imaging test không regression (đặc biệt `IMAGING-1-1-14` persistence
+  check — rủi ro thật, xem bên dưới).
+- `DEVICE-1-1-6` (PTZ Capabilities, hiện PASS nhờ trả fault) không được
+  phá — nếu bật PTZ (chỉ Zoom), test này sẽ đổi từ "mong đợi fault" sang
+  "mong đợi dữ liệu thật", cần xác nhận lại bằng DTT, không giả định.
+
+### Nghiên cứu Phase 5 (2026-09-25) — đã xong, CHƯA CODE, ghi lại để đối chiếu sau khi làm
+
+#### Xác nhận phạm vi theo đúng nguyên tắc #2.1 — tra cả 4 profile (S/T/M/G), không chỉ 1
+
+- **Profile S** (`ONVIF Profile S Specification v1.3`, tải từ onvif.org):
+  mục 8.3 "PTZ (if supported)" → `Device CONDITIONAL`, tường minh.
+- **Profile T** (`ONVIF_Profile_T_Specification_v1-0.md` có sẵn local):
+  toàn bộ mục 7.21 Absolute PTZ Move, 7.22 Continuous PTZ Move, 8.1-8.4 PTZ
+  Configuration/Presets/Home Position — **tất cả** đều `Device CONDITIONAL`
+  kèm "(if supported)"; `GetServiceCapabilities|PTZ|C`. Spec còn ghi rõ:
+  *"Some devices only support Pan/Tilt and not Zoom (or vice versa)...
+  device zoom operations are listed as Conditional"* — xác nhận 1 PTZ node
+  chỉ có trục Zoom là hợp lệ theo chuẩn.
+- **Profile M** (`onvif-profile-m-specification-v1-1.pdf`, tải trực tiếp từ
+  onvif.org — bản spec thật, không phải "Client Test Specification" đang
+  có sẵn local): grep toàn văn 49 trang, **0 kết quả "PTZ"** — không
+  mandatory, không conditional, không liên quan.
+- **Profile G** (`ONVIF_Profile_G_Specification_v1-0.pdf`): đúng 1 lần
+  nhắc "PTZ", nằm trong định nghĩa thuật ngữ "Metadata" (ví dụ nội dung
+  metadata), không phải yêu cầu chức năng.
+- **Kết luận**: không profile nào trong 4 profile dự án target bắt buộc
+  PTZ. Quyết định: **bỏ hẳn pan/tilt cơ khí**, chỉ làm Zoom (qua PTZ node
+  chỉ-Zoom) + Focus (qua Imaging service) + Imaging thường.
+
+#### Xác nhận phần cứng thật — không chỉ dựa vào "không bắt buộc"
+
+Đọc trực tiếp board profile đang chạy thật trên `.125`
+(`/opt/dvr_apps/board_profiles/active-profile.yaml` →
+`deployments/xavier-nx-hwv-model-125lab.yaml` →
+`boards/tomotech-ai-camera-125lab.yaml`, mục `peripherals`):
+
+```yaml
+lens_context:   # kênh 0 (main/context)
+  board_location: sub_board_cv25
+  driver: lens_cv25_tmc2300
+  lens_spec_file: FOCTEK_CS-P1150IR_8MP.json
+
+lens_alpr:      # kênh 1 (ALPR)
+  board_location: main_carrier_board
+  interface: i2c
+  driver: lens_pca9635
+  zoom_pin: [4, 5, 7, 6]
+  focus_pin: [0, 1, 3, 2]
+  iris_pin: [4, 5, 7, 6]
+  lens_spec_file: FOCTEK_CS-P1150IR_8MP.json
+```
+
+**Có motor zoom/focus/iris thật** (chân GPIO thật qua PWM PCA9635, ống
+kính varifocal thương mại FOCTEK CS-P1150IR 8MP) cho **cả 2 kênh**.
+**Không có mục nào cho pan/tilt** trong toàn bộ `peripherals` (so với các
+mục khác đều liệt kê đủ: GPS, radar, laser, IR-cut, IR-LED...) — xác nhận
+độc lập, không chỉ dựa vào phía HAL source code.
+
+Đối chiếu thêm bên `HAL` source (`D:\Elcom\Ovif-mock\AlvisOS\HAL`): driver
+Pelco-D UART pan/tilt (`src/common/drivers/ptz_pelco_d_uart.cpp`) viết đầy
+đủ giao thức thật, nhưng chỗ gọi vào nó
+(`src/ambarella/ExternalPeripheralHAL_amba.cpp`, nhánh `"ptz_control"`)
+còn nguyên `return false; // TODO` — chưa nối dispatch. Quét toàn bộ
+`board_profiles/**/*.yaml`: không profile nào khai báo thiết bị UART PTZ.
+→ Dù có bắt buộc theo spec, pan/tilt **cũng chưa dùng được** trên bất kỳ
+hardware nào đang deploy — 2 lý do độc lập cùng dẫn tới 1 kết luận.
+
+#### API thật phía MGMT — đã đọc 2 tài liệu handoff nội bộ của MGMT
+
+`D:\Elcom\NewVersion\frontend\MGMT\src\backend\docs\handoff_imaging_settings.md`
+và `handoff_lens_api_mapping.md` (viết bởi team MGMT, đối chiếu trực tiếp
+source DVR cũ + MGMT-BE hiện tại, rất chi tiết) — không cần suy diễn từ
+code, tài liệu đã có sẵn.
+
+**Imaging** — `ImagingSettingsApiController`:
+```
+GET/PUT /mgmt/v1/Config/ImagingSettings   (VideoSourceToken, ImagingSettingId optional)
+```
+Trả mảng `[{Type:"DAY",...},{Type:"NIGHT",...}]`, mỗi phần tử field:
+`Brightness/ColorSaturation/Contrast/Sharpness`, `Exposure{Mode,...}`,
+`WhiteBalance{...}`, `DayNight{IrCutFilterMode,...}`, `WDR/BLC/HLC/DNR`,
+`IspAdvance{...}`. Set là partial-update (mọi field optional).
+
+**Zoom/Focus** — `LensApiController`:
+```
+GET  /mgmt/v1/Config/ZoomFocus?VideoSourceToken=0|1
+PUT  /mgmt/v1/Config/ZoomFocus
+     body: {"VideoSourceId":"0"|"1","ZoomFocusCamera":{"FocusMode":int,"FocusValue":double,"ZoomValue":double}}
+GET  /mgmt/v1/Config/LensInfo   → MaxZoom/MinZoom/StepZoom, MaxFocus/MinFocus/Stepfocus
+```
+`FocusMode`: 0=AUTO_FOCUS (lái theo `ZoomValue`), 1=MANUAL_FOCUS (lái theo
+`FocusValue`), 2=RUN_AF (chạy autofocus), 3=ZF_SYNC (mới, lái zoom kèm
+focus tự theo đường cong lens). `ZMActive`/`FMActive` = motor đang bận
+(map sang `MoveStatus` ONVIF). **`RUN_AF` chỉ chạy thật ở kênh context (0)**
+— driver `LensCv25I2cBridge` có implement `autoFocus()`, driver PCA9635
+của kênh ALPR (1) kế thừa `return false` từ base class, MGMT tự fallback
+về AUTO_FOCUS khi bị từ chối. Cần phản ánh đúng khác biệt này trong
+Options/response, không quảng bá autofocus như nhau cho cả 2 kênh.
+
+#### Kiến trúc code — theo đúng pattern Device/Network đã có, không phát minh mới
+
+`include/backend/IMgmtClient.h` đã có khuôn mẫu rõ ràng
+(`getHostname()/setHostname()`, ném `MgmtValidationError` khi input sai
+vs `runtime_error` khi lỗi vận hành/kết nối) — chỉ cần thêm method cùng
+kiểu cho Imaging + ZoomFocus, không cần lớp client mới. `AlvisBackendFacade.cpp`
+hiện **100% hardcode Imaging/PTZ về mock** (`return mock("X").method(...)`,
+không đọc `capabilities.imaging`/`capabilities.ptz` gì cả) — cần thêm
+nhánh `real("imaging")`/`real("ptz")` gọi `IMgmtClient`, đúng y hệt cách
+Device/Network đã làm.
+
+**Zoom và Focus đi 2 service ONVIF khác nhau, không phải cùng chỗ:**
+- **Focus** → thuộc **Imaging service** (không phải PTZ) —
+  `ImagingService.cpp` đã có sẵn khung `Move/Stop/GetStatus/GetMoveOptions`
+  (hiện là state mock cục bộ `g_focus` map, xem comment gốc "motorized
+  lens mock" §7.16) — chỉ cần đổi nguồn dữ liệu sang gọi
+  `IMgmtClient::getZoomFocus()/setZoomFocus()`, field `FocusValue`/`FocusMode`.
+- **Zoom** → thuộc **PTZ service** — `PtzService.h` hiện chỉ 4 dòng
+  placeholder, chưa có `.cpp`, chưa đăng ký ở `OnvifServer.cpp`
+  (dispatch if/else chỉ có `/onvif/media`, `/onvif/imaging`, else
+  `DeviceService`), `DeviceService.cpp` đang chủ động trả fault PTZ
+  (`tt__CapabilityCategory::PTZ` → `reqUnsupported = true`, comment "Fixed
+  Camera, không hỗ trợ PTZ trong Profile T"). Cần dựng mới hoàn toàn: PTZ
+  node chỉ khai `ZoomSpaces/PositionGenericSpace` (AbsoluteMove) +
+  `ZoomSpaces/VelocityGenericSpace` (ContinuousMove), map `ZoomValue`
+  (1.0–4.0 tỉ lệ quang MGMT) sang thang normalized ONVIF.
+
+#### Bug thật tìm thấy — độc lập với việc có làm real hay không, phải sửa trước
+
+`ImagingService.cpp::isValidToken()`:
+```cpp
+return tok == "src_main" || tok == "src_sub1" || tok == "src_sub2" || tok == "video_source_token";
+```
+Đây là token thời mock cũ. Từ khi Media1/Media2 đã chuyển sang backend
+thật, `GetVideoSources` trả token thật (`"0"`/`"1"`, theo `sourceToken`
+DVR — xem `MediaLegacyHandler.cpp::handleGetVideoSources`). Nghĩa là
+**ngay hiện tại**, 1 client theo đúng flow ONVIF chuẩn (`GetVideoSources`
+rồi dùng token đó gọi Imaging) sẽ luôn bị từ chối "Invalid
+VideoSourceToken" — token thật không khớp danh sách hardcode cũ. Phải sửa
+đọc token động từ `backend_->getProfiles()` (giống các service khác đã
+làm), không phụ thuộc việc có nối MGMT thật hay chưa.
+
+#### Rủi ro cần theo dõi khi code thật
+
+- **`IMAGING-1-1-14`** (Set→Get, kiểm tra persistence) hiện pass dễ vì
+  toàn bộ là echo cache cục bộ. Tài liệu MGMT tự ghi nhận: *"Live.Sharpness
+  is lossy — sensor giữ 12 nấc (-6..5) cho thang 0-100 của API, nên lưu 50
+  đọc lại thành 45"* — field nào không round-trip chính xác cần cân nhắc
+  giữ echo cache thay vì đọc lại giá trị MGMT trả (matching pattern SOAP
+  state only đã dùng cho Media1 Set).
+- Model `ImagingTypes.h` chia sẻ hiện chỉ có 6 field (brightness/contrast/
+  saturation/sharpness/backlightComp/wideDynRange) — muốn Exposure/
+  WhiteBalance/IrCutFilter cũng thành real (thay vì tiếp tục echo cache
+  cục bộ như hiện tại) cần mở rộng struct này (và sync bản
+  `mock-camera-backend`, đúng nguyên tắc CLAUDE.md #2).
+- Bật PTZ (dù chỉ Zoom) sẽ đổi hành vi `GetCapabilities`/`GetServices` —
+  cần verify lại `DEVICE-1-1-6` bằng DTT thật sau khi code xong, không
+  giả định vẫn pass nguyên trạng.
+
+#### Việc CHƯA làm (đúng yêu cầu — dừng ở nghiên cứu, chưa code)
+
+Toàn bộ mục này là kết quả nghiên cứu, dùng để đối chiếu khi bắt tay code
+thật. `config/onvif.conf` hiện `imaging = mock`, `ptz = mock` — **giữ
+nguyên**, chỉ đổi sang `real` sau khi đã code xong + build + test DTT xác
+nhận, đúng quy trình rollout đã áp dụng cho Device/Network/Media (không
+đổi config trước khi có code tương ứng — đổi bây giờ cũng vô nghĩa vì
+`AlvisBackendFacade` chưa đọc capability này cho Imaging/PTZ, chưa có
+nhánh `real()` nào để kích hoạt).
 
 ## 9. Phase 6 — Profile M analytics metadata và event
 

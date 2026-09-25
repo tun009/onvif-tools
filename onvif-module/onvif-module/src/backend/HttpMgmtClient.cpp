@@ -553,3 +553,119 @@ OnvifAuthenticationResult HttpMgmtClient::verifyHttpDigest(
         return {};
     throw std::runtime_error("MGMT ONVIF HTTP Digest service unavailable");
 }
+
+// ── Imaging (Profile T §7.9) — MGMT ImagingSettingsApiController ───────────
+// GET/PUT /mgmt/v1/Config/ImagingSettings?VideoSourceId=0|1 — tham số/field
+// đã đối chiếu trực tiếp source
+// D:\Elcom\NewVersion\frontend\MGMT\src\backend\src\domains\setting_image\
+// controllers\imaging_settings_api_controller.cpp (không suy đoán từ tài
+// liệu prose). Response là mảng 2 phần tử [{"Type":"DAY",...},{"Type":"NIGHT",...}];
+// ONVIF GetImagingSettings chỉ có 1 kết quả — luôn lấy "DAY" (không có khái
+// niệm day/night trong operation này của ONVIF).
+ImagingSettings HttpMgmtClient::getImagingSettings(const std::string& sourceToken) {
+    const HttpResponse response = request(
+        "GET", "/mgmt/v1/Config/ImagingSettings?VideoSourceId=" + sourceToken);
+    if (response.status != 200 || SimpleJson::getInt(response.body, "result", 0) != 1)
+        throw std::runtime_error("MGMT rejected GetImagingSettings request");
+    ImagingSettings result;
+    for (const auto& item : jsonArrayObjects(jsonArray(response.body, "GetImagingSettingsResponse"))) {
+        if (SimpleJson::getString(item, "Type") != "DAY") continue;
+        const std::string settings = jsonObject(item, "ImagingSettings");
+        result.brightness = SimpleJson::getFloat(settings, "Brightness", 50.0f);
+        result.contrast    = SimpleJson::getFloat(settings, "Contrast", 50.0f);
+        result.saturation  = SimpleJson::getFloat(settings, "ColorSaturation", 50.0f);
+        result.sharpness   = SimpleJson::getFloat(settings, "Sharpness", 50.0f);
+        result.backlightComp = SimpleJson::getBool(settings, "BLC", false);
+        result.wideDynRange   = SimpleJson::getBool(settings, "WDR", false);
+        return result;
+    }
+    throw std::runtime_error("MGMT ImagingSettings response missing DAY profile");
+}
+
+void HttpMgmtClient::setImagingSettings(const std::string& sourceToken,
+                                        const ImagingSettings& settings) {
+    // Partial-update contract phía MGMT (mọi field optional) — vẫn gửi đủ 6
+    // field mình sở hữu mỗi lần Set, để không phụ thuộc state MGMT giữ sẵn.
+    std::ostringstream body;
+    body << "{\"VideoSourceId\":\"" << escapeJson(sourceToken) << "\","
+         << "\"ImagingSettings\":{"
+         << "\"Brightness\":" << settings.brightness << ","
+         << "\"Contrast\":" << settings.contrast << ","
+         << "\"ColorSaturation\":" << settings.saturation << ","
+         << "\"Sharpness\":" << settings.sharpness << ","
+         << "\"BLC\":" << (settings.backlightComp ? "true" : "false") << ","
+         << "\"WDR\":" << (settings.wideDynRange ? "true" : "false")
+         << "}}";
+    const HttpResponse response = request("PUT", "/mgmt/v1/Config/ImagingSettings", body.str());
+    const int resultCode = SimpleJson::getInt(response.body, "result", 0);
+    if (resultCode == -1) {
+        throw MgmtValidationError("MGMT rejected SetImagingSettings: " +
+                                   SimpleJson::getString(response.body, "error", "unknown"));
+    }
+    if (response.status != 200 || resultCode != 1)
+        throw std::runtime_error("MGMT SetImagingSettings failed");
+}
+
+// ── Zoom/Focus lens (PTZ Zoom-only node) — MGMT LensApiController ──────────
+// GET/PUT /mgmt/v1/Config/ZoomFocus?VideoSourceId=0|1 — field/wrapper key
+// ("ZoomFocusInfo"/"ZoomFocusCamera") đối chiếu trực tiếp
+// lens_api_controller.cpp::zoomFocusToJson/handleSetZoomFocus.
+ZoomFocusState HttpMgmtClient::getZoomFocus(const std::string& sourceToken) {
+    const HttpResponse response = request(
+        "GET", "/mgmt/v1/Config/ZoomFocus?VideoSourceId=" + sourceToken);
+    if (response.status != 200 || SimpleJson::getInt(response.body, "result", 0) != 1)
+        throw std::runtime_error("MGMT rejected GetZoomFocus request");
+    const std::string info = jsonObject(response.body, "ZoomFocusInfo");
+    ZoomFocusState state;
+    state.zoomValue    = SimpleJson::getFloat(info, "ZoomValue", 1.0f);
+    state.focusValue   = SimpleJson::getFloat(info, "FocusValue", 50.0f);
+    state.focusMode    = static_cast<ZoomFocusMode>(SimpleJson::getInt(info, "FocusMode", 0));
+    state.zoomMoving   = SimpleJson::getBool(info, "ZMActive", false);
+    state.focusMoving  = SimpleJson::getBool(info, "FMActive", false);
+    return state;
+}
+
+void HttpMgmtClient::setZoomFocus(const std::string& sourceToken, const ZoomFocusState& state) {
+    // DVR/MGMT contract: cả 3 field FocusMode/FocusValue/ZoomValue LUÔN gửi
+    // cùng nhau (FocusMode quyết định field nào thật sự được áp dụng) — xem
+    // handoff_lens_api_mapping.md.
+    std::ostringstream body;
+    body << "{\"VideoSourceId\":\"" << escapeJson(sourceToken) << "\","
+         << "\"ZoomFocusCamera\":{"
+         << "\"FocusMode\":" << static_cast<int>(state.focusMode) << ","
+         << "\"FocusValue\":" << state.focusValue << ","
+         << "\"ZoomValue\":" << state.zoomValue
+         << "}}";
+    const HttpResponse response = request("PUT", "/mgmt/v1/Config/ZoomFocus", body.str());
+    const int resultCode = SimpleJson::getInt(response.body, "result", 0);
+    if (response.status == 400) {
+        throw MgmtValidationError("MGMT rejected SetZoomFocus: " +
+                                   SimpleJson::getString(response.body, "error", "unknown"));
+    }
+    if (response.status != 200 || resultCode != 1)
+        throw std::runtime_error("MGMT SetZoomFocus failed");
+}
+
+LensBounds HttpMgmtClient::getLensBounds(const std::string& sourceToken) {
+    const HttpResponse response = request(
+        "GET", "/mgmt/v1/Config/LensInfo?VideoSourceId=" + sourceToken);
+    if (response.status != 200 || SimpleJson::getInt(response.body, "result", 0) != 1)
+        throw std::runtime_error("MGMT rejected GetLensInfo request");
+    // Mảng catalogue lens khả dụng cho camera này — lấy đúng lens đang chọn
+    // (Enable=true), khớp cách chính LensApiController tự đọc lại lựa chọn.
+    for (const auto& item : jsonArrayObjects(jsonArray(response.body, "GetLensInfoResponse"))) {
+        if (!SimpleJson::getBool(item, "Enable", false)) continue;
+        LensBounds bounds;
+        bounds.minZoom   = SimpleJson::getFloat(item, "MinZoom", 1.0f);
+        bounds.maxZoom   = SimpleJson::getFloat(item, "MaxZoom", 4.0f);
+        bounds.stepZoom  = SimpleJson::getFloat(item, "StepZoom", 0.1f);
+        bounds.minFocus  = SimpleJson::getFloat(item, "MinFocus", 0.0f);
+        bounds.maxFocus  = SimpleJson::getFloat(item, "MaxFocus", 100.0f);
+        bounds.stepFocus = SimpleJson::getFloat(item, "Stepfocus", 1.0f);
+        return bounds;
+    }
+    // Không có lens nào Enable=true (camera không gắn lens quản lý được) —
+    // trả default hợp lý thay vì throw, để PTZ GetConfigurationOptions vẫn
+    // trả về được response (chỉ là range mặc định), không phá cả request.
+    return LensBounds{};
+}

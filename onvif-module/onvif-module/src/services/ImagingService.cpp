@@ -15,11 +15,25 @@ ImagingService::ImagingService(struct soap* soap,
                                std::shared_ptr<ICameraBackend> backend)
     : ImagingBindingService(soap), cfg_(cfg), backend_(std::move(backend)) {}
 
-// Token hợp lệ khớp với MediaLegacyHandler + Media2Service.
-bool ImagingService::isValidToken(const std::string& tok) {
-    // Chấp nhận cả token backend "src_main"/"src_sub*" và alias cũ.
-    return tok == "src_main" || tok == "src_sub1" || tok == "src_sub2"
-        || tok == "video_source_token";
+// Token hợp lệ khớp với MediaLegacyHandler + Media2Service. Media1/Media2 đã
+// chuyển sang backend thật (2026-09-22) — GetVideoSources giờ trả sourceToken
+// thật của DVR ("0"/"1", xem MediaLegacyHandler::handleGetVideoSources), KHÔNG
+// còn "src_main" nữa. Bug cũ: hardcode chỉ nhận token mock → 1 client theo
+// đúng flow ONVIF chuẩn (GetVideoSources rồi dùng token đó gọi Imaging) luôn
+// bị từ chối "Invalid VideoSourceToken" trên backend thật. Sửa: đọc động từ
+// backend_->getProfiles(), giữ nguyên các token mock cũ làm fallback (mock
+// backend/mock-camera-backend vẫn dùng "src_main" thật sự).
+bool ImagingService::isValidToken(const std::string& tok) const {
+    if (tok.empty()) return false;
+    if (tok == "src_main" || tok == "src_sub1" || tok == "src_sub2"
+        || tok == "video_source_token") return true;
+    if (!backend_) return false;
+    try {
+        for (const auto& p : backend_->getProfiles()) {
+            if (p.sourceToken == tok) return true;
+        }
+    } catch (const std::exception&) {}
+    return false;
 }
 
 bool ImagingService::isValidSettings(const ImagingSettings& s) {

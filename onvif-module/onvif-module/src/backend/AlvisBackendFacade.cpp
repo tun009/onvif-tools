@@ -178,15 +178,92 @@ SnapshotUri AlvisBackendFacade::getSnapshotUri(const std::string &t)
     }
     return mock("GetSnapshotUri").getSnapshotUri(t);
 }
-bool AlvisBackendFacade::ptzAbsoluteMove(const std::string &t, const PTZVector &p, const PTZVector &s) { return mock("AbsoluteMove").ptzAbsoluteMove(t, p, s); }
+// Zoom-only PTZ node: PTZVector.pan/tilt luôn 0 (không có hardware pan/tilt,
+// xem docs/onvif-alvis/01-IMPLEMENTATION_PLAN.md Phase 5). Chỉ zoom được dịch
+// sang MGMT ZoomFocusState.zoomValue (physical ratio), dùng getLensBounds để
+// normalize/denormalize giữa [0,1] (ONVIF Zoom1DDescription) và [minZoom,maxZoom].
+namespace {
+float normalizeZoom(float physical, const LensBounds& b) {
+    if (b.maxZoom <= b.minZoom) return 0.0f;
+    float n = (physical - b.minZoom) / (b.maxZoom - b.minZoom);
+    return n < 0.0f ? 0.0f : (n > 1.0f ? 1.0f : n);
+}
+float denormalizeZoom(float normalized, const LensBounds& b) {
+    float v = b.minZoom + normalized * (b.maxZoom - b.minZoom);
+    return v < b.minZoom ? b.minZoom : (v > b.maxZoom ? b.maxZoom : v);
+}
+}
+bool AlvisBackendFacade::ptzAbsoluteMove(const std::string &t, const PTZVector &p, const PTZVector &s)
+{
+    if (real("ptz"))
+    {
+        if (!mgmtClient_)
+            throw std::runtime_error("MGMT client unavailable");
+        (void)s; // MGMT AbsoluteMove không có khái niệm speed, chỉ target position
+        const LensBounds bounds = mgmtClient_->getLensBounds(t);
+        // Giữ nguyên FocusMode/FocusValue hiện tại — MGMT contract luôn cần
+        // gửi cả 3 field cùng nhau (xem IMgmtClient.h::ZoomFocusState).
+        ZoomFocusState state = mgmtClient_->getZoomFocus(t);
+        state.zoomValue = denormalizeZoom(p.zoom, bounds);
+        mgmtClient_->setZoomFocus(t, state);
+        return true;
+    }
+    return mock("AbsoluteMove").ptzAbsoluteMove(t, p, s);
+}
 bool AlvisBackendFacade::ptzRelativeMove(const std::string &t, const PTZVector &p, const PTZVector &s) { return mock("RelativeMove").ptzRelativeMove(t, p, s); }
 bool AlvisBackendFacade::ptzContinuousMove(const std::string &t, const PTZVector &v) { return mock("ContinuousMove").ptzContinuousMove(t, v); }
-bool AlvisBackendFacade::ptzStop(const std::string &t, bool p, bool z) { return mock("Stop").ptzStop(t, p, z); }
-PTZStatus AlvisBackendFacade::getPtzStatus(const std::string &t) { return mock("GetStatus").getPtzStatus(t); }
+bool AlvisBackendFacade::ptzStop(const std::string &t, bool p, bool z)
+{
+    if (real("ptz"))
+    {
+        // AbsoluteMove ở MGMT là lệnh position-based, không phải velocity-based
+        // (không có "đang chạy tới đích thì dừng giữa chừng" như continuous move
+        // cơ học) — ONVIF cho phép Stop no-op an toàn trong trường hợp này.
+        (void)t; (void)p; (void)z;
+        return true;
+    }
+    return mock("Stop").ptzStop(t, p, z);
+}
+PTZStatus AlvisBackendFacade::getPtzStatus(const std::string &t)
+{
+    if (real("ptz"))
+    {
+        if (!mgmtClient_)
+            throw std::runtime_error("MGMT client unavailable");
+        const LensBounds bounds = mgmtClient_->getLensBounds(t);
+        const ZoomFocusState state = mgmtClient_->getZoomFocus(t);
+        PTZStatus status;
+        status.position.zoom = normalizeZoom(state.zoomValue, bounds);
+        status.zoomStatus = state.zoomMoving ? MoveStatus::MOVING : MoveStatus::IDLE;
+        status.panTiltStatus = MoveStatus::IDLE; // không có hardware pan/tilt
+        status.moveStatus = status.zoomStatus;
+        return status;
+    }
+    return mock("GetStatus").getPtzStatus(t);
+}
 bool AlvisBackendFacade::gotoHomePosition(const std::string &t) { return mock("GotoHomePosition").gotoHomePosition(t); }
 bool AlvisBackendFacade::setHomePosition(const std::string &t) { return mock("SetHomePosition").setHomePosition(t); }
-ImagingSettings AlvisBackendFacade::getImagingSettings(const std::string &t) { return mock("GetImagingSettings").getImagingSettings(t); }
-bool AlvisBackendFacade::setImagingSettings(const std::string &t, const ImagingSettings &v) { return mock("SetImagingSettings").setImagingSettings(t, v); }
+ImagingSettings AlvisBackendFacade::getImagingSettings(const std::string &t)
+{
+    if (real("imaging"))
+    {
+        if (!mgmtClient_)
+            throw std::runtime_error("MGMT client unavailable");
+        return mgmtClient_->getImagingSettings(t);
+    }
+    return mock("GetImagingSettings").getImagingSettings(t);
+}
+bool AlvisBackendFacade::setImagingSettings(const std::string &t, const ImagingSettings &v)
+{
+    if (real("imaging"))
+    {
+        if (!mgmtClient_)
+            throw std::runtime_error("MGMT client unavailable");
+        mgmtClient_->setImagingSettings(t, v);
+        return true;
+    }
+    return mock("SetImagingSettings").setImagingSettings(t, v);
+}
 ImagingStatus AlvisBackendFacade::getImagingStatus(const std::string &t) { return mock("GetImagingStatus").getImagingStatus(t); }
 std::vector<AnalyticsModule> AlvisBackendFacade::getSupportedAnalyticsModules(const std::string &t) { return mock("GetSupportedAnalyticsModules").getSupportedAnalyticsModules(t); }
 std::vector<AnalyticsRule> AlvisBackendFacade::getAnalyticsRules(const std::string &t) { return mock("GetRules").getAnalyticsRules(t); }

@@ -65,6 +65,8 @@ private:
     static std::mutex cacheMtx_;
     static std::map<std::string, ExtSettings> cache_;
 
-    static bool isValidToken(const std::string& tok);
+    // KHÔNG static: cần backend_ để đọc sourceToken thật (DVR trả "0"/"1",
+    // khác hẳn token mock cũ "src_main"/"src_sub1"/"src_sub2").
+    bool isValidToken(const std::string& tok) const;
     static bool isValidSettings(const ImagingSettings& s);
 };
