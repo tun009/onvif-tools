@@ -8,6 +8,10 @@
 #include <set>
 #include <sstream>
 
+// Định nghĩa thật: Media2Service.cpp (tra g_dynProfiles — profile tạo động
+// qua CreateProfile, backend_->getProfiles() KHÔNG biết những profile này).
+extern std::string resolveDynProfileSourceToken(const std::string& profileToken);
+
 namespace {
 // Generic normalized zoom space [0,1] — AlvisBackendFacade tự quy đổi sang/từ
 // physical zoomValue thật (MGMT LensBounds), PtzService không cần biết physical
@@ -76,13 +80,16 @@ std::string PtzService::sourceTokenFromConfig(const std::string& tok) {
 }
 
 std::string PtzService::resolveProfileToSource(const std::string& profileToken) const {
-    if (!backend_) return "";
-    try {
-        for (const auto& p : backend_->getProfiles()) {
-            if (p.token == profileToken) return p.sourceToken;
-        }
-    } catch (const std::exception&) {}
-    return "";
+    if (backend_) {
+        try {
+            for (const auto& p : backend_->getProfiles()) {
+                if (p.token == profileToken) return p.sourceToken;
+            }
+        } catch (const std::exception&) {}
+    }
+    // Fallback: profile tạo động qua CreateProfile (Media2/Media1) — không có
+    // trong backend_->getProfiles() (xem resolveDynProfileSourceToken).
+    return resolveDynProfileSourceToken(profileToken);
 }
 
 int PtzService::sendXml(const std::string& body) {

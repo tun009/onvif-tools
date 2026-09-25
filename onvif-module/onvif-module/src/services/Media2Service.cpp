@@ -68,6 +68,23 @@ static std::map<std::string, VSCOverride> g_vscOverride;
 static std::map<std::string, VECOverride> g_vecOverride;
 }
 
+// Tra sourceToken của 1 profile tạo động qua CreateProfile (g_dynProfiles ở
+// trên). Dùng bởi PtzService — PTZ operations nhận ProfileToken (chuẩn ONVIF),
+// nhưng backend_->getProfiles() (DVR thật) CHỈ biết profile cố định, không
+// biết profile DTT tự tạo động (chỉ tồn tại ở tầng onvif-module, chưa persist
+// xuống DVR) → PTZ-3-1-1/3-1-2/3-1-4/3-1-5/5-1-3/7-x-3, MEDIA2_PTZ-* từng fail
+// "No profile with the given token" vì thiếu bước tra này (r19.xml).
+// Trả "" nếu không phải dynamic profile, hoặc chưa có VideoSourceConfiguration.
+std::string resolveDynProfileSourceToken(const std::string& profileToken) {
+    std::lock_guard<std::mutex> lk(g_profMtx);
+    auto it = g_dynProfiles.find(profileToken);
+    if (it == g_dynProfiles.end()) return "";
+    static const std::string prefix = "video_source_config_";
+    const std::string& vs = it->second.vsToken;
+    if (vs.rfind(prefix, 0) == 0) return vs.substr(prefix.size());
+    return "";
+}
+
 // Forward declaration — định nghĩa cuối file. Cần cho các op gọi fault sớm.
 static int m2SendOnvifFault(struct soap* soap,
                             const char* code,
