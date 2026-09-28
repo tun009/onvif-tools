@@ -77,17 +77,22 @@ std::string ptzConfigurationXml(const std::string& src, const std::string& nodeT
         auto it = g_cfgTimeout.find(cfgTok);
         if (it != g_cfgTimeout.end()) timeout = it->second;
     }
+    // Thứ tự field PHẢI khớp xsd:sequence của tt:PTZConfiguration (soapStub.h):
+    // NodeToken, Default*Space (Absolute/Relative/Continuous...), DefaultPTZSpeed,
+    // DefaultPTZTimeout, PanTiltLimits, ZoomLimits, Extension. Đặt sai thứ tự
+    // (DefaultPTZTimeout trước DefaultAbsoluteZoomPositionSpace) khiến DTT báo lỗi
+    // schema "invalid child element" (PTZ-3-1-1 r21.xml).
     std::ostringstream os;
     os << "<tptz:PTZConfiguration token=\"" << escapeXml(cfgTok) << "\">"
           "<tt:Name>PTZ Configuration " << escapeXml(src) << "</tt:Name>"
           "<tt:UseCount>1</tt:UseCount>"
-          "<tt:NodeToken>" << escapeXml(nodeTok) << "</tt:NodeToken>";
+          "<tt:NodeToken>" << escapeXml(nodeTok) << "</tt:NodeToken>"
+          "<tt:DefaultAbsoluteZoomPositionSpace>" << kZoomSpaceUri
+            << "</tt:DefaultAbsoluteZoomPositionSpace>";
     if (!timeout.empty()) {
         os << "<tt:DefaultPTZTimeout>" << escapeXml(timeout) << "</tt:DefaultPTZTimeout>";
     }
-    os << "<tt:DefaultAbsoluteZoomPositionSpace>" << kZoomSpaceUri
-       << "</tt:DefaultAbsoluteZoomPositionSpace>"
-          "</tptz:PTZConfiguration>";
+    os << "</tptz:PTZConfiguration>";
     return os.str();
 }
 } // namespace
