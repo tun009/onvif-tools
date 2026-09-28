@@ -67,6 +67,7 @@ struct DynProfile {
     std::string vsToken;    // empty = chưa AddVideoSourceConfiguration
     std::string veToken;    // empty = chưa AddVideoEncoderConfiguration
     std::string mdToken;    // empty = chưa AddMetadataConfiguration
+    std::string ptzToken;   // empty = chưa AddPTZConfiguration
 };
 struct VECOverride {
     bool hasEncoding = false;   std::string encoding;
@@ -281,7 +282,8 @@ std::string MediaLegacyHandler::wrap(const std::string& action,
 // (nếu có) là token đã AddVideoSource/EncoderConfiguration trỏ tới.
 std::string MediaLegacyHandler::profileXml(const char* wrapperElem,
                                             const char* token, const char* name,
-                                            bool fixed, bool includeVSC, bool includeVEC) {
+                                            bool fixed, bool includeVSC, bool includeVEC,
+                                            bool includePTZ) {
     std::vector<StreamProfile> profiles =
         (includeVSC || includeVEC) ? backendProfiles() : std::vector<StreamProfile>{};
     std::ostringstream os;
@@ -353,6 +355,28 @@ std::string MediaLegacyHandler::profileXml(const char* wrapperElem,
                << "</tt:VideoEncoderConfiguration>";
         }
     }
+    // PTZConfiguration — vị trí ĐÚNG theo xsd:sequence của tt:Profile phải
+    // nằm sau VideoEncoderConfiguration và trước MetadataConfiguration (xem
+    // handleGetProfile chèn Metadata ngay trước thẻ đóng — nhờ khối này chạy
+    // trước nên thứ tự cuối cùng vẫn đúng: VEC, PTZ, Metadata).
+    if (includePTZ && !fixed) {
+        auto it = g_dynProfiles.find(token);
+        if (it != g_dynProfiles.end() && !it->second.ptzToken.empty()) {
+            std::string nodeTok;
+            static const std::string vscPrefix = "video_source_config_";
+            if (it->second.vsToken.rfind(vscPrefix, 0) == 0) {
+                nodeTok = "ptz_node_" + it->second.vsToken.substr(vscPrefix.size());
+            }
+            os << "<tt:PTZConfiguration token=\"" << it->second.ptzToken << "\">"
+                 << "<tt:Name>PTZ Configuration</tt:Name>"
+                 << "<tt:UseCount>1</tt:UseCount>";
+            if (!nodeTok.empty()) os << "<tt:NodeToken>" << nodeTok << "</tt:NodeToken>";
+            os << "<tt:DefaultAbsoluteZoomPositionSpace>"
+                    "http://www.onvif.org/ver10/tptz/ZoomSpaces/PositionGenericSpace"
+                 << "</tt:DefaultAbsoluteZoomPositionSpace>"
+               << "</tt:PTZConfiguration>";
+        }
+    }
     os << "</trt:" << wrapperElem << ">";
     return os.str();
 }
@@ -418,8 +442,9 @@ std::string MediaLegacyHandler::handleGetProfiles() {
     for (const auto& d : dyns) {
         bool hasVSC = !d.vsToken.empty();
         bool hasVEC = !d.veToken.empty();
+        bool hasPTZ = !d.ptzToken.empty();
         os << profileXml("Profiles", d.token.c_str(), d.name.c_str(),
-                          false, hasVSC, hasVEC);
+                          false, hasVSC, hasVEC, hasPTZ);
     }
     os << "</trt:GetProfilesResponse>";
     return os.str();
@@ -467,7 +492,8 @@ std::string MediaLegacyHandler::handleGetProfile(const std::string& req) {
     std::ostringstream os;
     os << "<trt:GetProfileResponse>"
        << profileXml("Profile", dp.token.c_str(), dp.name.c_str(),
-                     false, !dp.vsToken.empty(), !dp.veToken.empty());
+                     false, !dp.vsToken.empty(), !dp.veToken.empty(),
+                     !dp.ptzToken.empty());
     if (!dp.mdToken.empty()) {
         const std::string marker = "</trt:Profile>";
         const std::string metadata =
@@ -673,6 +699,23 @@ std::string MediaLegacyHandler::handleRemoveVideoSourceConfiguration(const std::
     auto it = g_dynProfiles.find(profileTok);
     if (it != g_dynProfiles.end()) it->second.vsToken.clear();
     return "<trt:RemoveVideoSourceConfigurationResponse/>";
+}
+
+std::string MediaLegacyHandler::handleAddPTZConfiguration(const std::string& req) {
+    std::string profileTok = extractInnerTag(req, "ProfileToken");
+    std::string cfgTok = extractInnerTag(req, "ConfigurationToken");
+    std::lock_guard<std::mutex> lk(g_stateMtx);
+    auto it = g_dynProfiles.find(profileTok);
+    if (it != g_dynProfiles.end()) it->second.ptzToken = cfgTok;
+    return "<trt:AddPTZConfigurationResponse/>";
+}
+
+std::string MediaLegacyHandler::handleRemovePTZConfiguration(const std::string& req) {
+    std::string profileTok = extractInnerTag(req, "ProfileToken");
+    std::lock_guard<std::mutex> lk(g_stateMtx);
+    auto it = g_dynProfiles.find(profileTok);
+    if (it != g_dynProfiles.end()) it->second.ptzToken.clear();
+    return "<trt:RemovePTZConfigurationResponse/>";
 }
 
 std::string MediaLegacyHandler::handleSetVideoSourceConfiguration(const std::string& req) {
@@ -1157,6 +1200,10 @@ std::string MediaLegacyHandler::dispatch(const std::string& req) {
         return wrap(actUrl("AddVideoSourceConfiguration"), rel, handleAddVideoSourceConfiguration(req));
     if (req.find("RemoveVideoSourceConfiguration") != std::string::npos)
         return wrap(actUrl("RemoveVideoSourceConfiguration"), rel, handleRemoveVideoSourceConfiguration(req));
+    if (req.find("AddPTZConfiguration") != std::string::npos)
+        return wrap(actUrl("AddPTZConfiguration"), rel, handleAddPTZConfiguration(req));
+    if (req.find("RemovePTZConfiguration") != std::string::npos)
+        return wrap(actUrl("RemovePTZConfiguration"), rel, handleRemovePTZConfiguration(req));
     if (req.find("SetVideoSourceConfiguration") != std::string::npos)
         return wrap(actUrl("SetVideoSourceConfiguration"), rel, handleSetVideoSourceConfiguration(req));
 

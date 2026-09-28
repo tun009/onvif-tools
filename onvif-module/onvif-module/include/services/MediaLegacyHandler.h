@@ -39,6 +39,13 @@ private:
     static std::string handleRemoveVideoSourceConfiguration(const std::string& req);
     static std::string handleSetVideoSourceConfiguration(const std::string& req);
 
+    // PTZ Config (gắn ptz_config_<sourceToken> — do PtzService quảng bá — vào
+    // dyn profile; PTZ-3-1-1/3-1-2/3-1-4/3-1-5/5-1-3 dùng flow Media1
+    // CreateProfile + AddVideoSourceConfiguration + AddPTZConfiguration rồi mới
+    // gọi PTZ AbsoluteMove/ContinuousMove/GotoHomePosition trên profile đó).
+    static std::string handleAddPTZConfiguration(const std::string& req);
+    static std::string handleRemovePTZConfiguration(const std::string& req);
+
     // Video Encoder Config
     static std::string handleGetVideoEncoderConfigurations();
     static std::string handleGetVideoEncoderConfiguration(const std::string& req);
@@ -65,8 +72,11 @@ private:
                             const std::string& bodyXml);
     // wrapperElem = "Profiles" (list, plural) hoặc "Profile" (single).
     // fixed=true cho profile default backend, false cho dyn CreateProfile.
-    // includeVSC/includeVEC: kèm configuration blocks hay không.
+    // includeVSC/includeVEC/includePTZ: kèm configuration blocks hay không.
+    // includePTZ chỉ có tác dụng khi !fixed (PTZConfiguration chỉ gắn qua
+    // AddPTZConfiguration trên dyn profile — xem handleAddPTZConfiguration).
     static std::string profileXml(const char* wrapperElem,
                                   const char* token, const char* name,
-                                  bool fixed, bool includeVSC, bool includeVEC);
+                                  bool fixed, bool includeVSC, bool includeVEC,
+                                  bool includePTZ = false);
 };
