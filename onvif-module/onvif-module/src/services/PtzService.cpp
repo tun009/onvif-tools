@@ -360,9 +360,18 @@ int PtzService::AbsoluteMove(_tptz__AbsoluteMove *req, _tptz__AbsoluteMoveRespon
     if (!req->Position->Zoom) {
         return sendFault(FaultBuilder::invalidArgVal("Missing Zoom position"));
     }
+    // Generic zoom space công bố XRange [0,1] (GetConfigurationOptions) — giá
+    // trị ngoài range PHẢI bị từ chối bằng fault, không được âm thầm clamp rồi
+    // vẫn gọi backend (PTZ-3-1-2 kỳ vọng đúng env:Sender/ter:InvalidArgVal/
+    // ter:InvalidPosition, không phải lỗi Receiver từ backend).
+    const float zoomX = req->Position->Zoom->x;
+    if (zoomX < 0.0f || zoomX > 1.0f) {
+        return sendFault(FaultBuilder::sender("ter:InvalidArgVal", "ter:InvalidPosition",
+                                              "Zoom position out of range [0,1]"));
+    }
 
     PTZVector pos;
-    pos.zoom = clamp01(req->Position->Zoom->x);
+    pos.zoom = zoomX;
     PTZVector speed;
     speed.zoom = (req->Speed && req->Speed->Zoom) ? clamp01(req->Speed->Zoom->x) : 1.0f;
 
