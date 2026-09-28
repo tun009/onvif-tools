@@ -156,11 +156,10 @@ int ImagingService::GetImagingSettings(
             ext.basic.contrast   = clamp(ext.basic.contrast);
             ext.basic.saturation = clamp(ext.basic.saturation);
             ext.basic.sharpness  = clamp(ext.basic.sharpness);
-            // Default modes: AUTO cho tất cả, IrCut = AUTO (2)
-            ext.exposureMode = 0;
-            ext.whiteBalanceMode = 0;
+            // Exposure/WhiteBalance/IrCutFilter đã nằm trong ext.basic, đọc
+            // thật từ backend_->getImagingSettings() ở trên — không cần
+            // default riêng nữa.
             ext.autoFocusMode = 0;
-            ext.irCutFilter = 2;
             ext.loaded = true;
             cache_[tok] = ext;
         }
@@ -185,18 +184,28 @@ int ImagingService::GetImagingSettings(
         s.wideDynRange ? tt__WideDynamicMode::ON
                        : tt__WideDynamicMode::OFF;
 
-    // IrCutFilter (từ cache)
+    // IrCutFilter — real qua MGMT (DayNight.IrCutFilterMode/IrCutOn).
     auto* irc = (tt__IrCutFilterMode*)soap_malloc(soap, sizeof(tt__IrCutFilterMode));
-    *irc = static_cast<tt__IrCutFilterMode>(ext.irCutFilter);
+    *irc = static_cast<tt__IrCutFilterMode>(s.irCutFilterMode);
     out->IrCutFilter = irc;
 
-    // WhiteBalance mode từ cache
+    // WhiteBalance — real qua MGMT.
     out->WhiteBalance = soap_new_tt__WhiteBalance20(soap);
-    out->WhiteBalance->Mode = static_cast<tt__WhiteBalanceMode>(ext.whiteBalanceMode);
+    out->WhiteBalance->Mode = s.whiteBalanceAuto ? tt__WhiteBalanceMode::AUTO
+                                                  : tt__WhiteBalanceMode::MANUAL;
+    out->WhiteBalance->CrGain = F(soap, s.whiteBalanceCrGain);
+    out->WhiteBalance->CbGain = F(soap, s.whiteBalanceCbGain);
 
-    // Exposure mode từ cache
+    // Exposure — real qua MGMT.
     out->Exposure = soap_new_tt__Exposure20(soap);
-    out->Exposure->Mode = static_cast<tt__ExposureMode>(ext.exposureMode);
+    out->Exposure->Mode = s.exposureAuto ? tt__ExposureMode::AUTO
+                                          : tt__ExposureMode::MANUAL;
+    out->Exposure->ExposureTime    = F(soap, s.exposureTime);
+    out->Exposure->MinExposureTime = F(soap, s.exposureMinTime);
+    out->Exposure->MaxExposureTime = F(soap, s.exposureMaxTime);
+    out->Exposure->Gain            = F(soap, s.exposureGain);
+    out->Exposure->MinGain         = F(soap, s.exposureMinGain);
+    out->Exposure->MaxGain         = F(soap, s.exposureMaxGain);
 
     // Declare Focus mode (motorized lens mock) — Profile T conditional §7.16.
     // IMAGING-1-1-14 kiểm NearLimit/FarLimit persist qua Set→Get.
@@ -262,15 +271,27 @@ int ImagingService::SetImagingSettings(
     if (in->WideDynamicRange)
         ext.basic.wideDynRange =
             (in->WideDynamicRange->Mode == tt__WideDynamicMode::ON);
-    if (in->Exposure)     ext.exposureMode     = static_cast<int>(in->Exposure->Mode);
-    if (in->WhiteBalance) ext.whiteBalanceMode = static_cast<int>(in->WhiteBalance->Mode);
+    if (in->Exposure) {
+        ext.basic.exposureAuto = (in->Exposure->Mode == tt__ExposureMode::AUTO);
+        if (in->Exposure->ExposureTime)    ext.basic.exposureTime    = *in->Exposure->ExposureTime;
+        if (in->Exposure->MinExposureTime) ext.basic.exposureMinTime = *in->Exposure->MinExposureTime;
+        if (in->Exposure->MaxExposureTime) ext.basic.exposureMaxTime = *in->Exposure->MaxExposureTime;
+        if (in->Exposure->Gain)            ext.basic.exposureGain    = *in->Exposure->Gain;
+        if (in->Exposure->MinGain)         ext.basic.exposureMinGain = *in->Exposure->MinGain;
+        if (in->Exposure->MaxGain)         ext.basic.exposureMaxGain = *in->Exposure->MaxGain;
+    }
+    if (in->WhiteBalance) {
+        ext.basic.whiteBalanceAuto = (in->WhiteBalance->Mode == tt__WhiteBalanceMode::AUTO);
+        if (in->WhiteBalance->CrGain) ext.basic.whiteBalanceCrGain = *in->WhiteBalance->CrGain;
+        if (in->WhiteBalance->CbGain) ext.basic.whiteBalanceCbGain = *in->WhiteBalance->CbGain;
+    }
     if (in->Focus) {
         ext.autoFocusMode = static_cast<int>(in->Focus->AutoFocusMode);
         if (in->Focus->NearLimit)    ext.focusNearLimit    = *in->Focus->NearLimit;
         if (in->Focus->FarLimit)     ext.focusFarLimit     = *in->Focus->FarLimit;
         if (in->Focus->DefaultSpeed) ext.focusDefaultSpeed = *in->Focus->DefaultSpeed;
     }
-    if (in->IrCutFilter)  ext.irCutFilter      = static_cast<int>(*in->IrCutFilter);
+    if (in->IrCutFilter)  ext.basic.irCutFilterMode = static_cast<int>(*in->IrCutFilter);
 
     // Validate range — nested fault (IMAGING-1-1-8).
     if (!isValidSettings(ext.basic)) {

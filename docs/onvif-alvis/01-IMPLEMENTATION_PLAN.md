@@ -1302,14 +1302,19 @@ thì nên hỏi DVR team đã từng chạy script/API nào đụng tới `1_sub
 
 ### Gate
 
-- Get/Set imaging dùng state thật qua MGMT, không còn echo cache cục bộ
-  cho các field đã có real API tương ứng.
-- PTZ Zoom command đến MGMT/HAL thật (không advertise Pan/Tilt).
-- Imaging test không regression (đặc biệt `IMAGING-1-1-14` persistence
-  check — rủi ro thật, xem bên dưới).
-- `DEVICE-1-1-6` (PTZ Capabilities, hiện PASS nhờ trả fault) không được
-  phá — nếu bật PTZ (chỉ Zoom), test này sẽ đổi từ "mong đợi fault" sang
-  "mong đợi dữ liệu thật", cần xác nhận lại bằng DTT, không giả định.
+- [x] Get/Set imaging dùng state thật qua MGMT (`imaging = real` đã bật,
+      DTT xác nhận — 2026-09-28).
+- [x] PTZ Zoom command đến MGMT/HAL thật, xác nhận qua log MGMT
+      `LensService HAL-DIRECT-OK set_zoom` trên `.194` (không advertise
+      Pan/Tilt) — 2026-09-28.
+- [x] Imaging test không regression — toàn bộ `IMAGING-*` PASS ở r20-r25,
+      bao gồm `IMAGING-1-1-14` persistence check.
+- [x] `DEVICE-1-1-6` (PTZ Capabilities) PASS lại với dữ liệu PTZ thật
+      (không còn dựa vào fault như trước Phase 5) — xác nhận bằng DTT, xem
+      "Triển khai Phase 5" bên dưới.
+- [ ] `ContinuousMove`/`Home Position` — biết là sẽ luôn fail DTT ở trạng
+      thái hiện tại (giới hạn cố ý, xem chi tiết bên dưới), **user quyết
+      định tạm hoãn** (2026-09-28), không phải điều kiện chặn Gate.
 
 ### Nghiên cứu Phase 5 (2026-09-25) — đã xong, CHƯA CODE, ghi lại để đối chiếu sau khi làm
 
@@ -1466,6 +1471,12 @@ làm), không phụ thuộc việc có nối MGMT thật hay chưa.
 
 #### Việc CHƯA làm (đúng yêu cầu — dừng ở nghiên cứu, chưa code)
 
+> ⚠️ Mục này mô tả trạng thái **lúc nghiên cứu (2026-09-25)**, đã bị
+> supersede bởi mục "Triển khai Phase 5" ngay bên dưới — Imaging + PTZ đã
+> code xong, build, và `config/onvif.conf` đã chuyển `imaging = real`,
+> `ptz = real` thật (không còn mock nữa). Giữ nguyên đoạn dưới đây làm
+> lịch sử quyết định, không xoá.
+
 Toàn bộ mục này là kết quả nghiên cứu, dùng để đối chiếu khi bắt tay code
 thật. `config/onvif.conf` hiện `imaging = mock`, `ptz = mock` — **giữ
 nguyên**, chỉ đổi sang `real` sau khi đã code xong + build + test DTT xác
@@ -1473,6 +1484,143 @@ nhận, đúng quy trình rollout đã áp dụng cho Device/Network/Media (khô
 đổi config trước khi có code tương ứng — đổi bây giờ cũng vô nghĩa vì
 `AlvisBackendFacade` chưa đọc capability này cho Imaging/PTZ, chưa có
 nhánh `real()` nào để kích hoạt).
+
+### Triển khai Phase 5 (2026-09-28) — Imaging real + PTZ zoom-only, DTT r18→r25
+
+#### Code đã viết
+
+- **`IMgmtClient.h`/`HttpMgmtClient.h`/`HttpMgmtClient.cpp`** — 5 method
+  mới theo đúng khuôn mẫu Device/Network sẵn có: `getImagingSettings()`/
+  `setImagingSettings()` (`GET/PUT /mgmt/v1/Config/ImagingSettings`, lọc
+  entry `Type=DAY`), `getZoomFocus()`/`setZoomFocus()` (`GET/PUT
+  /mgmt/v1/Config/ZoomFocus`, tham số query `VideoSourceId` — không phải
+  `VideoSourceToken` như tài liệu handoff ghi lỏng lẻo, đã đối chiếu trực
+  tiếp source MGMT), `getLensBounds()` (`GET /mgmt/v1/Config/LensInfo`,
+  lọc entry `Enable=true`). Ba struct mới `ZoomFocusMode`/`ZoomFocusState`/
+  `LensBounds` thêm vào `IMgmtClient.h`.
+- **`ImagingService.h`/`.cpp`** — `isValidToken()` hết static, đọc động từ
+  `backend_->getProfiles()` (đúng bug đã ghi nhận ở mục nghiên cứu, sửa
+  trước khi bật real).
+- **`AlvisBackendFacade.cpp`** — thêm nhánh `real("imaging")`/`real("ptz")`
+  cho `getImagingSettings`/`setImagingSettings`/`ptzAbsoluteMove`/
+  `ptzStop`/`getPtzStatus` (route `IMgmtClient`, giữ nguyên `ptzRelativeMove`/
+  `ptzContinuousMove`/`gotoHomePosition`/`setHomePosition` đi mock — không
+  implement real cho các op này, xem lý do ở mục "Giới hạn cố ý" bên dưới).
+  Zoom normalize/denormalize giữa thang ONVIF `[0,1]` và thang vật lý MGMT
+  `[MinZoom,MaxZoom]` (đọc từ `getLensBounds()` mỗi lần) nằm trong facade,
+  `PtzService` không cần biết physical range.
+- **`PtzService.h`/`.cpp` (mới hoàn toàn)** — PTZ node **chỉ có trục Zoom**
+  (không Pan/Tilt), implement thật 11/28 operation: `GetServiceCapabilities`,
+  `GetNodes`, `GetNode`, `GetConfigurations`, `GetConfiguration`,
+  `GetConfigurationOptions`, `SetConfiguration`, `GetCompatibleConfigurations`,
+  `AbsoluteMove`, `Stop`, `GetStatus`. 17 operation còn lại (Presets, Tours,
+  Home Position, ContinuousMove, RelativeMove...) trả `ter:ActionNotSupported`
+  — xem "Giới hạn cố ý" bên dưới về hệ quả DTT của quyết định này.
+- **`DeviceService.cpp`/`OnvifServer.cpp`/`Makefile`** — đăng ký PTZ service
+  đúng pattern sẵn có (`registry_`/dispatch if-else theo path
+  `/onvif/ptz`), thêm `soapPTZBindingService.cpp` vào `GEN_SRCS`.
+- **`Media2Service.cpp`** — thêm hàm export `resolveDynProfileSourceToken()`
+  (tra `g_dynProfiles` nội bộ file, cho `PtzService` gọi cross-file).
+- **`MediaLegacyHandler.h`/`.cpp`** — thêm hàm export tương tự
+  `resolveLegacyDynProfileSourceToken()` (kho `g_dynProfiles` RIÊNG của
+  Media1, độc lập với Media2) + 2 handler hoàn toàn mới
+  `handleAddPTZConfiguration`/`handleRemovePTZConfiguration` (op Media1
+  legacy chưa từng được implement, vì trước Phase 5 chưa từng có PTZ để
+  gọi tới) + field `ptzToken` trong `DynProfile` + echo `<tt:PTZConfiguration>`
+  trong `profileXml()` (đúng vị trí `xsd:sequence`: sau
+  `VideoEncoderConfiguration`, trước `MetadataConfiguration`).
+- **`DeviceIOHandler.h`/`.cpp`/`DeviceIOService.h`** — `GetVideoSources`
+  (namespace `deviceIO`) hết hardcode token mock `"src_main"`, đọc động từ
+  `backend_->getProfiles()` (bug độc lập, không phải PTZ nhưng phát hiện
+  qua test PTZ — xem "Bug tìm thấy trong lúc chạy DTT").
+
+#### Bug tìm thấy trong lúc chạy DTT (r18 → r25), theo đúng thứ tự phát hiện
+
+1. **`resolveProfileToSource()` chỉ tra `backend_->getProfiles()` (DVR
+   fixed profile), không biết profile tạo động qua `CreateProfile`** — vì
+   dynamic profile chỉ tồn tại trong state nội bộ `onvif-module`
+   (`g_dynProfiles`), DVR không hề biết. Test PTZ luôn tạo 1 profile tạm
+   rồi gắn PTZ config vào đó (`PTZ-3-1-1` và tương tự) → luôn fault
+   `ter:NoProfile`. **2 kho riêng biệt** (Media1 `MediaLegacyHandler.cpp`
+   và Media2 `Media2Service.cpp` không share state) → phải sửa **2 lần**
+   (r19 sửa Media2 trước — pass được `MEDIA2_PTZ-*`; r20 mới phát hiện
+   Media1 cũng cần y hệt — pass được `PTZ-*`).
+2. **Sai thứ tự field XML `tt:PTZConfiguration`** — tự gây ra khi thêm
+   persist `DefaultPTZTimeout` (đợt sửa `PTZ-2-1-9`), đặt nhầm TRƯỚC
+   `DefaultAbsoluteZoomPositionSpace` trong khi `xsd:sequence` yêu cầu
+   ngược lại. DTT báo lỗi schema rõ ràng ("invalid child element"), phát
+   hiện ở r21, sửa xong r22.
+3. **Media1 chưa từng có `AddPTZConfiguration`/`RemovePTZConfiguration`**
+   — không phải bug do sửa nhầm, mà là **chưa ai viết** (op này chỉ có ý
+   nghĩa khi có PTZ để gắn vào, trước Phase 5 không tồn tại). DTT gọi op
+   này giữa chừng flow `PTZ-3-1-1` → `ter:ActionNotSupported` (r20-r23).
+   Viết mới hoàn toàn ở r23→r24.
+4. **`AbsoluteMove` không validate range zoom `[0,1]`** — code cũ dùng
+   `clamp01()` âm thầm kẹp giá trị ngoài range rồi vẫn gọi backend, thay vì
+   từ chối bằng fault `ter:InvalidArgVal/ter:InvalidPosition` như DTT
+   (`PTZ-3-1-2`) kỳ vọng. Phát hiện + sửa r24→r25.
+5. **`DeviceIOHandler::GetVideoSources` hardcode `"src_main"`** — DTT
+   dùng chính response này để "đoán" 1 token KHÔNG hợp lệ cho test negative
+   (`IMAGING-2-1-16`), nhưng vì token trả về là mock cũ nên DTT đoán trúng
+   1 token thật (`"1"`) làm token âm tính → server chấp nhận đúng (vì `"1"`
+   thật sự hợp lệ) thay vì trả fault như DTT mong đợi. Sửa cùng đợt.
+
+#### Kết quả DTT — r18 (159 fail, chủ yếu do DVR tự restart giữa chừng khi
+chạy full-suite + WS-Discovery tắt, không liên quan Phase 5) → r19/r20/r21
+(dò lần lượt 5 bug ở trên) → r22 (pass gần hết) → **r25: 9/12 case trong
+scope PTZ đã liệt kê PASS**, bao gồm toàn bộ core: `AbsoluteMove` chạy
+**thật** xuống HAL (xác nhận qua log MGMT — `LensService HAL-DIRECT-OK
+set_zoom`), validate fault message, `SetConfiguration`, generic zoom/pan-tilt
+spaces, Home Position bản Media1, Imaging invalid-token.
+
+#### Giới hạn cố ý — 3 case còn fail vĩnh viễn, đã quyết định tạm hoãn (2026-09-28)
+
+`PTZ-3-1-4`, `MEDIA2_PTZ-1-1-3` (ContinuousMove) và `MEDIA2_PTZ-3-1-3`
+(Home Position) fail với lý do **thiết kế cố ý**, không phải bug:
+`AlvisBackendFacade` không implement real cho `ptzContinuousMove`/
+`gotoHomePosition`/`setHomePosition` vì MGMT không có khái niệm velocity
+(nguyên tắc README #5 — không quảng bá capability backend thật không làm
+được). **Phát hiện quan trọng**: `TestInfo` của các case này chỉ có
+`RequiredFeatures: [MediaService, PTZService]` — DTT **không** đọc
+`SupportedPTZSpaces`/`HomeSupported` trong `GetNode` để quyết định skip
+test, nó chỉ hỏi "PTZService có tồn tại không?" rồi coi ContinuousMove/Home
+là baseline "Must" bất kể node khai gì. Nghĩa là: **ngay khi bật
+PTZService (dù chỉ định làm zoom-only), 2 op này sẽ luôn fail DTT vĩnh
+viễn** trừ khi implement thật (kể cả no-op hợp lệ) — đúng pattern JPEG
+"Device MANDATORY" đã gặp ở Phase 4. User quyết định **tạm skip, để sau**
+(2026-09-28) — không phải regression, không cần sửa gấp.
+
+#### Bug ngoài phạm vi onvif-module — báo cáo team MGMT/HAL (2026-09-28)
+
+Trên camera `.194`, phát hiện **MGMT bị treo đồng bộ toàn bộ endpoint
+(kể cả xác thực Digest) trong nhiều giây** ngay sau khi `AbsoluteMove` ra
+lệnh motor zoom di chuyển quãng xa. Bằng chứng log `journalctl -u mgmt`:
+lệnh ghi `set_zoom` qua UART (subboard CV25, giao thức Pelco-D, chip
+SC16IS750) hoàn tất trong ~12ms, nhưng chuỗi đọc trạng thái **ngay sau đó
+im lặng hoàn toàn** — mỗi lệnh poll cách nhau đúng ~3.0s (khớp
+`request_timeout_ms` phía onvif-module) thay vì <1s như chu kỳ poll bình
+thường. Vì `LensApiController::handleGetZoomFocus`/`handleGetLensInfo` gọi
+đồng bộ vào chuỗi poll UART này, HTTP worker bị block theo → cascade fail
+sang cả những request auth không liên quan chạy đúng lúc đó (`PTZ-3-1-4`,
+`PTZ-3-1-5` từng fail lây kiểu này ở r24). **Không phải bug onvif-module**
+— nghi vấn: firmware subboard CV25 không phản hồi poll khi đang chấp hành
+lệnh motor (nên đổi sang trả "busy" ngay thay vì im lặng), hoặc
+`LensApiController` nên đọc cache `readState()` định kỳ thay vì tự poll
+UART mỗi request. Cách tái hiện: `PUT /mgmt/v1/Config/ZoomFocus` với
+`ZoomValue` cách xa vị trí hiện tại, gọi `GET` ngay sau đó — đo thời gian
+phản hồi. Đã bàn giao chi tiết cho team MGMT/HAL, chưa có fix, không chặn
+Phase 5 (chỉ ảnh hưởng độ ổn định khi test dồn dập, hành vi thật của
+`AbsoluteMove` là đúng).
+
+#### Môi trường test đã đổi 2 lần trong lúc verify (không phải vấn đề code)
+
+`.125` (DHCP cấp lại IP `.102` sau khi DTT tự chạy test
+`SET NETWORK INTERFACE CONFIGURATION` — side effect thật của `network =
+real`, không phải bug) → `.102` → `.194` (clone máy hoàn toàn mới để test).
+Mỗi lần đổi cần cập nhật `device_ip` trong `config/onvif.conf` (dùng để
+build `XAddr` trong mọi response ONVIF — quan trọng thật, không phải giá
+trị trang trí, xem thảo luận nên đổi sang tự đọc `Host:` header của
+request thay vì hardcode, **chưa làm**, để dành refactor sau).
 
 ## 9. Phase 6 — Profile M analytics metadata và event
 

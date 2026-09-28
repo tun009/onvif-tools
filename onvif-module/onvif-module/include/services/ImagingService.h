@@ -47,16 +47,15 @@ private:
     ServiceConfig cfg_;
     std::shared_ptr<ICameraBackend> backend_;
 
-    // Cache riêng vì backend mock không persist một số field. Extended lưu
-    // các mode ONVIF (Exposure/WhiteBalance/Focus/IrCut/BLC/WDR) không có
-    // trong ImagingSettings backend struct.
+    // Cache riêng cho phần KHÔNG có tương ứng thật ở MGMT (Focus AutoFocusMode
+    // + limit — thuộc lens motor control, không phải ImagingSettings). Kể từ
+    // 2026-09-28, Exposure/WhiteBalance/IrCutFilter đã chuyển vào `basic`
+    // (round-trip thật qua backend_->getImagingSettings/setImagingSettings,
+    // xem ImagingTypes.h), không còn echo cache riêng nữa.
     struct ExtSettings {
-        ImagingSettings basic;             // brightness/contrast/saturation/sharpness/BLC/WDR
-        int exposureMode = 0;              // 0=AUTO, 1=MANUAL (enum tt__ExposureMode)
-        int whiteBalanceMode = 0;          // 0=AUTO, 1=MANUAL
-        int autoFocusMode = 0;             // 0=AUTO, 1=MANUAL
-        int irCutFilter = 0;               // 0=ON, 1=OFF, 2=AUTO (enum tt__IrCutFilterMode)
-        // Focus params (IMAGING-1-1-14 persist test)
+        ImagingSettings basic;             // brightness/contrast/saturation/sharpness/BLC/WDR/Exposure/WhiteBalance/IrCutFilter — tất cả real qua MGMT
+        int autoFocusMode = 0;             // 0=AUTO, 1=MANUAL — chưa có API MGMT tương ứng rõ ràng, giữ cache
+        // Focus params (IMAGING-1-1-14 persist test) — không có field MGMT tương ứng.
         float focusNearLimit = 0.0f;
         float focusFarLimit = 100.0f;
         float focusDefaultSpeed = 0.5f;

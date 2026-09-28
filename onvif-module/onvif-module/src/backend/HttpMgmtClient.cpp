@@ -577,6 +577,33 @@ ImagingSettings HttpMgmtClient::getImagingSettings(const std::string& sourceToke
         result.sharpness   = SimpleJson::getFloat(settings, "Sharpness", 50.0f);
         result.backlightComp = SimpleJson::getBool(settings, "BLC", false);
         result.wideDynRange   = SimpleJson::getBool(settings, "WDR", false);
+
+        // Exposure — MGMT trả "Mode":"AUTO"|"MANUAL" (string), không phải bool.
+        const std::string exposure = jsonObject(settings, "Exposure");
+        result.exposureAuto    = SimpleJson::getString(exposure, "Mode", "AUTO") != "MANUAL";
+        result.exposureTime    = SimpleJson::getFloat(exposure, "ExposureTime", 0.0f);
+        result.exposureMinTime = SimpleJson::getFloat(exposure, "MinExposureTime", 0.0f);
+        result.exposureMaxTime = SimpleJson::getFloat(exposure, "MaxExposureTime", 0.0f);
+        result.exposureGain    = SimpleJson::getFloat(exposure, "Gain", 0.0f);
+        result.exposureMinGain = SimpleJson::getFloat(exposure, "MinGain", 0.0f);
+        result.exposureMaxGain = SimpleJson::getFloat(exposure, "MaxGain", 0.0f);
+
+        // WhiteBalance — cùng kiểu Mode string.
+        const std::string whiteBalance = jsonObject(settings, "WhiteBalance");
+        result.whiteBalanceAuto   = SimpleJson::getString(whiteBalance, "Mode", "AUTO") != "MANUAL";
+        result.whiteBalanceCrGain = SimpleJson::getFloat(whiteBalance, "CrGain", 0.0f);
+        result.whiteBalanceCbGain = SimpleJson::getFloat(whiteBalance, "CbGain", 0.0f);
+
+        // IrCutFilter — MGMT gộp 2 trục (DayNight.IrCutFilterMode AUTO/MANUAL
+        // + DayNight.IrCutOn bật/tắt) thành 1 khái niệm; ONVIF chỉ có 1 enum
+        // ON/OFF/AUTO. AUTO phía MGMT -> AUTO phía ONVIF; MANUAL thì đọc thêm
+        // IrCutOn để quyết định ON hay OFF.
+        const std::string dayNight = jsonObject(settings, "DayNight");
+        if (SimpleJson::getString(dayNight, "IrCutFilterMode", "AUTO") == "AUTO") {
+            result.irCutFilterMode = 2; // AUTO
+        } else {
+            result.irCutFilterMode = SimpleJson::getBool(dayNight, "IrCutOn", true) ? 0 : 1; // ON/OFF
+        }
         return result;
     }
     throw std::runtime_error("MGMT ImagingSettings response missing DAY profile");
@@ -584,8 +611,11 @@ ImagingSettings HttpMgmtClient::getImagingSettings(const std::string& sourceToke
 
 void HttpMgmtClient::setImagingSettings(const std::string& sourceToken,
                                         const ImagingSettings& settings) {
-    // Partial-update contract phía MGMT (mọi field optional) — vẫn gửi đủ 6
+    // Partial-update contract phía MGMT (mọi field optional) — vẫn gửi đủ
     // field mình sở hữu mỗi lần Set, để không phụ thuộc state MGMT giữ sẵn.
+    // Gửi cả Exposure/WhiteBalance/DayNight dù 1 số field (VD MinGain) MGMT
+    // chỉ lưu DB, không đẩy HAL — theo yêu cầu: MGMT có gì thì đồng bộ nấy,
+    // không phân biệt field nào thật sự chạm phần cứng.
     std::ostringstream body;
     body << "{\"VideoSourceId\":\"" << escapeJson(sourceToken) << "\","
          << "\"ImagingSettings\":{"
@@ -594,7 +624,29 @@ void HttpMgmtClient::setImagingSettings(const std::string& sourceToken,
          << "\"ColorSaturation\":" << settings.saturation << ","
          << "\"Sharpness\":" << settings.sharpness << ","
          << "\"BLC\":" << (settings.backlightComp ? "true" : "false") << ","
-         << "\"WDR\":" << (settings.wideDynRange ? "true" : "false")
+         << "\"WDR\":" << (settings.wideDynRange ? "true" : "false") << ","
+         << "\"Exposure\":{"
+             << "\"Mode\":\"" << (settings.exposureAuto ? "AUTO" : "MANUAL") << "\","
+             << "\"ExposureTime\":" << settings.exposureTime << ","
+             << "\"MinExposureTime\":" << settings.exposureMinTime << ","
+             << "\"MaxExposureTime\":" << settings.exposureMaxTime << ","
+             << "\"Gain\":" << settings.exposureGain << ","
+             << "\"MinGain\":" << settings.exposureMinGain << ","
+             << "\"MaxGain\":" << settings.exposureMaxGain
+         << "},"
+         << "\"WhiteBalance\":{"
+             << "\"Mode\":\"" << (settings.whiteBalanceAuto ? "AUTO" : "MANUAL") << "\","
+             << "\"CrGain\":" << settings.whiteBalanceCrGain << ","
+             << "\"CbGain\":" << settings.whiteBalanceCbGain
+         << "},"
+         << "\"DayNight\":{";
+    if (settings.irCutFilterMode == 2) {
+        body << "\"IrCutFilterMode\":\"AUTO\"";
+    } else {
+        body << "\"IrCutFilterMode\":\"MANUAL\",\"IrCutOn\":"
+             << (settings.irCutFilterMode == 0 ? "true" : "false");
+    }
+    body << "}"
          << "}}";
     const HttpResponse response = request("PUT", "/mgmt/v1/Config/ImagingSettings", body.str());
     const int resultCode = SimpleJson::getInt(response.body, "result", 0);
