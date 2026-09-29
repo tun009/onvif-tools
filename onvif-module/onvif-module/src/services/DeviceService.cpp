@@ -105,38 +105,69 @@ static int daysInMonth(int year, int month) {
     return kDays[month - 1];
 }
 
-// Ngược lại với công thức compose TimeZone ở GetSystemDateAndTime (chuỗi
-// "UTC" + dấu + giờ[:phút], dấu '-' ứng với offset dương). Đây là quy ước tự
-// định nghĩa của riêng service này (không phải mọi client POSIX TZ đều theo
-// đúng hình thức này), nhưng Get/Set trong cùng service phải nhất quán với
-// nhau để round-trip Get→Set hoạt động đúng.
+// Parse offset từ chuỗi POSIX TZ theo cú pháp chuẩn tzset(3):
+//   stdoffset[dst[offset][,rule]]
+// std/dst name có thể quote trong <...> (cho phép digit/+/-, vd "<UTC-11>")
+// hoặc chuỗi chữ cái liền không quote (vd "UTC", "EasterIslandStandardTime").
+// offset dạng [+-]hh[:mm[:ss]], không dấu = dương theo quy ước POSIX (offset
+// dương = local ở phía TÂY UTC, tức UTC = local + offset). Phần dst
+// name/offset/rule sau đó (nếu có) chỉ mô tả quy tắc chuyển giờ mùa hè —
+// không ảnh hưởng offset chuẩn hiện tại nên bỏ qua, không cần parse tiếp.
+// Hỗ trợ cả 2 dạng ODM (ONVIF Device Manager) thực tế gửi lên: gõ tay ô
+// "Posix TZ" (vd "UTC-7", "<UTC-11>11") lẫn Apply từ dropdown chọn sẵn (ODM
+// tự sinh chuỗi đầy đủ kèm tên zone + rule DST, vd
+// "EasterIslandStandardTime6DaylightTime,M9.1.6/22,M4.1.6/22").
 static bool parsePosixOffsetMinutes(const std::string& tz, int& outMinutes) {
-    if (tz.rfind("UTC", 0) != 0) return false;
-    const std::string rest = tz.substr(3);
-    if (rest.empty()) return false;
-    if (rest == "0") { outMinutes = 0; return true; }
-    const char sign = rest[0];
-    if (sign != '+' && sign != '-') return false;
-    const std::string numPart = rest.substr(1);
-    if (numPart.empty()) return false;
-    for (char c : numPart) {
-        if (c != ':' && !std::isdigit((unsigned char)c)) return false;
+    size_t pos = 0;
+    const size_t len = tz.size();
+    if (len == 0) return false;
+
+    // 1) Std name.
+    if (tz[pos] == '<') {
+        const size_t close = tz.find('>', pos + 1);
+        if (close == std::string::npos) return false;
+        pos = close + 1;
+    } else {
+        const size_t nameStart = pos;
+        while (pos < len && std::isalpha((unsigned char)tz[pos])) ++pos;
+        if (pos == nameStart) return false; // không có tên std hợp lệ
     }
-    const auto colon = numPart.find(':');
+
+    // 2) Offset: [+-]hh[:mm[:ss]]
+    if (pos >= len) return false;
+    bool negative = false;
+    if (tz[pos] == '+' || tz[pos] == '-') {
+        negative = (tz[pos] == '-');
+        ++pos;
+    }
+    const size_t numStart = pos;
+    while (pos < len && (std::isdigit((unsigned char)tz[pos]) || tz[pos] == ':'))
+        ++pos;
+    if (pos == numStart) return false; // không có số nào
+    const std::string offsetStr = tz.substr(numStart, pos - numStart);
+    const auto colon = offsetStr.find(':');
     int hours = 0, minutes = 0;
     try {
         if (colon == std::string::npos) {
-            hours = std::stoi(numPart);
+            hours = std::stoi(offsetStr);
         } else {
-            hours = std::stoi(numPart.substr(0, colon));
-            minutes = std::stoi(numPart.substr(colon + 1));
+            hours = std::stoi(offsetStr.substr(0, colon));
+            const auto colon2 = offsetStr.find(':', colon + 1);
+            const std::string minPart = (colon2 == std::string::npos)
+                ? offsetStr.substr(colon + 1)
+                : offsetStr.substr(colon + 1, colon2 - colon - 1);
+            minutes = minPart.empty() ? 0 : std::stoi(minPart);
         }
     } catch (...) {
         return false;
     }
-    if (hours < 0 || hours > 14 || minutes < 0 || minutes > 59) return false;
+    if (hours < 0 || hours > 24 || minutes < 0 || minutes > 59) return false;
+
     const int total = hours * 60 + minutes;
-    outMinutes = (sign == '-') ? total : -total;
+    outMinutes = negative ? total : -total;
+
+    // 3) Phần dst name/offset/",rule" còn lại (nếu có) — không cần parse,
+    // offset chuẩn đã lấy được ở bước 2.
     return true;
 }
 
@@ -1336,7 +1367,10 @@ int DeviceService::SetSystemDateAndTime(_tds__SetSystemDateAndTime* req,
         for (char c : tz) {
             if (std::isdigit((unsigned char)c)) hasDigit = true;
             if (c == ',') hasComma = true;
-            if (!(std::isalnum((unsigned char)c) || c=='+'||c=='-'||c==':'||c=='/'||c=='.'||c==','))
+            // '<'/'>' cho phép để hỗ trợ dạng tên std/dst quote POSIX
+            // (vd "<UTC-11>11") — xem parsePosixOffsetMinutes().
+            if (!(std::isalnum((unsigned char)c) || c=='+'||c=='-'||c==':'||
+                  c=='/'||c=='.'||c==','||c=='<'||c=='>'))
                 return devSendOnvifFault(this->soap, "SOAP-ENV:Sender",
                                          "ter:InvalidArgVal", "ter:InvalidTimeZone",
                                          "Invalid timezone format");
