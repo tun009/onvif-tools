@@ -3,6 +3,8 @@
 #include "backend/HttpMgmtClient.h"
 #include "backend/HttpDvrClient.h"
 #include "config/RuntimeConfig.h"
+#include "services/DvrRecordingService.h"
+#include "services/RecordingJobStore.h"
 #include "OnvifServer.h"
 
 // gSOAP namespace table — required when compiled with -DWITH_NONAMESPACES.
@@ -155,7 +157,22 @@ int main(int argc, char* argv[]) {
     // MGMT làm nguồn xác thực duy nhất; không fallback admin/admin123.
     std::shared_ptr<IMgmtClient> authClient =
         cfg.backendMode == BackendMode::Mock ? nullptr : mgmtClient;
-    OnvifServer server(svcCfg, backend, cfg.discoveryEnabled, authClient);
+    // Recording Control (Profile G) thật chỉ khi hybrid/production và media cũng thật: token nguồn
+    // của Recording Job là token Media profile của DVR. Không đạt → dùng service mock.
+    std::unique_ptr<IOnvifService> recordingService;
+    if (cfg.capability("recording") == CapabilityMode::Real) {
+        if (cfg.backendMode == BackendMode::Mock || cfg.capability("media") != CapabilityMode::Real) {
+            fprintf(stderr, "[main] recording=real needs backend.mode!=mock and media=real; using mock Recording service
+");
+        } else {
+            // Kho job/cấu hình tạo trong thư mục chạy onvif-server (spec: phải sống qua mất điện).
+            recordingService = std::make_unique<DvrRecordingService>(
+                dvrClient, std::make_shared<RecordingJobStore>("recording_store.dat"),
+                "http://" + cfg.deviceIp + ":" + std::to_string(cfg.httpPort) + "/onvif/recording");
+        }
+    }
+
+    OnvifServer server(svcCfg, backend, cfg.discoveryEnabled, authClient, std::move(recordingService));
     
     printf("[main] Starting ONVIF SOAP server...\n");
     if (server.start()) {

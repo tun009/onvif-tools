@@ -247,7 +247,8 @@ static void ensureFullBody(struct soap* soap) {
 OnvifServer::OnvifServer(const ServiceConfig& cfg,
                          std::shared_ptr<ICameraBackend> backend,
                          bool discoveryEnabled,
-                         std::shared_ptr<IMgmtClient> authClient)
+                         std::shared_ptr<IMgmtClient> authClient,
+                         std::unique_ptr<IOnvifService> recordingService)
     : cfg_(cfg),
       backend_(std::move(backend)),
       discoveryEnabled_(discoveryEnabled),
@@ -264,7 +265,8 @@ OnvifServer::OnvifServer(const ServiceConfig& cfg,
     registry_.registerService(std::make_unique<AnalyticsService>());
     // Profile G skeleton: Recording/Search/Replay — GetServiceCapabilities để DTT
     // nhận diện Profile G và mở test case con.
-    registry_.registerService(std::make_unique<RecordingService>());
+    if (recordingService) registry_.registerService(std::move(recordingService));
+    else registry_.registerService(std::make_unique<RecordingService>());
     registry_.registerService(std::make_unique<SearchService>());
     registry_.registerService(std::make_unique<ReplayService>());
 }

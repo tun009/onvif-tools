@@ -14,6 +14,7 @@
 #include <mutex>
 #include <chrono>
 #include <atomic>
+#include <functional>
 #include <thread>
 
 struct SubscriptionState {
@@ -28,6 +29,15 @@ struct SubscriptionState {
     // Basic Notification: ConsumerReference URL để POST Notify tới.
     // Rỗng nếu là PullPoint subscription (server không tự push, tool pull).
     std::string consumerUrl;
+};
+
+// Thông tin 1 Recording Job dùng để dựng event tns1:RecordingConfig/JobState.
+struct RecordingJobEvent {
+    std::string jobToken;
+    std::string recordingToken;
+    std::string sourceToken;   // token Media profile
+    std::string sourceType;    // thuộc tính Type của SourceToken
+    std::string state;         // Idle | Active | PartiallyActive | Error
 };
 
 class MockSubscriptionManager {
@@ -49,6 +59,15 @@ public:
                                     const std::string& sourceXml,
                                     const std::string& configurationXml);
     void fireRecordingJobState(const std::string& jobToken, const std::string& state);
+    // Bản dùng job thật (token Recording/Source lấy từ `job`, không cứng Recording_0).
+    void fireRecordingJobState(const RecordingJobEvent& job);
+
+    // Đăng ký nguồn job thật cho event JobState dạng Initialized (gửi ở lần PullMessages
+    // đầu tiên của mỗi subscription). Chưa đăng ký (mock) → giữ nguyên hành vi cũ: 1 event
+    // Initialized cho Job_0. Hàm này được gọi KHÔNG giữ khóa nội bộ của manager, nên được
+    // phép gọi xuống DVR.
+    using RecordingJobProvider = std::function<std::vector<RecordingJobEvent>()>;
+    void setRecordingJobProvider(RecordingJobProvider provider);
 
 private:
     // ── Handlers từng operation ───────────────────────────────────────────
@@ -94,6 +113,7 @@ private:
     void purgeExpired();   // xóa các subscription đã hết hạn
 
     std::mutex mtx_;
+    RecordingJobProvider jobProvider_;   // bảo vệ bởi mtx_
     std::map<std::string, SubscriptionState> subscriptions_;
     std::atomic<bool> notifyRunning_{false};
     std::thread notifyThread_;

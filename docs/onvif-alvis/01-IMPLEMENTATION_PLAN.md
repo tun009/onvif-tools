@@ -1,7 +1,7 @@
 # Kế hoạch tích hợp ONVIF Server với Camera-alvis
 
 > Trạng thái: Accepted / Living document  
-> Cập nhật gần nhất: 2026-09-04  
+> Cập nhật gần nhất: 2026-10-07 (Phase 7 — kế hoạch Profile G; Phase 6 vẫn tạm hoãn)  
 > Backend MGMT được đối chiếu: `D:\Elcom\NewVersion\frontend\MGMT\src\backend`
 
 ## 1. Mục tiêu
@@ -1640,6 +1640,366 @@ request thay vì hardcode, **chưa làm**, để dành refactor sau).
 - Cấp metadata track qua RTP/RTSP.
 - Cấp event qua PullPoint; MQTT chỉ advertise nếu thực sự hỗ trợ.
 
+### Nghiên cứu Phase 6 (2026-09-30) — đã xong, CHƯA CODE, ghi lại để đối chiếu sau khi làm
+
+#### Bối cảnh: Profile M đã pass conformance với MOCK từ trước (không liên quan phase này)
+
+Đối chiếu `docs/11-profile-m-plan.md` + `docs/16-profile-m-t-conformance-tong-ket.md` (project cũ,
+trước khi có tích hợp MGMT): **Profile M đã đạt 244/244 với mock-camera-backend** (2026-07-22) —
+toàn bộ SOAP layer (AnalyticsService, Media2 metadata config, event topic) đã tồn tại và đúng
+chuẩn, kể cả phần khó nhất — Metadata RTP Streaming (7.5, mandatory) — đã giải bằng gortsplib
+custom RTSP server bơm XML `<tt:MetadataStream>` giả định kỳ (xem `docs/15-profile-m-t-gortsplib-handover.md`).
+**Việc của Phase 6 KHÔNG phải viết lại SOAP layer từ đầu** (khác hẳn PTZ ở Phase 5, vốn chưa có
+file `.cpp` nào) — mà là **thay nguồn dữ liệu fake bằng dữ liệu Core/VPU thật**, y hệt tinh thần
+các phase trước.
+
+#### Nguồn thật — đối chiếu trực tiếp bằng cách đọc code MGMT + query DB thật trên `.194`
+
+Không có source Core/VPU checkout cục bộ (chỉ có source MGMT và DVR cũ, xem `README.md` mục 3) —
+khác hẳn Phase 3/5 (MGMT source đọc được đầy đủ). Kết luận dưới đây dựa trên: đọc code MGMT thật +
+query trực tiếp Postgres `dvr_db` trên `.194` (tài khoản `cameraai`, tìm được từ `strings` binary
+`nse`) — không suy đoán.
+
+**(a) MGMT SỞ HỮU config Area/App/Rule (ROI, không phải kết quả detection)** — domain
+`app_manager` (`src/domains/app_manager/`), lưu trong SQLite riêng của MGMT (KHÔNG phải Postgres
+`dvr_db` — 2 bảng `areas` trùng tên nhưng khác hệ hoàn toàn, xem bên dưới). Endpoint thật:
+```
+GET  /mgmt/v1/Config/AppsManagerInfo      — apps + areas + type_areas 1 lần gọi
+POST /mgmt/v1/Config/AppsManager          — CRUD apps/areas
+POST /mgmt/v1/Config/AppsManagerExport    — trigger đẩy config sang Core (xem (b))
+GET  /mgmt/v1/Config/CaptureContextImage / CaptureAlprImage
+WS   /ws/mgmt/v1/Config/ZoomFocusAndAreas — live overlay zoom + areas
+```
+`Area` (ROI vẽ trên ảnh, gắn `type_area_id`/`app_id`, path SVG, `details` JSON tự do như
+`AffectObjects[].Label`) + `TypeArea` (loại ROI: `ALPR Area`, `RedLightViolation`,
+`WrongDirection`...) + `App` (`ALPR`, loại `TRAFFIC`...) — bản chất chính là **Rule Configuration**
+theo nghĩa ONVIF (8.6): 1 Area+App+TypeArea ≈ 1 Rule (ROI + điều kiện + loại vi phạm cần phát hiện).
+→ **Đây là phần khả thi làm real NGAY, có API thật, đã implement** (đọc chi tiết:
+`docs/design_ai_config_export_payload.md` của MGMT).
+
+**(b) MGMT → Core chỉ đẩy CONFIG 1 chiều, KHÔNG nhận detection event ngược lại** — xác nhận từ
+chính doc thiết kế của MGMT (`design_ai_config_export_payload.md`): `AppsManagerExport` gửi message
+`{"cmd":"ai_config.export", ...}` xuống Core, Core ghi file `_draft/layout.json` cho pipeline AI
+đọc, trả về `{"result":1}` — **hết**. Không có API nào ở chiều ngược lại (Core/VPU → MGMT) để
+MGMT biết có event/detection gì vừa xảy ra. Tức là **MGMT không phải nguồn thật cho Detection/Event
+runtime** (khớp README gốc: "Rule, alarm và event | Core + BUS event", KHÔNG phải MGMT).
+
+**(c) Postgres `dvr_db` (DB CŨ, hệ legacy) có bảng `event_tbl` khớp gần đúng schema AIEvent** —
+tìm thấy bằng cách query trực tiếp (`psql -h localhost -U cameraai -d dvr_db`, credential lấy từ
+`strings /opt/nse_apps/nse`). Cột `evt_key`/`evt_type`/`roi_id`/`start_time`/`end_time`/`details`
+(JSONB)/`category` khớp gần như 1:1 với schema `core_events` mô tả trong
+`docs/Draft_ Cấu trúc bảng — AI Event, Rule, Alarm.pdf` (tài liệu thiết kế Core-01/02, có ghi chú
+"tên cột cũ (legacy) là evt_key" — xác nhận `event_tbl` chính là bảng legacy được nhắc tới).
+**Nhưng `event_tbl` đang HOÀN TOÀN RỖNG (0 dòng) trên `.194`** — tức camera test hiện tại
+**không có pipeline AI nào đang chạy/ghi event thật** để onvif-module có dữ liệu mà relay, dù
+schema đã sẵn sàng. `nse` (process duy nhất có kết nối tới `dvr_db`) không mở port TCP nào — nhiều
+khả năng không phải HTTP server, giao tiếp qua cơ chế khác (CLI/IPC) chưa xác định được thêm nếu
+không có source.
+
+**(d) Bảng Postgres `camera_events`** (211,941 dòng, có dữu liệu thật) — nhưng là **event log vận
+hành chung chung** (`topic`/`source_name`/`source_value`/`content_name`/`content_value`), phần lớn
+là log khởi động service (`operations/application/onvif_server/status/start`) — **không phải
+AI detection event**, không dùng được cho mục đích Phase 6.
+
+#### Cập nhật cùng ngày (2026-09-30, sau khi có source Core/VPU thật) — đảo ngược kết luận "Blocked" ở trên
+
+User cung cấp thêm 2 source trước đó chưa biết tồn tại cục bộ:
+`D:\Elcom\Ovif-mock\AlvisOS\CORE` và `D:\Elcom\Ovif-mock\AlvisOS\HAL` (branch `hieu-dev`, chứa
+plugin VPU: `human_detect`, `vehicle_detect`, `license_plate_detect`, `traffic_sign_detect`,
+`pothole_detect`, `manhole_detect`, `fighting_recognition`, `ocr`). Đọc trực tiếp source (không
+suy đoán) đảo ngược phần lớn kết luận "Blocked" phía trên — chỉ giữ lại đúng phần về MGMT.
+
+**Đối chiếu lại đúng ONVIF Profile M Specification v1.0** (đọc kỹ toàn văn, không chỉ tóm tắt cũ):
+Rule Configuration (mục 8.6) và 3 recognition event (Face/LicensePlate/LineCrossing, 8.13-8.15)
+đều **CONDITIONAL**, không phải mandatory như bảng cũ ngụ ý. Phần **MANDATORY** thật sự liên quan
+Analytics là mục 7.10 "Analytics Module configuration"
+(`GetSupportedAnalyticsModules`/`GetAnalyticsModules`/`CreateAnalyticsModules`/`DeleteAnalyticsModules`
+trên 1 `VideoAnalyticsConfiguration`) — khái niệm gần nhưng KHÔNG đồng nhất với "Rule".
+
+**Đối chiếu `g13.xml`** (log DTT full chạy với mock, 2026-08-05): toàn bộ nhóm `ANALYTICS-4-1-*`
+(Analytics Module Config, mục 7.10), `MEDIA2-8-1-*`/`MEDIA2-9-1-*` (Metadata/Analytics Profile
+config, 7.7-7.9), `MEDIA2_RTSS-4-1-*`/`4-2-1` (Metadata Streaming, 7.5) đều **PASSED** — khớp
+`16-profile-m-t-conformance-tong-ket.md` (244/244). **Không có test case nào tên `RULE`/`Recognition`/
+`LineCounting`** trong toàn bộ `g13.xml` — xác nhận thiết bị chưa từng quảng bá các feature
+conditional này, nên chưa có baseline behavior nào cần giữ nguyên khi làm thật.
+
+**Đọc source Core thật** (`AlvisOS/CORE`, README + `core-service.md` + đọc trực tiếp
+`ai_event_api_controller.cpp`, `ai_event_ipc_controller.cpp`, `rule_api_controller.cpp`,
+`core_config.json`):
+
+- Core là service HTTP+IPC thật (drogon), lắng nghe **port 8092** (`core_config.json`), DB
+  **SQLite `core.db`** (đã migrate khỏi Postgres/SOCI — xem `handoff_sqlite_migration.md`).
+- Pipeline đầy đủ, có bằng chứng code, KHÔNG phải suy đoán:
+  ```
+  VPU plugin (vd human_detect_plugin.cpp: Detection{label, confidence, bbox, track_id})
+    -> publish lên BUS-02 (Unix socket /tmp/cam_event_bus.sock)
+    -> Core AIEventIpcController::handleAiEvent()
+         -> RuleEngine::matchRule()  (auto-pass nếu channel chưa có Rule nào — đã có fallback)
+         -> AlarmManager::raise()    (cooldown/dedup/schedule — 1 phần theo README, không phải rỗng)
+    -> raise()==true mới ghi AIEventRepository -> core.db (bảng `core_events`)
+  ```
+- REST contract thật, đọc trực tiếp từ `include/controllers/*.hpp` (không phải từ file thiết kế
+  PDF cũ nữa):
+  ```
+  GET    /core/v1/AiEvents            (?channel=&start_time=&end_time=&max_items=)
+  GET    /core/v1/AiEvents/{event_key}
+  DELETE /core/v1/AiEvents/{event_key}
+  GET    /core/v1/AiEvents/{event_key}/Download   (evidence .tar: ảnh + video + details.json)
+  GET    /core/v1/TrafficMonitoring , POST .../Filter   (ALPR-only, tóm tắt biển số)
+  GET    /core/v1/EventsApp , POST .../Filter           (full AIEvent, non-ALPR)
+  GET/POST/PUT/DELETE /core/v1/Rules              (CRUD Rule — CORE-01)
+  GET/POST/PUT/DELETE /core/v1/AlarmConfigs       (CRUD AlarmConfig — CORE-02)
+  GET/POST/PUT/DELETE /core/v1/MetadataExportConfigs, /MetadataExportRecords  (FTP export, không liên quan ONVIF)
+  ```
+- `AIEvent` field thật (đọc từ `toJson()`): `event_key, name, channel, start_time, end_time,
+  created_at, details(JSON tự do), roi_id, img_urls[], video_url, object_label, object_type,
+  object_size, confidence` — map khá thẳng sang ONVIF `tt:Object/Appearance`:
+  `object_label`→`Class/Type`, `confidence`→`Likelihood`, `img_urls`/`video_url`→Image
+  sending (8.3), `roi_id`→liên kết Rule/ROI. `Detection.bbox` (VPU, không lưu trực tiếp ở
+  `AIEvent` — chỉ có trong `details` JSON tự do nếu producer gửi kèm) → `Shape/BoundingBox`.
+- `Rule` field thật (đọc từ `rule_api_controller.cpp`): `id, name, description, enabled, channel,
+  plugin_id, roi_id_list[], conditions(JSON), action, priority, cooldown_ms, schedule, version,
+  extensions` — gần với khái niệm ONVIF "Rule" (8.6, conditional) hơn là "Analytics Module"
+  (7.10, mandatory); `plugin_id` (HumanDetection/VehicleDetect/...) mới là ứng viên hợp lý cho
+  "Analytics Module" — cần thiết kế map 2 tầng (Module = catalog `plugin_id`, Rule = instance
+  cấu hình cụ thể) khi thực sự code, không gộp làm một.
+
+**Đã trả lời câu hỏi "MGMT đã thực sự handle chưa"**: **CHƯA**. Đọc lại chính source MGMT xác nhận
+domain `app_manager`/`AiConfigExportService` (`design_ai_config_export_payload.md`) chỉ đẩy CONFIG
+1 chiều MGMT→Core (`{"cmd":"ai_config.export"}`, Core trả `{"result":1}` rồi ghi `layout.json`) —
+**không có API nào ở chiều Core→MGMT** để đọc lại AiEvents/Rules/AlarmConfigs. Grep toàn bộ
+`AlvisOS/MGMT` (repo cũ hơn, 2026-08-05) và `NewVersion/frontend/MGMT` (repo hiện hành,
+2026-09-30) cho `8092|core/v1|AiEvents|AlarmConfigs` — chỉ khớp đúng 1 dòng README ghi chú quy ước
+đặt tên REST, không có lời gọi HTTP thật nào tới Core.
+
+**Kết luận đã đảo ngược**: Phase 6b (Detection/Event thật) **KHÔNG còn Blocked** về mặt contract —
+đã đọc được đầy đủ REST API + luồng dữ liệu thật của Core, đủ để thiết kế mapping ONVIF chính xác
+mà không cần đoán. Cái còn thiếu duy nhất là **runtime evidence** (build/test thật trên 1 camera
+đang chạy đúng bản Core này) — camera `.194`/`.102` hiện tại chạy firmware CŨ hơn (`nse` +
+Postgres `dvr_db`, không phải `core.db`/port 8092), nên chưa thể build-test Phase 6 trên 2 máy đó
+cho tới khi có 1 camera đã cập nhật lên đúng thế hệ firmware chứa Core này.
+
+**Đề xuất lại thứ tự Phase 6** (thay cho đề xuất 6a/6b cũ):
+- **6a — Analytics Module Configuration** (7.10, MANDATORY): map catalog `plugin_id` (đọc từ
+  HAL/VPU plugin có sẵn — human_detect, vehicle_detect, license_plate_detect, traffic_sign_detect,
+  pothole_detect, manhole_detect, fighting_recognition) vào
+  `GetSupportedAnalyticsModules`/`GetAnalyticsModules`. Không phụ thuộc runtime Core, có thể làm
+  ngay bằng cách đọc danh sách plugin tĩnh.
+- **6b — AiEvents/PullPoint event thật** (7.5 nội dung + 8.7-8.12 field): route qua Core REST
+  `GET /core/v1/AiEvents` (port 8092) — code onvif-module có thể viết ngay theo contract đã đọc,
+  nhưng **cần 1 camera đang chạy đúng bản Core này để build-test thật**, chưa có trên `.194`/`.102`.
+- **6c — Rule Configuration** (8.6, CONDITIONAL, không bắt buộc): map `/core/v1/Rules` — làm sau
+  6a/6b nếu muốn tăng coverage, không cần cho mandatory baseline.
+- Metadata RTP streaming hạ tầng: tái dùng cơ chế gortsplib cũ (đã hoạt động), chỉ đổi nguồn XML
+  frame từ giả sang đọc thật từ `/core/v1/AiEvents` mới nhất theo channel.
+
+#### Nghiên cứu bổ sung Phase 6 (2026-10-02 → 2026-10-05) — TẠM HOÃN, chưa code, ghi lại để làm tiếp sau
+
+**Trạng thái:** `PAUSED`. Chưa sửa dòng code nào của `onvif-module` cho Phase 6. Lý do tạm hoãn
+(2026-10-05): build thử trên camera `.70` bị crash do CPU bị chiếm nhiều (nhiều dev dùng chung
+máy). Phần dưới là toàn bộ kiến thức đã xác minh/suy luận được, để quay lại làm không phải
+nghiên cứu lại từ đầu. Mức chắc chắn được ghi rõ: **[verified]** = đã đọc source/SSH trực tiếp,
+**[suy luận]** = kết luận từ bằng chứng gián tiếp, **[chưa verify]** = chưa kiểm chứng.
+
+##### A. Camera `.70` — thiết bị đầu tiên chạy đúng thế hệ Core mới
+
+- **[verified]** `.70` = board **Ambarella CV25** (hostname `Oclea`, aarch64, Linux 5.4 nhúng,
+  BusyBox), KHÁC các Jetson `.124/.125/.194/.102`. **Không có `apt`/`dpkg`**, không có
+  `gsoap`/`wsdl2h`/`soapcpp2`; có `g++`, `make`, `git`. Root `/` chỉ 2.3GB (còn ~279MB) — build ở
+  `/home`/`/opt` có nguy cơ làm đầy đĩa và hại Core/DVR/MGMT đang chạy. Ổ lớn là `/media`
+  (57GB, còn ~9–11GB); trên máy đã có tiền lệ build ở `/media/build_sqlite`, `/media/build_htop`.
+  Repo `onvif-tools` đã được pull tại `/media/onvif/onvif-tools/` (module ở
+  `.../onvif-module/onvif-module`).
+- **[verified]** Bố cục service thật: `/opt/services/core/` (Core, `bin/core`, `core_config.json`,
+  log `bin/core_private.log`), `/opt/services/mgmt-be/` (+ `mgmt-test/`), `/opt/dvr_apps/` (DVR,
+  mediamtx, board_profiles), `/opt/gateway_apps/`, **VPU: `/opt/bin/vpu`**, model plugin tại
+  `/opt/ai/models/{license_plate_detect,ocr}/` (mỗi plugin `manifest.json` + `.so` + `classes.txt`),
+  config VPU `/opt/configs/config.json`. `/home/alvis` gần như trống (chỉ `.pid` do chạy tay).
+- **[verified]** `core.service`/`dvr_new.service`/`mgmt.service` là systemd; **VPU lúc kiểm tra
+  (2026-10-02) chạy tay** (`./vpu --config config.json`, gắn `pts/3`, KHÔNG systemd) → nếu
+  reboot/đóng phiên SSH sẽ không tự chạy lại. **Cần hỏi backend team** VPU có được đóng gói
+  systemd không trước khi dựa vào nó cho Phase 6b.
+- **[verified]** `onvif-module` KHÔNG chạy trên `.70` (chưa deploy): không process, không port
+  8000/8001/554. Core nghe `0.0.0.0:8092` (`core_config.json`) → về nguyên tắc `onvif-module`
+  chạy trên máy khác vẫn gọi được Core `.70` qua mạng **[chưa verify]**.
+
+##### B. Core thật trên `.70` — luồng ALPR đã chạy end-to-end (2026-10-02)
+
+- **[verified]** Sau khi backend bật VPU lúc 13:35: log Core có chuỗi
+  `ALPREVENT-RX` → `FRAME-OK shm=cam_vpu_alpr_shm 1920x1080` → `EVENT-REPO-CREATE-OK` →
+  `ALPREVENT-SAVE-OK ... images=4`; `/media/tmon_event` từ 0 file/4KB lên 176 file `.jpg`/40MB
+  (ảnh thật). Có **dedupe** `ALPREVENT-DUP repeated_plates=... event not saved` — chỉ lưu khi có
+  thay đổi, không lưu mọi lần RX (RX ~150–300ms/lần). Event bus trên log:
+  `/tmp/cam_event_bus.sock` (không thấy file trong `ls /tmp/*.sock` — nhiều khả năng abstract
+  socket, không phải lỗi). Core đăng ký 3 nhóm topic: `/ai_event`, `ALPR_EVENT_TOPIC`,
+  `/hardware/voltage|temperature`.
+- **[verified]** Dữ liệu ban đầu (29–30/09, ~17 giờ, cùng biển `30G43903`, confidence
+  `0.9014173150062561` trùng 16 chữ số) là **demo/bơm test**: `img_urls` trỏ tới file không tồn
+  tại (`find /media/tmon_event -name '*.jpg'` = 0), UI MGMT hiện "No image". Core tin `img_urls`
+  có sẵn trong payload (`extractRootField(details,"img_urls",...)`) và không kiểm tra file tồn tại.
+- **[verified]** Lỗi `Failed to connect to frame pool "CAM_SHM"` ở MỌI lần Core khởi động là pool
+  mặc định khác; luồng ALPR dùng shm riêng **`cam_vpu_alpr_shm`** và đọc frame thành công. Đừng
+  kết luận "FramePool hỏng" chỉ từ dòng `CAM_SHM`.
+- **[verified]** `GET /core/v1/AiEvents` — JSON thật của 1 event ALPR (bbox là **pixel**, không
+  chuẩn hoá; `plate_text` nằm trong `details.detections[]`; **không có `track_id`/`ObjectId`**):
+  ```json
+  {"event_key":"<uuid>","name":"ALPR_EVENT","channel":"0","object_label":"30G43903",
+   "roi_id":"10","start_time":1790923076799191,"end_time":...,"created_at":...,
+   "details":{"event_type":"ALPR","roi_id":10,"roi_name":"License Plate Tracker 01",
+     "timestamp_us":89900000,
+     "detections":[{"plate_text":"30G43903","confidence":0.9014,"x":839.32,"y":669.66,"w":138.5,"h":30.0}]},
+   "img_urls":[".../..._lp.jpg",".../..._pano.jpg",".../event_ctxt_...jpg",".../event_osd_...jpg"],
+   "video_url":""}
+  ```
+  `start_time` là epoch **microsecond UTC** (đổi sang `xs:dateTime` có `Z`). Frame 1920×1080
+  (kênh `0`). Trường `channel="0"` trùng quy ước token kênh DVR đã dùng ở Phase 4 (`"0"`,
+  `"0_sub"`...). `/core/v1/EventsApp` (non-ALPR) trả rỗng — chưa có event non-ALPR nào.
+- **[verified]** Hai đường xử lý KHÁC chính sách trong `AIEventIpcController`:
+  - `handleAlprEvent()` (topic `ALPR_EVENT_TOPIC`): **không qua RuleEngine/AlarmManager** (comment
+    trong code: "every well-formed ALPR event gets saved"). Vì vậy `Rules`/`AlarmConfigs` rỗng
+    (`[]`) mà vẫn có `AiEvents`.
+  - `handleAiEvent()` (topic `/ai_event`, dành cho plugin khác như human/vehicle): cửa Rule
+    **auto-pass** nếu kênh chưa có Rule (cố ý, có comment); nhưng cửa
+    `AlarmManager::raise()` → `findConfig()` yêu cầu khớp CHÍNH XÁC `(channel, type_name)` trong
+    `AlarmConfigs`, không khớp thì `raise()` trả `false` và event **bị huỷ trước
+    `repository.create()`**. ⇒ khi nối `human_detect`/`vehicle_detect`, **phải tạo ít nhất 1
+    `AlarmConfig` khớp** (`POST /core/v1/AlarmConfigs`) thì event mới xuất hiện trong `AiEvents`.
+    Nếu test Phase 6b thấy "REST đúng, code đúng nhưng không có object" → kiểm tra mục này đầu tiên.
+  - Ghi chú đính chính: nhận định trước đây coi `RuleEngine::loadRules()` là "bug dead-cache" và
+    `EventBus::serialize_event()` không copy `dets` đọc từ snapshot source; log `.70` cho thấy
+    `dets=0` và dữ liệu đi bằng `payload` JSON cho ALPR (khớp). Với nhánh `/ai_event` **[chưa
+    verify]** trên bản chạy thật.
+- Ý nghĩa 3 bảng: `AiEvents` = nhật ký kết quả cuối; `Rules` = lọc theo nội dung/ROI/plugin (áp
+  trước); `AlarmConfigs` = chính sách tần suất/lịch/cooldown (áp sau, đồng thời là cổng ghi cho
+  đường `/ai_event`). ALPR cố ý không gate vì mỗi lần đọc biển là 1 dữ kiện riêng.
+
+##### C. 7 plugin VPU/HAL ↔ ONVIF (đọc source HAL, branch `dev` — đầy đủ hơn `hieu-dev`)
+
+- **[verified]** Hợp đồng plugin (`include/hal/model_plugin.h`, `vpu_types.h`, chỉ có ở branch
+  `dev`): `IModelPlugin::process(FrameRef) -> DetectionResult`; `Detection{label, confidence, bbox
+  pixel, text (OCR), ...}`. Cần lưu ý repo HAL tham chiếu header/`PluginManager` của project `VPU`
+  riêng (Makefile ghi `see VPU/Makefile`) — **source orchestrator VPU (PluginManager, gán
+  `track_id`, ghép bbox+OCR, publish BUS) KHÔNG có trong checkout cục bộ**; mọi mô tả về nó là
+  **[suy luận]**. Từng có bug ABI `Tensor` lệch layout giữa HAL và `Camera-SW/interfaces/vpu_types.h`
+  (đã sửa trong comment, rủi ro tái diễn nếu 2 bản lệch).
+- **[verified]** `license_plate_detect` CHỈ cho bbox vùng biển (label `license_plate`); chữ biển do
+  plugin **`ocr`** riêng (CRNN, input 168×48) — VPU orchestrator ghép 2 kết quả **[suy luận]**.
+  Tên `name()` không đồng nhất (`human_detect`, `vehicle_detect`, `LicensePlateDetection`,
+  `TrafficSignDetection`, `PotholeDetection`, `ManholeDetection`, `fighting_recognition`); còn
+  `potmanhole_trafficsign_detect` là bản gộp 3 loại. `traffic_sign` dùng ~50 biển báo VN
+  (`P.127`, `W.224`...), `pothole`/`manhole` thuần vendor.
+- Mức ghép vào ONVIF: **`human_detect` (Type=Human), `license_plate_detect` (License Plate
+  recognition, có field `PlateText` chuẩn), `vehicle_detect` (Type=Vehicle)** có ý nghĩa chuẩn;
+  `traffic_sign`/`pothole`/`manhole` ghép được nhưng chỉ là chuỗi vendor tự đặt; **`fighting_recognition`
+  không có bbox** (phân loại cả clip) → không hợp `tt:Object`, nên khai như **Event** (ví dụ
+  `IsFighting`), không đưa vào Metadata stream. Khi khai `AnalyticsModuleDescription` nên
+  `fixed="true"` (khả năng phần cứng cố định, đúng nguyên tắc Fixed vs Configurable ở Phase 3).
+  ONVIF không cố định tên `AnalyticsModule`; `tt:ClassCandidate/tt:Type` là chuỗi tự do.
+- Chuẩn hoá bbox: ONVIF `tt:BoundingBox` là **0.0–1.0** (`left=x/W, top=y/H, right=(x+w)/W,
+  bottom=(y+h)/H`), VPU/Core lưu **pixel** → cần W×H của VideoSource đang stream (lấy động từ
+  DVR `GetProfiles`, không hardcode 1920×1080).
+- **Khoảng trống dữ liệu còn lại cho Metadata** (không ảnh hưởng Event): không có
+  `track_id`/`ObjectId` trong `AIEvent`; `bbox`/`plate_text` chỉ nằm trong `details` JSON tự do
+  (hiện đã có cho ALPR, quy ước chưa được cam kết bằng schema chính thức → nên xin Core team xác
+  nhận quy ước/đưa thành field).
+
+##### D. Trạng thái code `onvif-module`/mock hiện tại (đối chiếu để biết cần làm gì)
+
+- **[verified]** `AnalyticsService::handleGetSupportedAnalyticsModules()` **hardcode** 2 type giả
+  (`CellMotionEngine`, `ObjectDetection`), bỏ qua request; `GetSupportedMetadata` hardcode
+  `SampleFrame` bbox toàn 0; `AnalyticsModuleStore` là map RAM thuần (CRUD instance, bắt đầu rỗng) —
+  giữ nguyên được, chỉ cần đổi **catalog**. `GetServiceCapabilities` đã đúng `RuleSupport="false"`.
+  `Media2MetadataService` cũng mock (token cố định `vac_main`/`metadata_config`).
+- **[verified]** Metadata RTP stream của mock **không nằm trong `onvif-module`** mà là chương trình
+  Go `mock-camera-backend/rtsp/gortsplib-relay/main.go`, bơm XML giả định kỳ — chỉ chứng minh cơ chế
+  RTP/SDP, DTT không kiểm nội dung. **Chưa có code production cho Metadata thật**; bản C++
+  `AlvisOS/DVR/src/utility/ffmpeg_engine/ffmpeg_out_wrap.cpp::openMetadataStream()/sendMetadataFrame()`
+  dựng đúng SDP `vnd.onvif.metadata` nhưng là dead code (không nơi nào gọi). Đây là câu hỏi kiến
+  trúc còn mở: Metadata thật sẽ chạy bằng code nào.
+- **[verified]** `MockSubscriptionManager` đã có đủ cơ chế Event (CreatePullPoint, PullMessages,
+  Renew, Unsubscribe, SetSynchronizationPoint, `pending` theo subscription, filter topic) nhưng chỉ
+  phát topic Profile T nền (`VideoSource/MotionAlarm`, `GlobalSceneChange`, tampering) và
+  Media/Recording (`fireProfileChanged`, `fireConfigurationChanged`, `fireRecording*`).
+  **Không có topic nhận diện AI nào** (chưa có `LicensePlateDetection`...). Nghĩa là mock chưa từng
+  phải chọn Metadata hay Event cho dữ liệu AI — quyết định này là mới.
+- DTT không kiểm nội dung (Profile M từng 244/244 với số giả) nhưng khai topic rồi thì khi điều kiện
+  thật xảy ra phải bắn; không nên khai capability/topic mà backend không phát (nguyên tắc #5).
+
+##### E. Quyết định kiến trúc: Metadata hay Event — đề xuất làm **Event trước** (chờ chốt)
+
+- Khác biệt cốt lõi: **Metadata** là track RTP trong CÙNG phiên RTSP với video (cần SETUP/PLAY,
+  VMS tự khớp `UtcTime` với PTS frame và vẽ box đè; tắt video là mất); **Event** đi kênh SOAP/HTTP
+  riêng (PullPoint), không liên quan RTSP, VMS không cần mở video vẫn nhận, tồn tại như dòng trong
+  danh sách sự kiện. ONVIF không ép chọn: Metadata streaming (mechanism) bắt buộc cho Profile M,
+  còn dùng kênh nào cho từng loại kết quả AI là quyết định sản phẩm; có thể làm cả hai.
+- Lý do nghiêng Event cho ALPR: (1) hạ tầng Event trong `onvif-module` có sẵn ~90%, chỉ thiếu 1
+  hàm `fire...` + khai topic; (2) dữ liệu ALPR rời rạc (Core dedupe) khớp Event; (3) không cần đồng
+  bộ UtcTime↔PTS/normalize theo video; (4) UI MGMT hiện hiển thị ALPR dạng danh sách sự kiện;
+  (5) tránh phải giải câu hỏi "Metadata production chạy bằng code nào". `human_detect`/`vehicle_detect`
+  (liên tục theo frame) về sau hợp Metadata hơn. **Chờ người có thẩm quyền sản phẩm chốt.**
+
+##### F. Thiết kế dự kiến khi quay lại (theo pattern `IMgmtClient`/`HttpMgmtClient`, không phá DTT)
+
+1. **6a (không phụ thuộc runtime, làm được ngay):** thay catalog hardcode trong
+   `handleGetSupportedAnalyticsModules()` (và cân nhắc `GetSupportedMetadata`) bằng danh sách plugin
+   tĩnh (7 plugin, `fixed="true"`, `ParentTopic` tương ứng). Giữ nguyên `AnalyticsModuleStore`.
+2. **6b-Event:** thêm `ICoreClient`/`HttpCoreClient` (host/port từ `onvif.conf`, mặc định Core
+   `:8092`, timeout, map lỗi sang SOAP Fault) + thread polling `GET /core/v1/AiEvents?channel=&start_time=<cursor>`
+   mỗi ~1–2s với cursor `start_time` (tránh xử lý lặp); mỗi `AIEvent` mới → `fireLicensePlateRecognized(...)`
+   trong subscription manager, topic dự kiến `tns1:RuleEngine/LicensePlateDetection`, Source =
+   `VideoSourceConfigurationToken` (channel `"0"`), Data = `PlateText`, `Confidence` (+ bbox
+   normalize nếu muốn), `PropertyOperation`, `UtcTime` từ `start_time`. Khai topic trong
+   `GetEventProperties` đúng cấu trúc đã pass DTT (chỉ node gốc có `tns1:`, leaf không prefix).
+   Capability `events`/`analytics` gate `real/mock` như các phase trước; production không fallback
+   dữ liệu giả.
+3. **6b-Metadata (làm sau):** chỉ khi có plugin theo frame; trước đó chốt code Metadata production.
+4. **6c Rule (CONDITIONAL):** vẫn không làm.
+5. Backend cần (không phải việc onvif-module): VPU chạy thường trực (systemd); với plugin non-ALPR
+   tạo `AlarmConfig`; thống nhất schema `bbox`/`track_id`/`plate_text` trong `AIEvent`.
+
+##### G. Triển khai/build trên `.70` — bài học và phương án khi quay lại
+
+- **[verified]** Cấu trúc Makefile: `make full` phụ thuộc `check-gen` (chỉ kiểm
+  `generated/soapC.cpp` tồn tại, `GEN_DIR=generated`), KHÔNG tự chạy `gen`; `make gen` LUÔN sinh lại
+  từ WSDL bằng `wsdl2h`+`soapcpp2` (không kiểm file đã có) nên lỗi `wsdl2h not found` trên `.70`.
+  `external/gsoap/` là runtime gSOAP (`stdsoap2.cpp`...), còn `generated/` (soapC.cpp,
+  soap*BindingService.cpp...) mới là code sinh từ WSDL và chỉ là **text C++ portable** — copy nguyên
+  `generated/` từ máy đã `make gen` thành công (vd `.102`/`.125`) rồi chạy **`make full`** (không chạy
+  `make gen`). Lúc dừng chưa xác nhận lần build `make full` hoàn tất; lần chạy gần nhất bị crash vì
+  CPU bận.
+- **[verified]** Makefile link `gstreamer-1.0`, `gstreamer-rtsp-server-1.0`, `openssl` qua
+  `pkg-config` → **[chưa verify]** `.70` có dev lib/`pkg-config` các gói này hay không (có thể là
+  blocker tiếp theo).
+- Phương án giảm rủi ro khi quay lại: (a) KHÔNG build nặng trên `.70` lúc nhiều dev đang dùng, tránh
+  `make -j`, build ngoài giờ cao điểm; (b) **chạy `onvif-module` trên máy khác (vd Jetson `.125`) cho
+  dev, trỏ `ICoreClient` tới `http://192.168.8.70:8092`** — không cần build trên `.70` **[chưa
+  verify khả năng mạng]**; (c) nếu cần chạy ngay trên `.70`, build ở máy khác rồi copy binary có rủi
+  ro lệch phiên bản thư viện (rootfs Oclea ≠ Ubuntu Jetson) **[chưa verify]**. Mọi build/chạy phải
+  ở `/media`, không dùng `/home` hoặc `/opt` của `.70` (đĩa `/` chật).
+- Quy ước vận hành của dự án vẫn giữ: không đè repo thật trên server bằng `sftp.put`; sửa code ở
+  local rồi commit/push, camera chỉ `git pull`.
+
+##### H. Câu hỏi còn mở / việc cần xác nhận trước khi code
+
+1. Product chốt Metadata hay Event (hay cả hai) cho ALPR — đề xuất Event trước.
+2. Backend: VPU có chạy systemd thường trực không; `Core`/VPU có cập nhật cho các camera khác
+   (`.124/.125`) để test không (hiện chỉ `.70` có Core mới + VPU).
+3. Core team: quy ước/cam kết schema cho `bbox`, `track_id`, `plate_text` trong `AIEvent`; ALPR có
+   cố ý không qua Rule/Alarm.
+4. `onvif-module` sẽ chạy ở đâu cho dev Phase 6 (trên `.70` hay máy khác gọi sang Core `.70`).
+5. Metadata thật dùng code nào (Go gortsplib hay C++ `sendMetadataFrame()` của DVR).
+6. Channel→VideoSource/Profile token mapping chính thức; polling interval; xử lý nhiều `event_type`
+   (`details.event_type`) khi các plugin khác online.
+
+##### I. Lệnh kiểm tra nhanh trạng thái `.70` (chạy trên máy đó)
+
+```bash
+curl -s "http://127.0.0.1:8092/core/v1/AiEvents?max_items=5"          # event đã lưu
+ps aux | grep -iE "vpu|core|dvr|mgmt" | grep -v grep                  # có VPU/service nào chạy
+grep -iE "ALPREVENT|AIEVENT" /opt/services/core/bin/core_private.log | tail -30   # luồng nhận/lưu/dedupe
+find /media/tmon_event -name "*.jpg" | wc -l                           # ảnh evidence thật có không
+```
+
 ### Gate
 
 - Metadata XML valid schema.
@@ -1651,24 +2011,253 @@ request thay vì hardcode, **chưa làm**, để dành refactor sau).
 
 ### Nguồn thật
 
-- Recording/track/job/index/replay: DVR.
-- Historical event/metadata index: DVR + Core.
+- Recording/track/job/index: DVR (`AlvisOS/DVR`, REST `:8200` + WS `:8210`).
+- Dữ liệu video đã ghi: file MP4 do DVR ghi tại `/media/records/<camera>/`.
+- **Replay RTSP: DVR KHÔNG có — phải xây mới** (xem mục "Quyết định D4").
+- Historical event/metadata index: DVR + Core (hoãn, xem "Ngoài phạm vi đợt 1").
 
-### Công việc
+### Trạng thái hiện tại (đối chiếu code, 2026-10-07)
 
-- Thay `Recording_0`, `Job_0`, `VIDEO_0`, `META_0` mock bằng registry thật.
-- Nối Recording Control.
-- Nối Search token lifecycle, forward/backward, time range và track filter.
-- Nối Event Search.
-- Nối `GetReplayUri` tới DVR playback server.
-- Hỗ trợ RTSP Range clock và timestamp replay.
-- Không truyền replay payload qua onvif-server.
+**Phía `onvif-module`** (`onvif-module/onvif-module`):
+
+- `RecordingService.cpp` / `SearchService.cpp` / `ReplayService.cpp` là **stub tĩnh**, comment đầu
+  file ghi rõ "Data model tĩnh → không cần backend/IPC". Dữ liệu cố định: `Recording_0`
+  (`VIDEO_0` + `META_0`), `Job_0`, `profile_main`, trạng thái giữ trong biến global của file.
+- `config/onvif.conf` `[capabilities]`: `recording = mock`, `search = mock`, `replay = mock`.
+- `ReplayService.cpp`: `GetReplayUri` kiểm `RecordingToken == "Recording_0"` rồi trả
+  `rtsp://<host>:8555/replay` (cổng hardcode của relay mock).
+- Các service này chưa đi qua `ICameraBackend` hay `IDvrClient` (`IDvrClient` hiện chỉ có Media2:
+  `getProfiles/getStreamUri/getSnapshotUri`).
+- Tunnel RTSP-over-HTTP (`OnvifServer.cpp:81-144, 397-423`) proxy **mọi** kết nối có header
+  `x-rtsp-tunnelled` tới **một** cổng `cfg_.rtspPort` (không phân biệt path). Với DVR thật, cổng này là
+  MediaMTX (live). Replay cần cổng khác nên tunnel phải chọn đích theo path.
+- Event Recording (`RecordingConfig/*`, `JobState`) đi qua `MockSubscriptionManager`
+  (`fireRecordingConfigChanged`, `fireRecordingJobState`).
+
+**Mock replay hiện tại là giả.** `mock-camera-backend/rtsp/gortsplib-relay/main.go`: path `replay`
+chỉ **relay lại luồng live `main`** (`srcPath = "main"`, dòng 175), rồi gắn extension `0xABAC` và
+giờ lấy từ `Range`. Không đọc dữ liệu đã lưu, nên chỉ chứng minh được phần giao thức đúng chuẩn
+(DTT 313/313), chưa chứng minh được phát lại từ archive. Phần tái dùng được: `parseClockRange`,
+`ntpTimestamp`, dựng extension `0xABAC`, xử lý `Immediate` + cờ D, `PayloadMaxSize = 1434`.
+
+**Phía DVR** (đọc source, chưa chạy thử trên thiết bị):
+
+| Hạng mục | Thực tế |
+|---|---|
+| Nơi lưu | `/media/records/<tên camera>` (`dvr_controller.cpp:291`); `/media/dvr_data/storage/<ch>` chỉ là mặc định dự phòng |
+| Định dạng | MP4 video-only, H.264/H.265, mỗi file mở đầu bằng keyframe có SPS/PPS (`record_writer.cpp:196-214`), `+faststart` (`ffmpeg_out_wrap.cpp:444`) |
+| Tên file | `<profile>_YYYYMMDD_HHMMSS[_EVENT].mp4`, giờ **địa phương** |
+| Chỉ mục | Quét thư mục + đọc `moov` (`file_utils.cpp:84`), cache 10 giây, thời lượng số giây nguyên |
+| REST | `RecordPlaybackfilter`, `GetRecordingList`, `DeleteVideoByID`, `ExportVideo`, `SetOnOffVideoRecorder`, `Get/SetWeeklyScheduleRecordOnOff`, `GetListVideoSourceRecorder` |
+| WS `:8210` | Chỉ đẩy trạng thái ghi (`IsRecording`, `Manual`, `Scheduled`, `Writing`) và nhận `SetRecord` |
+| Phát lại | **Không có.** RTSP chỉ có `/live/ch<N>`. Web UI nhiều khả năng tải file qua HTTP tĩnh `[chưa verify]` |
+| Retention | `StorageManager` xóa file cũ nhất khi đĩa đầy, không phát event |
+
+### Quyết định kiến trúc (đề xuất — cần user chốt trước khi code)
+
+| # | Vấn đề | Đề xuất | Lý do / phương án khác |
+|---|---|---|---|
+| D1 | Recording theo đơn vị nào | **1 Recording / 1 VideoSource** (`rec_<VideoSourceId>`, ví dụ `rec_0` = context, `rec_1` = alpr) | Đúng spec (Recording là vật chứa theo nguồn). Không dùng 1 Recording / 1 file |
+| D2 | Track | **(đã điều chỉnh 2026-10-07 theo thông tin của user)** Mỗi sensor có 2 luồng main + sub nhưng **chỉ ghi 1 luồng tại một thời điểm**. Đề xuất: Recording có **2 track video** `VIDEO_main`, `VIDEO_sub` (theo `recordable` của từng stream); dữ liệu của track nào chỉ có ở những lúc luồng đó được ghi (suy ra từ tiền tố tên file `_main_`/`_sub_`). Không audio, không metadata | Spec cho phép Recording nhiều track và track có khoảng trống. Gộp main/sub vào 1 track sẽ đổi độ phân giải/codec giữa chừng khi người dùng chuyển luồng. Hiện `.194` chỉ có file `_main_` (7632 context + 6857 alpr, không file `_sub_` nào) nên đợt đầu replay có thể chỉ cần phục vụ track có dữ liệu. **Chưa chốt** |
+| D3 | Recording Job ↔ DVR | Job (sự tồn tại, token, nguồn, priority) do **onvif-module lưu** (JSON ở thư mục bền vững); `Mode` **là** trạng thái ghi tay của DVR, điều khiển bằng `SetOnOffVideoRecorder` | **Đã sửa sau khi đọc source + kiểm `.194` (2026-10-07):** ghi tay của DVR **có bền qua restart** (`saveManualRecord` / `resumeManualRecords`, `dvr_controller_record.cpp:62-80`; trên `.194` DVR khởi động 08:37:14 và tự ghi lại lúc 08:37:18 dù lịch tắt). Nên không cần onvif-module "áp lại Mode". `testAPI.md` ghi "không phải cấu hình" chỉ đúng với `ResetDvrConfiguration`. **Bổ sung (2026-10-07):** ghi tay chỉ cho **1 luồng mỗi sensor** (`startManualRecord` tắt ghi tay của luồng kia, `dvr_controller_record.cpp:257-264`), nên `SourceToken` của Job = profile của luồng đang ghi; đổi sang luồng kia = đổi nguồn của Job. Ghi theo lịch thì code **không** loại trừ nhau (`startScheduledRecording` không tắt luồng khác) và ghi sự kiện chỉ ở main — `GetRecordingJobState` phải phản ánh đúng trạng thái thật, không giả định luôn 1 luồng |
+| D4 | Replay RTSP server | **Phương án A**: process mới (Go + gortsplib), đọc trực tiếp MP4 của DVR | Tái dùng được code giao thức của mock. B (mở rộng gst-rtsp-server của DVR): legacy `REPLAY_RTSP.cpp` chỉ phát 1 file cố định, không có Range clock. C (URL tĩnh/HTTP): không đúng chuẩn |
+| D5 | Replay lấy chỉ mục ở đâu | Gọi REST `GetRecordingList`/`RecordPlaybackfilter` của DVR (nguồn sự thật duy nhất) | Quét thư mục riêng sẽ lệch logic với DVR (múi giờ, `_EVENT`, file đang ghi) |
+| D6 | Xác thực replay | Replay server **gọi lại cùng đường xác thực** mà onvif-module dùng với MGMT (`verifyHttpDigest`); không lưu mật khẩu riêng | Mock dùng credential tĩnh, không dùng cho thật. Cách cụ thể (replay server gọi MGMT hay onvif-module mở endpoint loopback) chốt ở bước 7.4 |
+
+Mock vẫn là baseline: mỗi capability có cờ `mock|real` trong `[capabilities]`, `mock` giữ nguyên hành vi hiện tại (313/313).
+
+### Ánh xạ ONVIF ↔ DVR
+
+| ONVIF | Nguồn dữ liệu / cách làm | Ghi chú |
+|---|---|---|
+| `GetRecordings` | Danh sách `VideoSourceId` có `recordable` (từ `GetListVideoSourceRecorder`) | Token ổn định `rec_<id>`; không dùng `Id` của `RecordPlaybackfilter` (đánh số lại mỗi lần có file mới) |
+| `GetRecordingConfiguration` / `SetRecordingConfiguration` | Lưu `MaximumRetentionTime` trong store của onvif-module; không ép DVR | DVR chỉ có xóa theo đĩa đầy, chưa có retention theo thời gian |
+| `GetTrackConfiguration` / `SetTrackConfiguration` | Một track `VIDEO_main`, `Description` lưu cục bộ | |
+| `GetRecordingJobs` / `GetRecordingJobConfiguration` | Store của onvif-module (D3) | |
+| `CreateRecordingJob` / `DeleteRecordingJob` | Tạo/xóa bản ghi trong store; `Delete` kèm đưa Mode về Idle | Mandatory theo Profile G; cần kiểm kỹ hành vi DTT mong đợi |
+| `SetRecordingJobMode` | `Active` → `SetOnOffVideoRecorder{Enable:true}`; `Idle` → `Enable:false` | Nếu lịch của DVR vẫn đang ghi thì trạng thái thật vẫn là đang ghi: **trả đúng trạng thái thật**, không nói dối |
+| `GetRecordingJobState` | `GetListVideoSourceRecorder.IsRecording` (+ WS `Writing`) | `Writing=false` khi yêu cầu ghi nhưng đĩa tháo → báo lỗi qua `State.Error` |
+| `GetRecordingOptions` | Cố định theo khả năng thực | `DynamicRecordings=false`, `DynamicTracks=false` |
+| `GetRecordingInformation` | Từ danh sách file: `EarliestRecording` = giờ bắt đầu thật của file đầu (`mtime − duration`, **không** lấy từ tên file), `LatestRecording` = giờ đóng (`mtime`) của file đã **đóng** gần nhất | File đang ghi chưa đọc được (`+faststart`), `LatestRecording` trễ tối đa 1 đoạn `FileDuration` |
+| `GetRecordingSummary` | Tổng hợp từ cùng nguồn | |
+| `FindRecordings` + `GetRecordingSearchResults` + `EndSearch` | Phiên tìm kiếm lưu trong onvif-module (SearchToken, `KeepAliveTime` ≥ 10 giây, tự hủy khi hết hạn) | Mock hiện trả hết 1 lần; real vẫn có thể hoàn tất ngay nhưng phải có vòng đời token đúng |
+| `FindEvents` + `GetEventSearchResults` | **Tự suy ra** từ ranh giới file: `tns1:RecordingHistory/Track/State` (`IsDataPresent`) và `.../Recording/State` (`IsRecording`); `IncludeStartState` sinh event ảo tại `StartPoint` | Theo thứ tự thời gian. Ngưỡng coi là "có khoảng trống" giữa 2 file cần đo thật (V3) |
+| `GetMediaAttributes` | Từ file: codec, độ phân giải, giờ bắt đầu/kết thúc | |
+| `GetReplayUri` | `rtsp://<host>:<replay_port>/replay/<RecordingToken>` | Host lấy từ request như hiện tại; cổng đọc từ config, không hardcode |
+| `Get/SetReplayConfiguration` | Giữ `SessionTimeout` cục bộ | |
+| Event `RecordingConfig/JobState` | Phát khi Mode đổi (từ SOAP hoặc từ WS `:8210`) | Dùng `MockSubscriptionManager`; **phụ thuộc quyết định Event vs Metadata của Phase 6** (đang hoãn) |
+
+### Các bước triển khai
+
+**7.0 — Xác minh dữ liệu thật trên camera (bắt buộc, trước mọi dòng code)**
+
+Chạy trên camera `.102` (SSH) rồi ghi kết quả vào mục này:
+
+```bash
+ls -l --time-style=full-iso /media/records/*/ | tail -40
+```
+
+```bash
+ffprobe -v error -show_format -show_streams -show_entries packet=pts_time,flags -of compact <file.mp4> | head -60
+```
+
+| Mã | Cần biết | Vì sao |
+|---|---|---|
+| V1 | Cấu trúc thư mục thật: stream sub nằm ở đâu? (export dùng `<cam>_<role>`, ghi lại dùng `<cam>`); `scanRecordFiles` chỉ quét `context`/`alpr` | Quyết định Recording/Track có thấy được sub hay không |
+| V2 | Codec, khoảng cách keyframe, `time_base`, vị trí `moov` | Tính độ trễ vào điểm phát, thiết kế seek |
+| V3 | Khoảng cách thật giữa 2 file liên tiếp; độ dài file so với giờ thật | Ngưỡng báo khoảng trống; độ chính xác NTP (PTS do DVR **dựng theo FPS**, `ffmpeg_out_wrap.cpp:422-424`) |
+| V4 | Múi giờ tiến trình DVR so với `GetSystemDateAndTime` | Tên file là giờ địa phương, ONVIF cần UTC (`Z`) |
+| V5 | Tiến trình replay có đọc được `/media/records` không (user, quyền) | |
+| V6 | Có build được Go (arm64) cho CV25, kích thước binary, CPU/RAM còn lại | Máy dùng chung nhiều dev; từng sập khi build trên `.70` |
+| V7 | Web server nào đang phục vụ `VideoUrl` | Hiểu playback hiện tại để không phá |
+| V8 | Danh sách case DTT Profile G (Recording Control, Search, Replay) trong `g13.xml` và điều kiện dữ liệu mỗi case cần | Archive thật phải đủ để các case không rơi vào N/A hoặc FAIL |
+
+#### Kết quả bước 7.0 trên camera `192.168.8.194` (2026-10-07, SSH chỉ đọc)
+
+Dữ liệu đo từ thiết bị thật (aarch64, DVR chạy bằng `root`, `onvif-module` chạy bằng `alvis`).
+
+| Mã | Kết quả | Hệ quả cho kế hoạch |
+|---|---|---|
+| V1 | Chỉ có `/media/records/context` (7439 mp4), `/alpr` (6934 mp4), `/overlay` (rỗng). **Không có file sub** (`_sub_` = 0). `/media/dvr_data/storage/0` là thư mục cũ (26/09), không còn ghi. API `GetListVideoSourceRecorder` có thêm nguồn `2 "Overlay"` báo `IsRecording:true` nhưng không có file. Số file `_EVENT` ở context: 1 | Hiện chỉ có luồng main được ghi, nhưng sensor có cả main và sub (chỉ ghi 1 luồng một lúc) nên D2 đã được điều chỉnh (xem bảng quyết định). **Không đưa nguồn Overlay vào `GetRecordings`**; chỉ lấy nguồn có dữ liệu thật (0, 1) |
+| V2 | alpr: H.264 2464×2056, 30 fps, **keyframe mỗi 1,0 s**, `time_base 1/90000`, `moov` ở **đầu file** (`+faststart` đúng). context: H.264 640×360, `r_frame_rate 15`, nhưng **chỉ 1 keyframe/file** (8/8 file kiểm tra) | Điểm vào replay của alpr tốt (≤ 1 s). Với context, điểm vào chỉ là **đầu file** (có thể lùi tới ~40 s so với mốc yêu cầu) |
+| V3 | **(đã hiệu chỉnh sau khi đối chiếu log DVR, 2026-10-07)** File context có `ffprobe duration` nhỏ hơn khoảng "tên file → `mtime`" (ví dụ `103317`: 41 s so với 15,5 s). Nguyên nhân **không phải PTS sai** mà là **tên file là giờ MỞ segment, còn frame đầu đến muộn hơn**: DVR bỏ các frame P cho tới keyframe đầu tiên (`DVR03-REC-KEYFRAME … skipped: 366` = 24,4 s ở 15 fps). Kiểm 4 file: keyframe đầu theo log `10:33:42,43` / `10:34:33,03` / `10:35:23,63` / `10:36:14,23`; `mtime − duration` cho `10:33:42,48` / `10:34:33,08` / `10:35:23,67` / `10:36:14,27` → **khớp trong ~50 ms**. Số frame bỏ ÷ 15 cũng khớp thời gian chờ (24,4 s / 5,0 s / 15,6 s / 26,2 s). Vậy trong các file đo được, **frame đến đều 15 fps và PTS theo số đếm khớp thời gian thật**. Keyframe của context cách nhau **≈ 50,6 s** (GOP rất dài). Các cảnh báo `FPS-LOW` (fps 0) phần lớn là đếm lúc **đang chờ keyframe**, không phải encoder tụt fps. `REC-EMPTY` (xóa segment không có keyframe) tạo khoảng trống thật | (a) **Giờ bắt đầu thật của file = `mtime − duration`** (sai số ~50 ms), không phải giờ trong tên file. (b) API `StartTime`/`EndTime` hiện sai: `start` lấy từ tên file (sớm hơn thật 5–26 s), `end = start + duration` (sớm hơn `mtime`). Phải tính lại ở `onvif-module`. (c) Khoảng trống thật giữa các file context là 30–50 s (mất do chờ keyframe + segment bị xóa); ngưỡng báo khoảng trống ≥ 5 s. (d) **Chưa chứng minh được** PTS lệch giờ thật; vẫn có thể lệch nếu encoder dừng/giật (pacing có cơ chế bỏ qua stall, `encoder_worker.cpp:372`) — cần đo trên file có lỗi thật |
+| V4 | `/etc/localtime` = **Asia/Manila (UTC+8)**; tên file và `mtime` cùng `+0800`; epoch trong API đúng (`1791341027` = `02:43:47Z`). API trả `"TimeZone":"Asia/Saigon"` **cố định, sai với máy này** | Chuyển tên file → UTC phải dựa vào múi giờ **hệ thống** của máy (hoặc dùng `mtime`/epoch), không tin trường `TimeZone` của API |
+| V5 | File `mp4` thuộc `root:root`, mode `644`; thư mục `755` | `alvis` **đọc được** → replay server chạy bằng `alvis` là đủ, không cần root |
+| V6 | Máy có `ffprobe`, `ffmpeg`, `gst-launch-1.0`; **không có `go`** | Replay server phải cross-compile (Go `GOOS=linux GOARCH=arm64`) trên máy dev rồi copy binary. Có `gst-launch-1.0` + `rtspsrc onvif-mode` để kiểm replay ngay trên camera |
+| V7 | `RecordPlaybackfilter` với 14373 file mất **2,0 s** (khi cache nguội). Giữ 3,3 ngày dữ liệu (`20261004_023534` → nay), đĩa `/media` 79% (46 GB trống) | Search/Replay không được gọi API này cho mỗi yêu cầu; cần cache chỉ mục riêng, lọc theo khoảng thời gian |
+| V8 | Chưa làm — cần đọc `g13.xml` lấy danh sách case Profile G | Còn mở |
+
+**Điều chỉnh sau V3 (đã sửa lại 2026-10-07, bản trước kết luận sai):** DVR gán PTS = số thứ tự frame ÷ FPS (`ffmpeg_out_wrap.cpp:502-514`, đúng theo code), nhưng trên các file đo được, frame đến đều nên PTS khớp giờ thật. Do đó **không bắt buộc sửa DVR** để có NTP từng frame:
+
+1. **Không sửa DVR (đề xuất đợt 1):** NTP của frame = `giờ bắt đầu file + PTS`, với `giờ bắt đầu file = mtime − duration` (khớp log DVR ~50 ms trên 4 file; so với **overlay** thật thì sai số ±1,5 s, xem mục "Vấn đề giờ bắt đầu/kết thúc của DVR" bên dưới). Giới hạn đã biết: nếu encoder giật/dừng giữa file thì NTP lệch tương ứng (chưa quan sát được trường hợp này).
+2. **Sửa DVR (tùy chọn, độ chính xác cao hơn):** ghi giờ bắt đầu thật của frame đầu (ms) vào metadata/file phụ, và/hoặc PTS theo giờ thu từng frame. Chạm code DVR → cần chủ sở hữu đồng ý. Chỉ cần nếu đo thấy lệch thực tế.
+3. **Cần đo thêm để quyết định:** so `mtime − duration` với giờ thật ở nhiều file hơn, gồm cả alpr (GOP 1 s, file nào cũng bắt đầu ngay) và file có cảnh báo lỗi.
+
+#### Vấn đề giờ bắt đầu/kết thúc của DVR — đã báo team DVR (2026-10-07)
+
+**Phát hiện:** `RecordPlaybackfilter` (và `GetRecordingList`) trả `StartTime`/`EndTime` lệch so với thời điểm hình thật. `StartTime` lấy từ **tên file** = lúc DVR **mở** file (`record_writer.cpp:126`, `file_utils.cpp:134-158`); frame đầu vào file muộn hơn vì DVR bỏ frame P cho tới keyframe đầu (`record_writer.cpp:200-201`); `EndTime = StartTime + duration` (`file_utils.cpp:190-193`) nên lệch theo. `Time` (độ dài) thì đúng.
+
+**Bằng chứng (camera `.194`):**
+
+| Nguồn đối chiếu | Kết quả |
+|---|---|
+| Đồng hồ **overlay** trên hình, file `ctx_main_20261007_145209` | API 14:52:09 → 14:52:46; hình thật 14:52:12 → 14:52:49 (**sớm 3 s**, cả đầu lẫn cuối) |
+| Overlay, file `ctx_main_20261007_145249` | API 14:52:49 → 14:53:15; hình thật 14:53:02 → 14:53:29 (**sớm 13–14 s**) |
+| Overlay, file alpr `anpr_main_20261007_143726` (người dùng tự kiểm) | API đúng đến ~2 s (alpr có keyframe mỗi giây nên frame đầu đến ngay) |
+| `ctx_main_20261007_103547` (chưa có overlay lúc đó) | API 10:35:47 → 10:36:00; `mtime` 10:36:28, `duration` 13,7 s → hình thật ≈ 10:36:14 → 10:36:28. Lọc API theo 10:36:15–10:36:25 **không trả file**; lọc 10:35:50–10:35:55 **lại trả file này** |
+
+Cơ chế: sai lệch = thời gian chờ keyframe đầu tiên. Context có GOP dài (~50 s trước khi bật overlay) nên lệch 3–27 s; alpr lệch <1 s.
+
+**Độ chính xác của cách tính lại (đối chiếu overlay):** `giờ bắt đầu thật ≈ mtime − duration`, `giờ kết thúc thật ≈ mtime`. Sai số **±1,5 s** (overlay chỉ đọc đến giây; `mtime` là giờ đóng file, có thể sau frame cuối tới ~1 s). *Đính chính:* con số "khớp ~50 ms" ở trên chỉ là so với dòng log DVR, không phải với hình thật.
+
+**Trạng thái:** user đã trao đổi với team DVR và đang nhờ sửa (2026-10-07). Hướng sửa đã đề xuất: (1) `scanRecordFiles` dùng `end = mtime`, `start = mtime − duration` cho file đã đóng; (2) hoặc lưu giờ frame đầu thật (file phụ / đặt tên theo frame đầu). **Chưa biết** team DVR chọn cách nào hay đã sửa chưa — phải đo lại trên bản DVR mới trước khi tin vào API.
+
+**Phạm vi ảnh hưởng tới Profile G** (không chỉ Replay):
+
+| Phần ONVIF | Bị ảnh hưởng? | Vì sao |
+|---|---|---|
+| Recording Control (`SetRecordingJobMode`, `GetRecordingJobState`, cấu hình job) | **Không** | Chỉ bật/tắt và đọc trạng thái ghi, không dùng giờ file |
+| `GetRecordings`, tracks, `GetRecordingOptions` | **Không** | Không dùng giờ file |
+| **Search**: `GetRecordingInformation` (`EarliestRecording`/`LatestRecording`), `GetRecordingSummary`, `FindRecordings`, `GetMediaAttributes` | **Có** | Lấy giờ từ chỉ mục file; sai 3–27 s ở context |
+| **Search**: `FindEvents` (`IsDataPresent`, ranh giới dữ liệu) | **Có** | Event dựng từ ranh giới file; ranh giới dịch sớm, và khoảng trống thật (30–50 s do chờ keyframe) bị báo sai chỗ |
+| **Replay** (`Range: clock`, NTP từng frame, cờ D) | **Có, nặng nhất** | Hình phát ra bị gắn giờ sai nếu tin tên file; lọc theo giờ bỏ sót hoặc trả nhầm file |
+
+Tức vấn đề này không chỉ "phục vụ Replay": Search sai giờ thì VMS vẽ timeline sai và client tin nhầm khoảng có dữ liệu, dù Replay chưa viết.
+
+**Cách xử lý trong `onvif-module` (không phụ thuộc DVR sửa hay chưa):** một hàm duy nhất tính `[start, end]` của mỗi file từ `mtime` và `duration`, dùng chung cho Search và Replay; không dùng `StartTime`/`EndTime` của API. Khi DVR sửa xong và đo lại thấy API đúng (trong ±1,5 s), có thể chuyển sang dùng API nhưng giữ hàm tính lại làm kiểm chứng chéo.
+
+**Điều cần đo lại sau khi DVR sửa:** so `StartTime`/`EndTime` của API với đồng hồ overlay ở frame đầu/cuối cho ít nhất 10 file context + 10 file alpr; kiểm API lọc theo khoảng thời gian trả đúng file (phép thử 10:36:15–10:36:25 ở trên).
+
+**Cấu hình luồng đã đổi sau các lần đo trên (quan sát 15:4x, `.194`):** context main hiện **3840×2160, 30 fps, keyframe mỗi 1 s** (~21 MB/30 s), context sub **1920×1080, 15 fps, keyframe mỗi ~2 s** (~50 MB/30 s). Các số đo độ lệch ở trên (3–27 s) là của cấu hình cũ (640×360, GOP ~50 s). Với GOP ngắn, độ lệch tên file ↔ frame đầu chỉ còn ≤ vài giây (ví dụ `ctx_sub_20261007_154838`: tên 15:48:38, `mtime − duration` = 15:48:40,7), nhưng **vẫn khác 0** nên vẫn cần tính lại từ `mtime`/`duration` hoặc DVR sửa.
+
+**Chuyển luồng main ↔ sub đã quan sát thật (2026-10-07 ~15:48:38, `.194`):** `ctx_main_20261007_154835` đóng sau 2,8 s, `ctx_sub_20261007_154838` mở ngay sau; file sub nằm **cùng thư mục** `/media/records/context` với tiền tố `ctx_sub_`; API trả `StreamType: "sub"`, `VideoSourceId: "0"`. Độ phân giải/codec đổi tại ranh giới (4K → 1080p) nên **không được gộp 2 luồng vào 1 track** (D2). Tại ranh giới có file ngắn (2–3 s) và một khoảng trống ~7 s ở cả context (`ctx_sub_154908` 2 s, rồi `154918`) lẫn alpr (`anpr_main_154856` 15 s, rồi `154918`) quanh 15:49:10 — **nguyên nhân chưa rõ** (có thể do thay đổi cấu hình làm DVR cắt/khởi động lại recorder); cần hỏi team DVR. Người dùng cho biết chuyển luồng hiếm xảy ra trong thực tế.
+
+**Phát hiện phụ (chưa điều tra):** sau khi bật overlay, file context có 3 keyframe (pts 0; 3,4; 4,07 s) và dung lượng tăng mạnh (file mới ~22 MB so với 2–6 MB trước) — có thể cấu hình encoder luồng context đã đổi; cần hỏi team DVR.
+
+**7.1 — Hợp đồng và lớp truy cập DVR**
+
+- Mở rộng `IDvrClient` (hoặc thêm `IRecordingBackend`/`ISearchBackend`/`IReplayBackend` như `02-INTEGRATION_MATRIX.md` đã ghi): `listRecordedFiles(sourceId, from, to)`, `getRecorderStatus()`, `setManualRecord(sourceId, enable)`.
+- Cài đặt trong `HttpDvrClient`; timeout và ánh xạ lỗi theo pattern Phase 4 (không fallback mock âm thầm).
+- Chuẩn hóa ở một chỗ duy nhất: tên file → UTC (V4), loại file `_EVENT`, bỏ file đang ghi.
+- Không sửa `interface/` chung khi chưa đồng bộ với mock backend (quy ước #9 của CLAUDE.md).
+
+**7.2 — Recording Control thật**
+
+- Tách khỏi biến global: tạo `RecordingStore` (interface) với 2 cài đặt: `MockRecordingStore` (hành vi hiện tại, giữ baseline) và `DvrRecordingStore` (D1–D3).
+- `RecordingService` hiện 435 dòng; tách handler theo nhóm (config / job) trước khi thêm logic để giữ giới hạn 600 dòng.
+- Store job bền vững (D3): JSON ở thư mục ghi được, ghi nguyên tử (chỉ lưu sự tồn tại/cấu hình job). `Mode` luôn đọc từ DVR, không lưu bản sao.
+- Event `JobState` / `RecordingConfig` phát khi thay đổi (SOAP hoặc WS `:8210`).
+
+**7.3 — Recording Search thật**
+
+- `SearchSessionStore`: SearchToken, `KeepAliveTime`, hết hạn, dọn dẹp; `EndSearch`; fault đúng cho token sai/hết hạn.
+- `FindRecordings`: lọc theo Scope (`IncludedRecordings`, `RecordingInformationFilter`), trả `RecordingInformation` từ chỉ mục.
+- `FindEvents`: dựng event ảo từ ranh giới file (bảng ánh xạ ở trên), sắp theo thời gian, `IncludeStartState`, `MaxMatches`.
+- Cache chỉ mục phía onvif-module để mỗi phiên tìm kiếm không quét lại nhiều file (DVR cache 10 giây).
+
+**7.4 — Replay RTSP server (phần khó nhất)**
+
+- Process Go + gortsplib (`alvis-onvif-replay`), systemd riêng, cổng cấu hình trong `onvif.conf`.
+- Luồng một phiên (đã mô tả trong chat 2026-10-07):
+  1. `DESCRIBE` có `Require: onvif-replay` → SDP kèm `a=x-onvif-track:<TrackToken>`.
+  2. `PLAY` với `Range: clock=<UTC>-<UTC>` (đóng/mở), `Rate-Control` (bắt buộc hỗ trợ `no`), `Frames: intra|all`, `Scale`, `Immediate: yes`.
+  3. Tra chỉ mục (D5) → các file giao với khoảng thời gian; mở file đầu, **tìm keyframe tại hoặc trước** mốc bắt đầu bằng bảng sample MP4.
+  4. Đọc sample (không giải mã lại) → đóng gói RTP H.264/H.265, `PayloadMaxSize` 1434.
+  5. Gắn extension `0xABAC` (độ dài 3, NTP 8 byte, cờ C/E/D/T, CSeq byte thấp) lên **gói đầu của mỗi access unit**; NTP = giờ bắt đầu file + (PTS − PTS đầu), phải đơn điệu tăng.
+  6. Hết file → sang file kế; có khoảng trống → đặt cờ D ở gói đầu của đoạn mới; hết dữ liệu → **ngừng gửi, không PAUSE**.
+  7. `PAUSE` bắt buộc; transport RTP/UDP và RTP/RTSP/TCP; WebSocket không làm.
+- Mỗi phiên có trạng thái replay riêng (mock đang dùng 1 `replayState` chung cho cả handler — không dùng được khi nhiều client).
+- Thư viện đọc MP4: chọn thuần Go (không cgo) để cross-build dễ — **[chưa verify]** cần chọn và thử trên file DVR thật ở bước V2.
+- Xác thực (D6) và sửa tunnel: `proxyRtspHttpTunnel` chọn đích theo path (`/replay…` → cổng replay, còn lại → `cfg_.rtspPort`).
+- Tái dùng từ mock: `parseClockRange`, `ntpTimestamp`, dựng extension, `Immediate`/cờ D. Thay hoàn toàn nguồn dữ liệu (không còn relay live).
+
+**7.5 — Nối `ReplayService` và cấu hình**
+
+- `GetReplayUri` kiểm `RecordingToken` với `RecordingStore`, trả URI dùng cổng từ config; fault `ter:NoRecording` khi không tồn tại; fault `ter:InvalidStreamSetup` nếu StreamSetup không hỗ trợ.
+- Khai báo capability đúng: `ReversePlayback=false`, `RTP_RTSP_TCP=true`, `RTSPOverWebSocket=false`.
+- `onvif.conf`: thêm khóa cho cổng/binary replay; bật từng cờ `recording/search/replay = real` độc lập (hybrid).
+
+**7.6 — Kiểm thử**
+
+- Chuẩn bị archive: ghi lịch ≥ vài chục phút, có **ít nhất 1 khoảng trống** (dừng rồi ghi lại), có ranh giới giữa 2 file, có file `_EVENT`.
+- DTT Profile G trên backend thật; mock phải giữ 313/313 (chạy lại sau mỗi thay đổi).
+- Kiểm tra giao thức replay ngoài DTT: `gst-launch-1.0` với `rtspsrc onvif-mode=true` + `rtponvifparse`, Wireshark (kiểm `Require`, `Range`, extension `0xABAC`, cờ D), OxDM, Happytime ONVIF Client.
+- Kiểm tra bằng VMS thật: phát lại đúng khoảng UTC, qua ranh giới file, qua khoảng trống, tua, PAUSE.
+- Kiểm tra độ bền: restart DVR/onvif-module/replay server khi đang replay; tháo đĩa.
+
+**7.7 — Tài liệu**
+
+- Cập nhật `02-INTEGRATION_MATRIX.md` (các hàng Recording/Search/Replay) khi từng capability đạt gate; không đánh `REAL_VERIFIED` nếu mới compile/smoke test.
+
+### Rủi ro và giới hạn đã biết
+
+- **File đang ghi chưa đọc được** (`+faststart`): vùng thời gian mới nhất (tối đa một đoạn `FileDuration`) không replay được; `LatestRecording` luôn trễ. Giải pháp triệt để (MP4 phân mảnh) cần sửa DVR — ngoài phạm vi đợt 1, cần chủ sở hữu DVR đồng ý.
+- **Độ chính xác khoảng 1 giây** (giờ từ tên file, thời lượng số giây nguyên): khoảng trống dưới 1 giây không phát hiện được.
+- **Giờ bắt đầu file trong tên file không phải giờ frame đầu (đã xác nhận trên `.194`, V3)**: tên = lúc mở segment; frame đầu đến sau khi chờ keyframe (5–26 s ở context). Phải dùng `mtime − duration`. Nếu bỏ sót, replay lệch 5–26 s và Search báo sai khoảng có dữ liệu. Đây là rủi ro đúng-sai lớn nhất của Phase 7, nhưng sửa được hoàn toàn ở `onvif-module`.
+- **Chỉ mục của DVR (`RecordPlaybackfilter`) sai giờ bắt đầu/kết thúc** vì lấy `start` từ tên file; không dùng thẳng, tính lại từ `mtime`/`duration`.
+- **PTS theo số đếm**: đúng khi frame đến đều (đã kiểm), có thể lệch nếu encoder giật giữa file. Chưa gặp, cần đo thêm; nếu gặp mới cần sửa DVR.
+- **GOP rất dài ở context (~50,6 s)**: DVR bỏ toàn bộ frame P trước keyframe đầu nên mỗi lần mở file mất 5–26 s hình, và segment không có keyframe bị xóa (`REC-EMPTY`). Đó là mất dữ liệu ở **phía ghi** của DVR (cần chủ DVR biết), không phải việc của ONVIF; replay chỉ phản ánh đúng khoảng trống. Điểm vào replay là đầu file nên có thể lùi tới vài chục giây so với mốc yêu cầu (spec cho phép bắt đầu ở clean point trước mốc).
+- **Múi giờ**: tên file là giờ địa phương; API DVR gán cứng `Asia/Saigon`. Sai múi giờ tiến trình → lệch toàn bộ Range.
+- **`Id` của DVR không ổn định**; mọi token ONVIF phải dựa vào `VideoSourceId` và giờ/tên file.
+- **Retention**: DVR xóa file khi đĩa đầy không báo; Search phải phản ánh theo lần quét sau. Event `DataDeletion` là conditional → không làm đợt 1.
+- **Tài nguyên**: replay đọc đĩa trong khi DVR đang ghi; CPU máy dùng chung. Giới hạn số phiên replay đồng thời (đề xuất cấu hình, mặc định thấp).
+- **Phụ thuộc Phase 6**: event Recording dùng chung `MockSubscriptionManager`; nếu Phase 6 đổi cách phát event thì cập nhật cùng lúc.
+- **DTT cần dữ liệu**: các case Replay/Search đòi recording có dữ liệu thật tại thời điểm test.
+
+### Ngoài phạm vi đợt 1
+
+Audio và metadata recording, nhiều track (main + sub), dynamic recording/track (`CreateRecording`, `CreateTrack`, `DeleteTrack`), Receiver làm nguồn, reverse playback, RTSP qua WebSocket, event `DataDeletion`, tìm event metadata lịch sử từ Core. Khai báo đúng trong capabilities để DTT đánh dấu N/A thay vì fail.
 
 ### Gate
 
-- Recording/Search/Replay token nhất quán.
-- VMS phát lại đúng UTC range.
-- Profile G pass với archive thật.
+- [ ] 7.0 hoàn tất (V1–V7 đã đo trên `.194` 2026-10-07; còn V8 và xác nhận lại trên `.102`); D1–D6 đã được user chốt; đo thêm độ lệch `mtime − duration` so với giờ thật trên nhiều file (kể cả alpr) để quyết định có cần sửa DVR không.
+- [ ] `recording = real`: GetRecordings/Jobs/State/Mode khớp trạng thái ghi thật của DVR; Mode bền qua restart onvif-module và DVR.
+- [ ] `search = real`: token lifecycle đúng (KeepAlive, hết hạn, `EndSearch`); `FindRecordings`/`FindEvents` khớp danh sách file thật.
+- [ ] `replay = real`: VMS phát lại **đúng khoảng UTC** từ archive thật, qua ranh giới file và khoảng trống; Wireshark xác nhận `0xABAC`, cờ D, `Immediate`, `Rate-Control: no`.
+- [ ] Recording/Search/Replay token nhất quán (`rec_<id>` dùng xuyên suốt).
+- [ ] DTT Profile G pass với archive thật; mock vẫn 313/313.
+- [ ] Không có replay payload đi qua onvif-server; tunnel RTSP-over-HTTP định tuyến đúng cổng replay.
+- [ ] `02-INTEGRATION_MATRIX.md` cập nhật kèm evidence.
 
 ## 11. Phase 8 — Production hardening và loại mock khỏi runtime
 

@@ -623,6 +623,54 @@ void MockSubscriptionManager::fireRecordingJobState(const std::string& jobToken,
     }
 }
 
+// Dựng 1 NotificationMessage tns1:RecordingConfig/JobState cho job thật.
+// `operation` = "Initialized" (trạng thái ban đầu) hoặc "Changed".
+static std::string recordingJobStateMessage(const std::string& topic, const std::string& now,
+                                            const char* operation, const RecordingJobEvent& e) {
+    std::ostringstream m;
+    m << "<wsnt:NotificationMessage>"
+      << "<wsnt:Topic Dialect=\"" << TOPIC_DIALECT << "\">" << topic << "</wsnt:Topic>"
+      << "<wsnt:Message><tt:Message UtcTime=\"" << now
+      << "\" PropertyOperation=\"" << operation << "\">"
+      << "<tt:Source><tt:SimpleItem Name=\"RecordingJobToken\" Value=\""
+      << e.jobToken << "\"/></tt:Source>"
+      << "<tt:Data>"
+      << "<tt:SimpleItem Name=\"State\" Value=\"" << e.state << "\"/>"
+      << "<tt:ElementItem Name=\"Information\">"
+      << "<tt:RecordingJobStateInformation>"
+      << "<tt:RecordingToken>" << e.recordingToken << "</tt:RecordingToken>"
+      << "<tt:State>" << e.state << "</tt:State>"
+      << "<tt:Sources>"
+      << "<tt:SourceToken Type=\"" << e.sourceType << "\">"
+      << "<tt:Token>" << e.sourceToken << "</tt:Token></tt:SourceToken>"
+      << "<tt:State>" << e.state << "</tt:State><tt:Tracks/>"
+      << "</tt:Sources>"
+      << "</tt:RecordingJobStateInformation>"
+      << "</tt:ElementItem></tt:Data>"
+      << "</tt:Message></wsnt:Message>"
+      << "</wsnt:NotificationMessage>";
+    return m.str();
+}
+
+void MockSubscriptionManager::fireRecordingJobState(const RecordingJobEvent& job) {
+    std::lock_guard<std::mutex> lk(mtx_);
+    const std::string now = getXmlUtcTime(0);
+    for (auto& kv : subscriptions_) {
+        const std::string& f = kv.second.topicFilter;
+        const bool match = f.empty() || f.find("JobState") != std::string::npos ||
+                           f.find("RecordingConfig//.") != std::string::npos ||
+                           f.find("RecordingConfig//*") != std::string::npos;
+        if (!match) continue;
+        const std::string topic = echoTopic(f, "JobState", "tns1:RecordingConfig/JobState");
+        kv.second.pending.push_back(recordingJobStateMessage(topic, now, "Changed", job));
+    }
+}
+
+void MockSubscriptionManager::setRecordingJobProvider(RecordingJobProvider provider) {
+    std::lock_guard<std::mutex> lk(mtx_);
+    jobProvider_ = std::move(provider);
+}
+
 // ── PullMessages ────────────────────────────────────────────────────────────
 std::string MockSubscriptionManager::handlePullMessages(const std::string& subId,
                                                         const std::string& req) {
@@ -631,6 +679,7 @@ std::string MockSubscriptionManager::handlePullMessages(const std::string& subId
     int timeout = 60;
     unsigned long pullNo = 0;
     std::vector<std::string> pending;   // event do thao tác (ProfileChanged/ConfigurationChanged)
+    RecordingJobProvider jobProvider;   // bản sao nguồn job thật (rỗng khi chạy mock)
     {
         std::lock_guard<std::mutex> lk(mtx_);
         purgeExpired();
@@ -645,7 +694,9 @@ std::string MockSubscriptionManager::handlePullMessages(const std::string& subId
         filter = it->second.topicFilter;
         pullNo = it->second.pullCount++;
         pending.swap(it->second.pending);   // lấy ra + xóa khỏi subscription
+        jobProvider = jobProvider_;
     }
+    const bool hasJobProvider = static_cast<bool>(jobProvider);
 
     // MessageLimit từ request (tool set để giới hạn tối đa messages trả về).
     // Default 100 nếu không chỉ định. Bỏ qua sẽ gây "Maximum number of
@@ -732,6 +783,17 @@ std::string MockSubscriptionManager::handlePullMessages(const std::string& subId
     }
     // Property event khởi tạo chỉ thuộc pull đầu tiên. Phát lại ở mọi pull sẽ
     // che event Changed vừa enqueue (RECORDING-5-1-19).
+    // Job thật (provider đã đăng ký): mỗi job 1 event Initialized, đúng trạng thái hiện tại.
+    // Provider được gọi ở đây, ngoài khóa mtx_, vì nó có thể gọi xuống DVR.
+    if (emitted < msgLimit && emitJobState && pullNo == 0 && hasJobProvider) {
+        const std::string topic = echoTopic(filter, "JobState",
+                                            "tns1:RecordingConfig/JobState");
+        for (const auto& job : jobProvider()) {
+            if (emitted >= msgLimit) break;
+            body << recordingJobStateMessage(topic, now, "Initialized", job);
+            ++emitted;
+        }
+    } else
     if (emitted < msgLimit && emitJobState && pullNo == 0) {
         const std::string topic = echoTopic(filter, "JobState",
                                             "tns1:RecordingConfig/JobState");

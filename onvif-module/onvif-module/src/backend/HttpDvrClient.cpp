@@ -292,6 +292,58 @@ StreamUri HttpDvrClient::getStreamUri(const std::string& profileToken, StreamPro
     return {};
 }
 
+std::vector<RecorderSource> HttpDvrClient::getRecorderSources() {
+    const HttpResponse response = request("GET", "/dvr/v1.0/GetListVideoSourceRecorder");
+    if (response.status != 200)
+        throw std::runtime_error("DVR GetListVideoSourceRecorder failed (status=" +
+                                 std::to_string(response.status) + ")");
+    const std::string& json = response.body;
+    if (SimpleJson::getInt(json, "result", 0) != 1)
+        throw std::runtime_error("DVR GetListVideoSourceRecorder returned result != 1");
+
+    std::vector<RecorderSource> sources;
+    for (const auto& item : jsonArrayObjects(jsonArray(json, "data"))) {
+        RecorderSource source;
+        // "VideoSourceId"/"Name" của mục xuất hiện TRƯỚC mảng "Profiles", nên lần tìm
+        // đầu tiên trong object luôn trúng khóa của chính mục (không phải của profile).
+        source.videoSourceId = SimpleJson::getString(item, "VideoSourceId");
+        if (source.videoSourceId.empty()) continue;
+        source.name = SimpleJson::getString(item, "Name");
+        for (const auto& profile : jsonArrayObjects(jsonArray(item, "Profiles"))) {
+            RecorderStreamState stream;
+            stream.streamType = SimpleJson::getString(profile, "StreamType");
+            if (stream.streamType.empty()) continue;
+            stream.isRecording = SimpleJson::getBool(profile, "IsRecording", false);
+            source.streams.push_back(std::move(stream));
+        }
+        sources.push_back(std::move(source));
+    }
+    return sources;
+}
+
+void HttpDvrClient::setManualRecord(const std::string& videoSourceId,
+                                    const std::string& streamType, bool enable) {
+    // Giá trị này đi thẳng vào thân JSON dựng tay: chỉ nhận ký tự an toàn để không thể
+    // chèn thêm khóa/giá trị (id và loại luồng của DVR chỉ gồm chữ, số, '_' và '-').
+    auto safe = [](const std::string& value) {
+        if (value.empty() || value.size() > 32) return false;
+        for (const char ch : value)
+            if (!std::isalnum(static_cast<unsigned char>(ch)) && ch != '_' && ch != '-') return false;
+        return true;
+    };
+    if (!safe(videoSourceId) || !safe(streamType))
+        throw std::invalid_argument("Invalid recorder source or stream type");
+
+    const std::string body = "{\"VideoSourceId\":\"" + videoSourceId + "\",\"StreamType\":\"" +
+                             streamType + "\",\"Enable\":" + (enable ? "true" : "false") + "}";
+    const HttpResponse response = request("POST", "/dvr/v1.0/SetOnOffVideoRecorder", body);
+    if (response.status != 200)
+        throw std::runtime_error("DVR SetOnOffVideoRecorder failed (status=" +
+                                 std::to_string(response.status) + ")");
+    if (SimpleJson::getInt(response.body, "result", 0) != 1)
+        throw std::runtime_error("DVR SetOnOffVideoRecorder returned result != 1");
+}
+
 SnapshotUri HttpDvrClient::getSnapshotUri(const std::string& profileToken) {
     // DVR GetSnapshot chỉ phân biệt theo video source (channel vật lý), không
     // theo profile con — tách phần số đứng đầu token ("0"/"0_sub" -> "0").

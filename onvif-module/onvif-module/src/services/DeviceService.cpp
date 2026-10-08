@@ -1,5 +1,6 @@
 #include "services/DeviceService.h"
 #include "services/DiscoveryService.h"
+#include "services/DvrRecordingService.h"
 #include "auth/WsSecurityHandler.h"
 #include "backend/IMgmtClient.h"
 #include <iostream>
@@ -645,12 +646,9 @@ int DeviceService::GetServices(
         svc("http://www.onvif.org/ver20/analytics/wsdl", "/onvif/analytics",
             21, 12, anCaps);
 
-        // Recording Control (Profile G) — non-dynamic, 1 recording dựng sẵn, H264.
-        std::string recCaps =
-            "<trc:Capabilities DynamicRecordings=\"false\" DynamicTracks=\"false\" "
-             "DeleteData=\"false\" Encoding=\"H264\" MaxRate=\"20000\" "
-             "MaxTotalRate=\"20000\" MaxRecordings=\"1\" MaxRecordingJobs=\"1\" "
-             "Options=\"true\"/>";
+        // Recording Control (Profile G) — non-dynamic. Dùng chung nguồn với
+        // RecordingService::GetServiceCapabilities (RECORDING-1-1-3 so hai bên).
+        std::string recCaps = DvrRecordingService::capabilitiesXml();
         svc("http://www.onvif.org/ver10/recording/wsdl", "/onvif/recording",
             21, 12, recCaps);
 

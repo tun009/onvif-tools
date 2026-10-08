@@ -10,6 +10,9 @@ public:
     StreamUri   getStreamUri(const std::string& profileToken,
                              StreamProtocol protocol) override;
     SnapshotUri getSnapshotUri(const std::string& profileToken) override;
+    std::vector<RecorderSource> getRecorderSources() override;
+    void setManualRecord(const std::string& videoSourceId,
+                         const std::string& streamType, bool enable) override;
 
 private:
     struct HttpResponse { int status = 0; std::string body; };
