@@ -162,8 +162,7 @@ int main(int argc, char* argv[]) {
     std::unique_ptr<IOnvifService> recordingService;
     if (cfg.capability("recording") == CapabilityMode::Real) {
         if (cfg.backendMode == BackendMode::Mock || cfg.capability("media") != CapabilityMode::Real) {
-            fprintf(stderr, "[main] recording=real needs backend.mode!=mock and media=real; using mock Recording service
-");
+            fprintf(stderr, "[main] recording=real needs backend.mode!=mock and media=real; using mock Recording service\n");
         } else {
             // Kho job/cấu hình tạo trong thư mục chạy onvif-server (spec: phải sống qua mất điện).
             recordingService = std::make_unique<DvrRecordingService>(
