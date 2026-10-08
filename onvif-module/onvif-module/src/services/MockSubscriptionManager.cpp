@@ -647,8 +647,8 @@ static std::string recordingJobStateMessage(const std::string& topic, const std:
     if (e.trackToken.empty())
         m << "<tt:Tracks/>";
     else
-        m << "<tt:Tracks><tt:SourceTag>video</tt:SourceTag><tt:Destination>" << e.trackToken
-          << "</tt:Destination><tt:State>" << e.state << "</tt:State></tt:Tracks>";
+        m << "<tt:Tracks><tt:Track><tt:SourceTag>video</tt:SourceTag><tt:Destination>" << e.trackToken
+          << "</tt:Destination><tt:State>" << e.state << "</tt:State></tt:Track></tt:Tracks>";
     m << "</tt:Sources>"
       << "</tt:RecordingJobStateInformation>"
       << "</tt:ElementItem></tt:Data>"

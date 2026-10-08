@@ -30,11 +30,13 @@ std::string faultNotStarted() {
     return FaultBuilder::receiver("ter:Action", "Recording could not be started");
 }
 
-// Phần tử Tracks trong RecordingJobStateInformation: nguồn → track đích kèm trạng thái.
+// Phần tử Tracks trong RecordingJobStateInformation: nguồn → track đích kèm trạng thái. Khác với
+// cấu hình job (Tracks lặp trực tiếp, mỗi phần tử chứa SourceTag/Destination), ở trạng thái
+// Tracks là phần tử bọc và mỗi track nằm trong <Track> (RecordingJobStateTracks/Track).
 std::string trackStateXml(const std::string& trackToken, const std::string& state) {
     if (trackToken.empty()) return "<tt:Tracks/>";
-    return "<tt:Tracks><tt:SourceTag>video</tt:SourceTag><tt:Destination>" + trackToken +
-           "</tt:Destination><tt:State>" + state + "</tt:State></tt:Tracks>";
+    return "<tt:Tracks><tt:Track><tt:SourceTag>video</tt:SourceTag><tt:Destination>" + trackToken +
+           "</tt:Destination><tt:State>" + state + "</tt:State></tt:Track></tt:Tracks>";
 }
 
 } // namespace
