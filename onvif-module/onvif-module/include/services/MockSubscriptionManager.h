@@ -38,6 +38,7 @@ struct RecordingJobEvent {
     std::string sourceToken;   // token Media profile
     std::string sourceType;    // thuộc tính Type của SourceToken
     std::string state;         // Idle | Active | PartiallyActive | Error
+    std::string trackToken;    // track đích của job (rỗng = không khai báo track, giữ dạng cũ)
 };
 
 class MockSubscriptionManager {

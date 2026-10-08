@@ -13,6 +13,7 @@
 #include "onvif.nsmap"
 
 #include <csignal>
+#include <unistd.h>
 #include <atomic>
 #include <thread>
 #include <chrono>
@@ -164,9 +165,14 @@ int main(int argc, char* argv[]) {
         if (cfg.backendMode == BackendMode::Mock || cfg.capability("media") != CapabilityMode::Real) {
             fprintf(stderr, "[main] recording=real needs backend.mode!=mock and media=real; using mock Recording service\n");
         } else {
-            // Kho job/cấu hình tạo trong thư mục chạy onvif-server (spec: phải sống qua mất điện).
+            // Kho job/cấu hình (spec: phải sống qua mất điện) nằm trên ổ dữ liệu /media: ổ hệ thống
+            // `/` nhỏ, hay đầy, và triển khai lại có thể xóa thư mục repo. Máy không có /media/database
+            // (môi trường khác) thì dùng thư mục đang chạy.
+            const std::string storeDir = "/media/database";
+            const std::string storePath = access(storeDir.c_str(), W_OK) == 0
+                ? storeDir + "/onvif_recording.dat" : "recording_store.dat";
             recordingService = std::make_unique<DvrRecordingService>(
-                dvrClient, std::make_shared<RecordingJobStore>("recording_store.dat"),
+                dvrClient, std::make_shared<RecordingJobStore>(storePath),
                 "http://" + cfg.deviceIp + ":" + std::to_string(cfg.httpPort) + "/onvif/recording");
         }
     }

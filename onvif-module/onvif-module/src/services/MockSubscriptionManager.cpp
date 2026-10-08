@@ -643,8 +643,13 @@ static std::string recordingJobStateMessage(const std::string& topic, const std:
       << "<tt:Sources>"
       << "<tt:SourceToken Type=\"" << e.sourceType << "\">"
       << "<tt:Token>" << e.sourceToken << "</tt:Token></tt:SourceToken>"
-      << "<tt:State>" << e.state << "</tt:State><tt:Tracks/>"
-      << "</tt:Sources>"
+      << "<tt:State>" << e.state << "</tt:State>";
+    if (e.trackToken.empty())
+        m << "<tt:Tracks/>";
+    else
+        m << "<tt:Tracks><tt:SourceTag>video</tt:SourceTag><tt:Destination>" << e.trackToken
+          << "</tt:Destination><tt:State>" << e.state << "</tt:State></tt:Tracks>";
+    m << "</tt:Sources>"
       << "</tt:RecordingJobStateInformation>"
       << "</tt:ElementItem></tt:Data>"
       << "</tt:Message></wsnt:Message>"

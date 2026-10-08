@@ -3,7 +3,8 @@
 // giữ: Recording Job, cấu hình Recording/Track do client đặt (Set*Configuration).
 //
 // Spec (Recording Control §5.2): mọi đối tượng phải bền qua mất điện → lưu ra file ở
-// `path` mỗi khi có thay đổi (ghi file tạm rồi rename, tránh file dở dang khi mất điện).
+// `path` mỗi khi có thay đổi: ghi file tạm, fsync, rename, fsync thư mục chứa (không có hai
+// lần fsync thì mất điện đột ngột có thể để lại file rỗng hoặc bản cũ).
 // `path` rỗng = chỉ giữ trong bộ nhớ (log cảnh báo khi khởi tạo).
 //
 // Chỉ lưu CẤU HÌNH. Trạng thái ghi thật luôn đọc từ DVR, không lưu bản sao ở đây.
@@ -39,6 +40,9 @@ public:
     bool findJobByRecording(const std::string& recordingToken, RecordingJobRecord& out) const;
     // Gán token mới (không bao giờ dùng lại token đã cấp) và lưu.
     RecordingJobRecord addJob(RecordingJobRecord job);
+    // Lưu job với token do caller chọn (dùng khi "nhận" job quan sát được, giữ nguyên token
+    // client đã thấy). Trả false nếu token đã tồn tại.
+    bool addJobWithToken(const RecordingJobRecord& job);
     bool updateJob(const RecordingJobRecord& job);
     bool removeJob(const std::string& token);
 

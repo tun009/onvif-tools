@@ -1,9 +1,12 @@
 #include "services/RecordingJobStore.h"
 
+#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
+#include <fcntl.h>
 #include <fstream>
 #include <sstream>
+#include <unistd.h>
 #include <utility>
 
 // Định dạng file: mỗi dòng 1 bản ghi, các trường cách nhau bằng TAB, ký tự đặc biệt
@@ -63,6 +66,19 @@ std::string joinFields(const std::vector<std::string>& fields) {
         line += escapeField(fields[i]);
     }
     return line;
+}
+
+bool writeAll(int fd, const std::string& data) {
+    std::size_t offset = 0;
+    while (offset < data.size()) {
+        const ssize_t n = ::write(fd, data.data() + offset, data.size() - offset);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            return false;
+        }
+        offset += static_cast<std::size_t>(n);
+    }
+    return true;
 }
 
 // "job_12" -> 12; khác dạng đó -> 0.
@@ -131,19 +147,34 @@ void RecordingJobStore::saveLocked() const {
         os << joinFields({"T", kv.first.substr(0, bar), kv.first.substr(bar + 1), kv.second}) << '\n';
     }
 
-    // Ghi file tạm rồi rename: mất điện giữa chừng chỉ để lại file tạm, file chính vẫn nguyên.
+    // Ghi file tạm, fsync, rename, rồi fsync thư mục. Mất điện lúc nào cũng chỉ để lại hoặc bản cũ
+    // nguyên vẹn, hoặc bản mới đầy đủ. Thiếu fsync thì dữ liệu mới chỉ nằm trong bộ nhớ đệm của
+    // hệ điều hành và có thể mất (kể cả khi đã rename).
     const std::string tmp = path_ + ".tmp";
-    {
-        std::ofstream out(tmp, std::ios::trunc);
-        out << os.str();
-        out.flush();
-        if (!out) {
-            fprintf(stderr, "[RecordingStore] Cannot write %s: change kept in memory only\n", tmp.c_str());
-            return;
-        }
+    const int fd = ::open(tmp.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) {
+        fprintf(stderr, "[RecordingStore] Cannot write %s (errno %d): change kept in memory only\n", tmp.c_str(), errno);
+        return;
     }
-    if (std::rename(tmp.c_str(), path_.c_str()) != 0)
+    const bool written = writeAll(fd, os.str()) && ::fsync(fd) == 0;
+    const int writeErrno = errno;
+    ::close(fd);
+    if (!written) {
+        fprintf(stderr, "[RecordingStore] Cannot write %s (errno %d): change kept in memory only\n", tmp.c_str(), writeErrno);
+        ::unlink(tmp.c_str());
+        return;
+    }
+    if (std::rename(tmp.c_str(), path_.c_str()) != 0) {
         fprintf(stderr, "[RecordingStore] Cannot replace %s: change kept in memory only\n", path_.c_str());
+        return;
+    }
+    const auto slash = path_.find_last_of('/');
+    const std::string dir = slash == std::string::npos ? "." : (slash == 0 ? "/" : path_.substr(0, slash));
+    const int dirFd = ::open(dir.c_str(), O_RDONLY | O_DIRECTORY);
+    if (dirFd >= 0) {
+        ::fsync(dirFd);   // đưa việc đổi tên xuống đĩa
+        ::close(dirFd);
+    }
 }
 
 std::vector<RecordingJobRecord> RecordingJobStore::jobs() const {
@@ -172,6 +203,15 @@ RecordingJobRecord RecordingJobStore::addJob(RecordingJobRecord job) {
     jobs_.push_back(job);
     saveLocked();
     return job;
+}
+
+bool RecordingJobStore::addJobWithToken(const RecordingJobRecord& job) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (const auto& existing : jobs_)
+        if (existing.token == job.token) return false;
+    jobs_.push_back(job);
+    saveLocked();
+    return true;
 }
 
 bool RecordingJobStore::updateJob(const RecordingJobRecord& job) {

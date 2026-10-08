@@ -7,6 +7,9 @@
 //     "VIDEO_main" / "VIDEO_sub". Chỉ lấy sensor có cả recorder DVR lẫn Media profile ONVIF
 //     (nguồn ảo "Overlay" của DVR vì thế tự bị loại).
 //   - 1 Recording Job / Recording. Nguồn job = token Media profile của luồng.
+//   - Luồng đang ghi mà recording đó chưa có job nào (bật từ web hoặc lịch) vẫn hiện trong danh
+//     sách job dưới dạng job "quan sát được" (token "auto_<recording>_<luồng>", Mode/State Active),
+//     để VMS thấy đúng thực tế. Sửa hoặc đặt Mode cho job đó sẽ "nhận" nó thành job thật (giữ token).
 //   - Job (token, priority, nguồn, mode mong muốn) và cấu hình Recording/Track lưu bền ở
 //     RecordingJobStore. Mode Active/Idle điều khiển ghi TAY của DVR (dùng chung với nút
 //     "Record" trên web; ghi theo lịch không bị ảnh hưởng). JobState luôn đọc từ DVR.
@@ -73,6 +76,10 @@ private:
     std::string getJobState(const std::string& req, const std::string& rel);
     struct JobFields;   // trường client gửi trong <JobConfiguration>
     static JobFields parseJob(const std::string& scope);
+    // Job trong danh sách: đã lưu, hoặc "quan sát được" (không nằm trong kho).
+    struct JobView { RecordingJobRecord job; bool observed = false; };
+    std::vector<JobView> listJobs(const std::vector<Source>& sources) const;
+    bool findJobView(const std::string& token, const std::vector<Source>& sources, JobView& out) const;
 
     // ── DVR ───────────────────────────────────────────────────────
     // Thất bại → `fault` là SOAP fault để trả thẳng cho client.
@@ -87,10 +94,13 @@ private:
     RecordingConfigRecord effectiveConfig(const Source& source) const;
     std::string configXml(const Source& source) const;
     std::string tracksXml(const Source& source) const;
-    std::string jobConfigXml(const RecordingJobRecord& job) const;
+    // `sources` (nếu có) dùng để điền Tracks: luồng nguồn → track đích của recording.
+    std::string jobConfigXml(const RecordingJobRecord& job, const std::vector<Source>* sources) const;
+    static std::string trackOf(const RecordingJobRecord& job, const std::vector<Source>& sources);
     // "Active" khi job mong muốn ghi VÀ luồng nguồn đang ghi thật; ngược lại "Idle".
     static std::string jobStateOf(const RecordingJobRecord& job, const std::vector<Source>& sources);
-    static RecordingJobEvent jobEvent(const RecordingJobRecord& job, const std::string& state);
+    static RecordingJobEvent jobEvent(const RecordingJobRecord& job, const std::string& state,
+                                      const std::string& trackToken);
     std::vector<RecordingJobEvent> initialJobEvents() const;
 
     // ── Cắt chuỗi / envelope SOAP (không parse XML đầy đủ, giống các service string-based) ──
