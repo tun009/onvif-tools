@@ -33,7 +33,7 @@ UNSUPPORTED       Sản phẩm quyết định không hỗ trợ và không adve
 | Analytics metadata | M | VPU | BUS event + RTP metadata | MOCK | Chưa nối VPU result thật |
 | Analytics rules/modules | M/T | VPU/Core | Internal API/BUS | MOCK | Cần map rule/application canonical |
 | ONVIF Event/PullPoint | S/T/M/G | Core + BUS | Event bus | MOCK | SOAP behavior đã pass; nguồn event còn mock |
-| Recording control | G | DVR | Internal API/IPC | REAL_IN_PROGRESS | Backend mới đã có record một phần; cần inventory operation |
+| Recording control | G | DVR (trạng thái ghi) + onvif-module (job, cấu hình) | Internal REST (`GetListVideoSourceRecorder`, `SetOnOffVideoRecorder`) | REAL_DTT | `recording=real` trên `.194` (2026-10-08): DTT Recording Control **22/22** (r33; lịch sử r29–r33 trong 01-IMPLEMENTATION_PLAN.md Phase 7), thử tay Happytime đạt, job lưu bền ở `/media/database/onvif_recording.dat` (có `fsync`) và nạp lại sau restart. Chưa `REAL_VERIFIED`: chưa kiểm DTT đường job quan sát được (4-1-4/5/7 chạy với danh sách rỗng), chưa kiểm bền qua restart DVR, chưa test VMS. Giới hạn: `MaximumRetentionTime` chỉ lưu không thực thi; chưa có event `JobState` khi bật/tắt ghi từ web; job quan sát được của ghi theo lịch không dừng được bằng ONVIF |
 | Recording search | G | DVR/Core | Internal API/IPC | REAL_IN_PROGRESS | Cần index/time/filter/token contract |
 | Replay | G | DVR | API + RTSP replay | REAL_IN_PROGRESS | Backend mới đã có playback một phần; cần ONVIF Range/URI test |
 
@@ -69,7 +69,10 @@ UNSUPPORTED       Sản phẩm quyết định không hỗ trợ và không adve
 | ContinuousMove/Stop/Home Position | PTZ | chưa implement (luôn fault) | — | UNSUPPORTED | Cố ý hoãn — DTT pre-filter chỉ theo `RequiredFeatures` cấp service (`PTZService`), không theo node capability, nên các test PTZ Service "Must" này luôn chạy và fail cho tới khi có no-op implementation. User quyết định tạm hoãn (2026-09-28) |
 | GetSupportedMetadata | Analytics | `IAnalyticsBackend` | VPU | MOCK | Mock DTT baseline |
 | PullMessages | Event | `IEventBackend` | Core/BUS | MOCK | Mock DTT baseline |
-| GetRecordings | Recording | `IRecordingBackend` | DVR | REAL_IN_PROGRESS | Chưa ghi |
+| GetRecordings / Get-SetRecordingConfiguration / Get-SetTrackConfiguration / GetRecordingOptions | Recording | `DvrRecordingService` (+ `IDvrClient::getRecorderSources`, `RecordingJobStore`) | DVR `GET /dvr/v1.0/GetListVideoSourceRecorder` + `GET /dvr/v3.0/GetProfiles` | REAL_DTT | r33 (2026-10-08): RECORDING-1-1-1/1-1-3/4-1-1/4-1-2/4-1-3/4-1-9/4-1-10/4-1-11, 5-1-3/5-1-4 PASS. Recording `rec_<VideoSourceId>`, track `VIDEO_main`/`VIDEO_sub`; nguồn ảo "Overlay" của DVR bị loại. Cấu hình do client đặt lưu ở onvif-module (DVR không có chỗ lưu) |
+| CreateRecordingJob / DeleteRecordingJob / SetRecordingJobMode | Recording | `DvrRecordingService` + `IDvrClient::setManualRecord` | DVR `POST /dvr/v1.0/SetOnOffVideoRecorder` (ghi tay) | REAL_DTT | r33: RECORDING-2-1-28/29/30, 3-1-11 (bỏ qua: không có recording tạo được 2 job) PASS. Bật ghi phải đọc lại trạng thái để xác nhận (DVR trả thành công cả khi từ chối âm thầm). Ghi tay dùng chung với nút Record trên web |
+| GetRecordingJobs / GetRecordingJobConfiguration / SetRecordingJobConfiguration / GetRecordingJobState | Recording | `DvrRecordingService` + `RecordingJobStore` | DVR (state) + file onvif-module (job) | REAL_DTT | r33: RECORDING-4-1-4/4-1-5/4-1-7/4-1-13/4-1-14, 5-1-18/19/20 PASS. Job quan sát được `auto_<rec>_<luồng>` (luồng ghi từ web chưa có job) chưa được DTT kiểm (danh sách rỗng lúc chạy); đã kiểm bằng thử tay. `Tracks`: cấu hình phẳng, trạng thái/event bọc `Track` |
+| Event tns1:RecordingConfig/JobState (+ RecordingConfiguration, TrackConfiguration, RecordingJobConfiguration) | Event | `MockSubscriptionManager` + provider job thật | Nội bộ onvif-module | REAL_DTT | r33: RECORDING-5-1-3/4/18/19/20 PASS (Initialized và Changed). Chỉ bắn khi chính ONVIF đổi trạng thái, chưa bắn khi bật/tắt ghi từ web |
 | FindRecordings | Search | `ISearchBackend` | DVR index | REAL_IN_PROGRESS | Chưa ghi |
 | FindEvents | Search | `ISearchBackend` | DVR/Core metadata | REAL_IN_PROGRESS | Chưa ghi |
 | GetReplayUri | Replay | `IReplayBackend` | DVR playback | REAL_IN_PROGRESS | Chưa ghi |
@@ -87,7 +90,7 @@ UNSUPPORTED       Sản phẩm quyết định không hỗ trợ và không adve
 | PTZ capability/coordinate mapping | ONVIF + HAL | OPEN |
 | Detection metadata schema | ONVIF + VPU | OPEN |
 | Alarm/Event schema và topic registry | ONVIF + Core | OPEN |
-| Recording/Search/Replay API | ONVIF + DVR + Core | OPEN |
+| Recording/Search/Replay API | ONVIF + DVR + Core | IN_PROGRESS: phần Recording Control chạy trên REST hiện có của DVR (không cần thay đổi DVR); phương án C (DVR giữ job) là đề xuất chưa quyết, xem 01-IMPLEMENTATION_PLAN.md Phase 7; Search/Replay chưa chốt (cần DVR sửa giờ file hoặc onvif-module tự tính từ `mtime − duration`; Replay cần server RTSP mới) |
 | ONVIF/RTSP shared identity | ONVIF + MGMT + Security + DVR | OPEN |
 
 ## 5. Evidence template

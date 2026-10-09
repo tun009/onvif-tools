@@ -15,7 +15,9 @@ public:
                 std::shared_ptr<IMgmtClient> authClient = nullptr,
                 // Service Recording Control thật (capability recording=real). nullptr =
                 // dùng RecordingService mock cũ (dữ liệu tĩnh Recording_0/Job_0).
-                std::unique_ptr<IOnvifService> recordingService = nullptr);
+                std::unique_ptr<IOnvifService> recordingService = nullptr,
+                // Service Recording Search thật (capability search=real). nullptr = SearchService mock.
+                std::unique_ptr<IOnvifService> searchService = nullptr);
     ~OnvifServer();
 
     bool start();

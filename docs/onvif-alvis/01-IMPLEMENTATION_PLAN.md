@@ -1,7 +1,7 @@
 # Kế hoạch tích hợp ONVIF Server với Camera-alvis
 
 > Trạng thái: Accepted / Living document  
-> Cập nhật gần nhất: 2026-10-07 (Phase 7 — kế hoạch Profile G; Phase 6 vẫn tạm hoãn)  
+> Cập nhật gần nhất: 2026-10-09 (Phase 7: Recording Control đạt DTT 22/22; đang làm Search; Phase 6 vẫn tạm hoãn)  
 > Backend MGMT được đối chiếu: `D:\Elcom\NewVersion\frontend\MGMT\src\backend`
 
 ## 1. Mục tiêu
@@ -2053,7 +2053,7 @@ giờ lấy từ `Range`. Không đọc dữ liệu đã lưu, nên chỉ chứn
 | Phát lại | **Không có.** RTSP chỉ có `/live/ch<N>`. Web UI nhiều khả năng tải file qua HTTP tĩnh `[chưa verify]` |
 | Retention | `StorageManager` xóa file cũ nhất khi đĩa đầy, không phát event |
 
-### Quyết định kiến trúc (đề xuất — cần user chốt trước khi code)
+### Quyết định kiến trúc (D1–D3 đã chốt 2026-10-07; D4–D6 chờ chốt)
 
 | # | Vấn đề | Đề xuất | Lý do / phương án khác |
 |---|---|---|---|
@@ -2229,6 +2229,57 @@ Tức vấn đề này không chỉ "phục vụ Replay": Search sai giờ thì 
 
 - Cập nhật `02-INTEGRATION_MATRIX.md` (các hàng Recording/Search/Replay) khi từng capability đạt gate; không đánh `REAL_VERIFIED` nếu mới compile/smoke test.
 
+### Kết quả triển khai Recording Control (2026-10-08, DTT r33: 22/22 đạt)
+
+**Trạng thái:** `recording = real` đã chạy trên `.194`, nhóm DTT Recording Control đạt toàn bộ 22 case (r33, 2026-10-08), thử tay trên Happytime ONVIF Client đạt (Add/Start/Stop/Modify/Delete job, đổi nguồn main ↔ sub, lưu bền qua restart). Search và Replay vẫn là mock.
+
+**Quyết định đã chốt (2026-10-07):** D1 (1 Recording / sensor), D2 điều chỉnh (2 track video `VIDEO_main`/`VIDEO_sub`, ghi 1 luồng một lúc), D3 điều chỉnh (xem "Thiết kế như đã xây"). D4–D6 (Replay) chưa chốt.
+
+**Thiết kế như đã xây:**
+
+| Hạng mục | Cách làm |
+|---|---|
+| Token | Recording `rec_<VideoSourceId>` (`rec_0` context, `rec_1` alpr; nguồn ảo "Overlay" của DVR bị loại vì không có Media profile ONVIF); track `VIDEO_main`/`VIDEO_sub`; job `job_N` (không dùng lại) |
+| Nguồn của job | Token Media profile (`0`, `0_sub`, `1`, `1_sub`); mỗi Recording tối đa 1 job; không hỗ trợ Receiver |
+| Mode / State | `Mode` mong muốn lưu cùng job; `State` luôn đọc từ DVR (`GetListVideoSourceRecorder`): Active chỉ khi job `Active` **và** luồng nguồn đang ghi thật |
+| Điều khiển ghi | Mode Active/Idle gọi `SetOnOffVideoRecorder` (ghi **tay**; dùng chung với nút Record trên web; ghi theo lịch không bị ảnh hưởng). DVR trả thành công cả khi từ chối âm thầm, nên sau khi bật phải đọc lại để xác nhận |
+| Job "quan sát được" | Luồng đang ghi mà recording chưa có job đã lưu (bật từ web/lịch) hiện trong `GetRecordingJobs` dưới token `auto_<recording>_<luồng>` (Active). Không chiếm slot job. Đặt Mode/đổi cấu hình sẽ "nhận" nó thành job thật, giữ nguyên token; xóa thì tắt ghi tay |
+| `Tracks` | Cấu hình job: `<Tracks>` lặp phẳng (`SourceTag`, `Destination`); trạng thái job và event `JobState`: `<Tracks><Track>…</Track></Tracks>` (hai dạng khác nhau theo schema; lỗi này từng làm hỏng 5 case ở r32) |
+| Lưu bền | `/media/database/onvif_recording.dat` (ổ dữ liệu, có `fsync` file và thư mục); lưu job, cấu hình Recording, mô tả Track, bộ đếm token. Nếu không có `/media/database` thì dùng `recording_store.dat` ở thư mục chạy |
+| Capability | `GetServices` và `GetServiceCapabilities` dùng chung một hàm (`DvrRecordingService::capabilitiesXml`); số Recording/Job lấy từ lần đọc DVR gần nhất, không gọi DVR từ `GetServices` |
+| Event | `JobState`: `Initialized` (mỗi job, kể cả job quan sát được) và `Changed` khi chính ONVIF đổi; `RecordingConfiguration`/`TrackConfiguration`/`RecordingJobConfiguration` qua `MockSubscriptionManager` (đã thêm provider job thật, giữ nguyên hành vi mock khi chưa có provider) |
+| Lỗi | `Priority` phải không âm; vượt số job tối đa → `Receiver/ter:Action` (chưa có mã con `ter:MaxRecordingJobs`); DVR hỏng → `Receiver/ter:Action` "Recording backend unavailable" |
+
+**File (5 mới, ~10 sửa), không đụng interface chung với mock:** mới `DvrRecordingService.h/.cpp`, `DvrRecordingJobs.cpp`, `RecordingJobStore.h/.cpp`; sửa `IDvrClient.h`, `HttpDvrClient.h/.cpp` (thêm `getRecorderSources`, `setManualRecord`), `MockSubscriptionManager.h/.cpp`, `OnvifServer.h/.cpp`, `main.cpp`, `DeviceService.cpp`, `config/onvif.conf` (`recording = real`). Service mock cũ (`RecordingService`) giữ nguyên, dùng khi `recording = mock` hoặc khi `media` không phải `real` (token nguồn là token Media profile của DVR).
+
+**Lịch sử kiểm thử DTT trên `.194`:**
+
+| Báo cáo | Kết quả | Ghi chú |
+|---|---|---|
+| r29 | Recording Control 17/18 | Fail `RECORDING-4-1-12` (cần `DynamicRecordings`, ta khai báo `false` có chủ đích; case không nằm trong baseline `g13.xml`, chỉ lộ ra khi tích cả nhóm). `DEVICE-1-1-31` fail do MGMT không đọc được DB (hết chỗ ổ `/`, không liên quan Recording) |
+| r30 | Recording Control 17/17 | Event Handling chạy cả nhóm: 6 fail ngoài baseline và không liên quan (`EVENT-2-1-19`, `2-1-23` Basic Notification negative; `3-1-20` do ép subscription sống tối thiểu 600 s; `6-1-3/4/5` Seek cần `PersistentNotificationStorage=false`) |
+| r31 | Recording Control 22/22 | Nhóm Events (5-1-3/4/18/19/20) đạt lần đầu với DVR thật |
+| r32 | 17/22 | Thêm `Tracks` làm hỏng 2-1-28/29/30, 5-1-18/19: sai cấu trúc `Tracks` trong trạng thái/event (thiếu lớp `Track`) |
+| r33 | **22/22** | Đã sửa cấu trúc `Tracks` |
+
+Lưu ý: `RECORDING-4-1-4/4-1-5/4-1-7` ở r33 vẫn chạy với danh sách job rỗng (alpr không ghi lúc chạy), nên **đường job quan sát được chưa được DTT kiểm** (chỉ kiểm bằng thử tay Happytime và bộ kiểm tra riêng). Muốn kiểm: bật ghi alpr trên web rồi chạy riêng 4-1-4/5/7.
+
+**Giới hạn đã biết (Recording Control):**
+
+- `MaximumRetentionTime` **chỉ lưu, không thực thi**: DVR chỉ xóa file cũ nhất khi đầy đĩa (thời gian lưu thực tế ~3–3,5 ngày trên `.194`, đổi theo bitrate). Vi phạm spec nếu client đặt giá trị ngắn hơn thời gian lưu thực tế (ví dụ `P1D`). Đã chốt tạm phương án B (nhận và lưu, ghi giới hạn); phương án C (DVR thêm xóa theo tuổi file) chờ nhu cầu khách hàng.
+- **Hai nguồn sự thật:** DVR giữ cờ ghi tay, onvif-module giữ job; job `Active` có thể lệch với thực tế nếu người dùng tắt ghi trên web (State về `Idle`, Mode vẫn `Active`).
+- **Chưa có event `JobState` khi ghi bật/tắt từ web** (cần poll hoặc WebSocket `:8210`, vốn đòi token và client WebSocket tự viết).
+- Job quan sát được của ghi **theo lịch** không dừng được bằng ONVIF (DVR chỉ có cờ ghi tay để tắt). Lịch ghi của `.194` đang tắt.
+- Mỗi lệnh Recording gọi DVR hai lần (`GetProfiles` + `GetListVideoSourceRecorder`), và DVR ghi một dòng log cho mỗi `GetProfiles`, góp vào tăng syslog. Có thể giảm bằng cách nhớ `GetProfiles` vài giây.
+- `Encoding` chỉ khai báo `H264`; `MaxRate`/`MaxTotalRate` là giá trị khai báo chưa đối chiếu giới hạn thật; `SourceTag` của Tracks chọn là `video` (spec không quy định cho nguồn Media profile).
+- Không hỗ trợ audio, metadata, dynamic recording/track, Receiver.
+
+**Phương án C (đề xuất cho team DVR, chưa quyết):** DVR giữ luôn đối tượng job thay vì onvif-module. Công việc: (1) bảng `recording_job` trong `dvr.db` (token không dùng lại, `VideoSourceId`, `StreamType`, `Mode`, `Priority`) theo mẫu `record_settings`/`saveManualRecord` (`database_manager.cpp`); (2) logic tạo/xóa/đặt Mode, 1 job/sensor, trả **lỗi** khi không ghi được thay vì thành công âm thầm; (3) khôi phục job `Active` khi khởi động thay cho `resume_manual`; (4) khoảng 5 endpoint REST (`routes_record_playback.cpp`) + cập nhật `testAPI.md`; (5) đưa job và cờ `Writing` vào bản tin WebSocket; (6) `ResetDvrConfiguration` xóa job; (7) kiểm thử khởi động lại/mất điện/ổ đầy. Quyết định quan trọng nhất: nút Record trên web có tạo job tự động không. Ước lượng thô: vừa phải, vài ngày cho người quen code DVR. Job quan sát được tương thích với C sau này.
+
+**Sự cố vận hành trên `.194` (2026-10-08), ghi lại vì liên quan tài nguyên:** ổ `/` (eMMC 14 GB) đầy 100% lúc 12:30–12:37 làm PostgreSQL PANIC (`No space left on device`) → cluster `12-main` down → `nse.service` crash-loop (không kết nối được 5432) → Apache trả 503 cho `/nse/v1.0/CheckAuthentication` → web không đăng nhập được; RAM không phải nguyên nhân (còn ~3,5 GB). Khắc phục: dọn log (`syslog.1` 395 MB, `/tmp/onvif-server-8001.log` 90 MB) và khởi động lại PostgreSQL. Nguồn tăng log: `mgmt` ghi `MGMT-ONVIF-AUTH-OK`/`DIGEST-OK` cho mỗi request ONVIF và lỗi `[HAL-03] radar and laser are both declared` mỗi 10 s; `dvr` ghi `GetProfiles requested`; `onvif-server` in `[DEBUG SEND]` toàn bộ XML. Nên chuyển log lớn sang `/media` và giới hạn `syslog`. Bitrate luồng sub của context cũng rất lớn (~130 MB/30 s), báo team DVR.
+
+**Vận hành `onvif-server` trên `.194`:** chạy tay (không systemd) bằng `root` từ thư mục repo: `pkill -f onvif-server`, kiểm tra không còn tiến trình, rồi `setsid nohup ./onvif-server config/onvif.conf < /dev/null > /tmp/onvif-server-8001.log 2>&1 &`. `onvif_server.service` trên máy là bản ONVIF cũ (trạng thái failed), không dùng.
+
 ### Rủi ro và giới hạn đã biết
 
 - **File đang ghi chưa đọc được** (`+faststart`): vùng thời gian mới nhất (tối đa một đoạn `FileDuration`) không replay được; `LatestRecording` luôn trễ. Giải pháp triệt để (MP4 phân mảnh) cần sửa DVR — ngoài phạm vi đợt 1, cần chủ sở hữu DVR đồng ý.
@@ -2251,7 +2302,7 @@ Audio và metadata recording, nhiều track (main + sub), dynamic recording/trac
 ### Gate
 
 - [ ] 7.0 hoàn tất (V1–V7 đã đo trên `.194` 2026-10-07; còn V8 và xác nhận lại trên `.102`); D1–D6 đã được user chốt; đo thêm độ lệch `mtime − duration` so với giờ thật trên nhiều file (kể cả alpr) để quyết định có cần sửa DVR không.
-- [ ] `recording = real`: GetRecordings/Jobs/State/Mode khớp trạng thái ghi thật của DVR; Mode bền qua restart onvif-module và DVR.
+- [x] `recording = real`: GetRecordings/Jobs/State/Mode khớp trạng thái ghi thật của DVR; job bền qua restart onvif-module (kiểm bằng thử tay, 2026-10-08); DTT Recording Control 22/22 (r33). Còn lại: kiểm DTT đường job quan sát được và kiểm bền qua restart DVR.
 - [ ] `search = real`: token lifecycle đúng (KeepAlive, hết hạn, `EndSearch`); `FindRecordings`/`FindEvents` khớp danh sách file thật.
 - [ ] `replay = real`: VMS phát lại **đúng khoảng UTC** từ archive thật, qua ranh giới file và khoảng trống; Wireshark xác nhận `0xABAC`, cờ D, `Immediate`, `Rate-Control: no`.
 - [ ] Recording/Search/Replay token nhất quán (`rec_<id>` dùng xuyên suốt).

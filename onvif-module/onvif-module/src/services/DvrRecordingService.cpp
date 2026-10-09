@@ -271,6 +271,11 @@ bool DvrRecordingService::loadSources(std::vector<Source>& sources, std::string&
                 if (profile == profiles.end()) continue;
                 source.streams.push_back(
                     {profile->token, state.streamType, "VIDEO_" + state.streamType, state.isRecording});
+                Stream& added = source.streams.back();
+                added.width = profile->videoConfig.resolution.width;
+                added.height = profile->videoConfig.resolution.height;
+                added.framerate = profile->videoConfig.framerate;
+                added.bitrate = profile->videoConfig.bitrate;
             }
             if (!source.streams.empty()) sources.push_back(std::move(source));
         }
@@ -315,17 +320,55 @@ RecordingConfigRecord DvrRecordingService::effectiveConfig(const Source& source)
     return config;
 }
 
-std::string DvrRecordingService::configXml(const Source& source) const {
-    const RecordingConfigRecord c = effectiveConfig(source);
+std::string DvrRecordingService::sourceXml(const RecordingConfigRecord& c) {
     return "<tt:Source>"
              "<tt:SourceId>" + esc(c.sourceId) + "</tt:SourceId>"
              "<tt:Name>" + esc(c.name) + "</tt:Name>"
              "<tt:Location>" + esc(c.location) + "</tt:Location>"
              "<tt:Description>" + esc(c.description) + "</tt:Description>"
              "<tt:Address>" + esc(c.address) + "</tt:Address>"
-           "</tt:Source>"
-           "<tt:Content>" + esc(c.content) + "</tt:Content>"
+           "</tt:Source>";
+}
+
+std::string DvrRecordingService::contentXml(const RecordingConfigRecord& c) {
+    return "<tt:Content>" + esc(c.content) + "</tt:Content>";
+}
+
+std::string DvrRecordingService::configXml(const Source& source) const {
+    const RecordingConfigRecord c = effectiveConfig(source);
+    return sourceXml(c) + contentXml(c) +
            "<tt:MaximumRetentionTime>" + esc(c.maxRetention) + "</tt:MaximumRetentionTime>";
+}
+
+bool DvrRecordingService::catalog(std::vector<CatalogRecording>& out) const {
+    std::vector<Source> sources;
+    std::string ignored;
+    if (!loadSources(sources, ignored)) return false;
+    out.clear();
+    for (const auto& source : sources) {
+        const RecordingConfigRecord config = effectiveConfig(source);
+        CatalogRecording rec;
+        rec.token = source.recordingToken;
+        rec.videoSourceId = source.videoSourceId;
+        rec.sourceId = config.sourceId;
+        rec.sourceXml = sourceXml(config);
+        rec.contentXml = contentXml(config);
+        for (const auto& stream : source.streams) {
+            CatalogTrack track;
+            track.token = stream.trackToken;
+            track.streamType = stream.streamType;
+            if (!store_->getTrackDescription(source.recordingToken, stream.trackToken, track.description))
+                track.description = "Video " + stream.streamType + " stream";
+            track.width = stream.width;
+            track.height = stream.height;
+            track.framerate = stream.framerate;
+            track.bitrate = stream.bitrate;
+            track.isRecording = stream.isRecording;
+            rec.tracks.push_back(std::move(track));
+        }
+        out.push_back(std::move(rec));
+    }
+    return true;
 }
 
 std::string DvrRecordingService::tracksXml(const Source& source) const {

@@ -42,12 +42,40 @@ public:
     // gọi DVR, chỉ dùng số sensor lần đọc gần nhất.
     static std::string capabilitiesXml();
 
+    // Dành cho Search: các Recording hiện có, mô tả đúng bằng thứ GetRecordings trả (tt:Source,
+    // tt:Content lấy từ cùng cấu hình) để RecordingInformation khớp GetRecordings. Kích thước,
+    // fps, bitrate là cấu hình HIỆN TẠI của luồng (DVR không lưu lịch sử cấu hình theo từng file).
+    // Trả false khi DVR không đọc được.
+    struct CatalogTrack {
+        std::string token, streamType, description;
+        int width = 0, height = 0, framerate = 0, bitrate = 0;
+        bool isRecording = false;
+    };
+    struct CatalogRecording {
+        std::string token, videoSourceId, sourceId;   // sourceId = tt:SourceId (client đặt được)
+        std::string sourceXml, contentXml;            // <tt:Source>…</tt:Source>, <tt:Content>…</tt:Content>
+        std::vector<CatalogTrack> tracks;
+    };
+    bool catalog(std::vector<CatalogRecording>& out) const;
+
+    // ── Cắt chuỗi / envelope SOAP, dùng chung với DvrSearchService ──
+    static std::string opName(const std::string& request);                 // phần tử đầu trong <Body>
+    static std::string textOf(const std::string& xml, const std::string& name);   // văn bản thuần
+    static std::string blockOf(const std::string& xml, const std::string& name);   // cả phần tử
+    static std::string attrOf(const std::string& element, const std::string& name);
+    static std::string reply(const std::string& rel, const char* op, const std::string& body);
+    // Giá trị client gửi được giải mã khi nhận và thoát lại khi phát ra: response luôn hợp lệ
+    // XML dù client gửi '&' trần, và dữ liệu lưu là văn bản thuần.
+    static std::string esc(const std::string& text);
+    static std::string unesc(const std::string& text);
+
 private:
     struct Stream {
         std::string profileToken;   // token Media profile ("0", "0_sub")
         std::string streamType;     // "main" | "sub"
         std::string trackToken;     // "VIDEO_main" | "VIDEO_sub"
         bool isRecording = false;
+        int width = 0, height = 0, framerate = 0, bitrate = 0;   // cấu hình encoder hiện tại
     };
     struct Source {
         std::string recordingToken, videoSourceId, name;
@@ -93,6 +121,8 @@ private:
     // ── Dựng XML ──────────────────────────────────────────────────
     RecordingConfigRecord effectiveConfig(const Source& source) const;
     std::string configXml(const Source& source) const;
+    static std::string sourceXml(const RecordingConfigRecord& config);
+    static std::string contentXml(const RecordingConfigRecord& config);
     std::string tracksXml(const Source& source) const;
     // `sources` (nếu có) dùng để điền Tracks: luồng nguồn → track đích của recording.
     std::string jobConfigXml(const RecordingJobRecord& job, const std::vector<Source>* sources) const;
@@ -102,17 +132,6 @@ private:
     static RecordingJobEvent jobEvent(const RecordingJobRecord& job, const std::string& state,
                                       const std::string& trackToken);
     std::vector<RecordingJobEvent> initialJobEvents() const;
-
-    // ── Cắt chuỗi / envelope SOAP (không parse XML đầy đủ, giống các service string-based) ──
-    static std::string opName(const std::string& request);                 // phần tử đầu trong <Body>
-    static std::string textOf(const std::string& xml, const std::string& name);   // văn bản thuần
-    static std::string blockOf(const std::string& xml, const std::string& name);   // cả phần tử
-    static std::string attrOf(const std::string& element, const std::string& name);
-    static std::string reply(const std::string& rel, const char* op, const std::string& body);
-    // Giá trị client gửi được giải mã khi nhận và thoát lại khi phát ra: response luôn hợp lệ
-    // XML dù client gửi '&' trần, và dữ liệu lưu là văn bản thuần.
-    static std::string esc(const std::string& text);
-    static std::string unesc(const std::string& text);
 
     static std::string faultNoRecording();
     static std::string faultNoTrack();

@@ -248,7 +248,8 @@ OnvifServer::OnvifServer(const ServiceConfig& cfg,
                          std::shared_ptr<ICameraBackend> backend,
                          bool discoveryEnabled,
                          std::shared_ptr<IMgmtClient> authClient,
-                         std::unique_ptr<IOnvifService> recordingService)
+                         std::unique_ptr<IOnvifService> recordingService,
+                         std::unique_ptr<IOnvifService> searchService)
     : cfg_(cfg),
       backend_(std::move(backend)),
       discoveryEnabled_(discoveryEnabled),
@@ -267,7 +268,8 @@ OnvifServer::OnvifServer(const ServiceConfig& cfg,
     // nhận diện Profile G và mở test case con.
     if (recordingService) registry_.registerService(std::move(recordingService));
     else registry_.registerService(std::make_unique<RecordingService>());
-    registry_.registerService(std::make_unique<SearchService>());
+    if (searchService) registry_.registerService(std::move(searchService));
+    else registry_.registerService(std::make_unique<SearchService>());
     registry_.registerService(std::make_unique<ReplayService>());
 }
 
