@@ -1,9 +1,9 @@
 #pragma once
-// SearchSupport — hàm thuần dùng riêng cho DvrSearchService: thời gian xs:dateTime / xs:duration,
+// SearchSupport — hàm thuần dùng riêng cho SearchService: thời gian xs:dateTime / xs:duration,
 // cắt phần tử XML lặp lại, bộ lọc topic và bộ lọc RecordingInformation (XPath dialect của Search).
-// Header-only để DvrSearchService.cpp gọn dưới 600 dòng; không phải API dùng chung.
+// Header-only để SearchService.cpp gọn dưới 600 dòng; không phải API dùng chung.
 
-#include "services/DvrRecordingService.h"
+#include "services/RecordingService.h"
 #include "services/RecordingIndex.h"
 
 #include <algorithm>
@@ -21,7 +21,7 @@
 
 namespace searchsupport {
 
-using Svc = DvrRecordingService;
+using Svc = RecordingService;
 
 inline int64_t epochNowMs() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(

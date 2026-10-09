@@ -3,8 +3,8 @@
 #include "backend/HttpMgmtClient.h"
 #include "backend/HttpDvrClient.h"
 #include "config/RuntimeConfig.h"
-#include "services/DvrRecordingService.h"
-#include "services/DvrSearchService.h"
+#include "services/RecordingService.h"
+#include "services/SearchService.h"
 #include "services/RecordingIndex.h"
 #include "services/RecordingJobStore.h"
 #include "OnvifServer.h"
@@ -161,12 +161,12 @@ int main(int argc, char* argv[]) {
     std::shared_ptr<IMgmtClient> authClient =
         cfg.backendMode == BackendMode::Mock ? nullptr : mgmtClient;
     // Recording Control (Profile G) thật chỉ khi hybrid/production và media cũng thật: token nguồn
-    // của Recording Job là token Media profile của DVR. Không đạt → dùng service mock.
+    // của Recording Job là token Media profile của DVR. Không đạt → không đăng ký service.
     std::unique_ptr<IOnvifService> recordingService;
     std::unique_ptr<IOnvifService> searchService;
     if (cfg.capability("recording") == CapabilityMode::Real) {
         if (cfg.backendMode == BackendMode::Mock || cfg.capability("media") != CapabilityMode::Real) {
-            fprintf(stderr, "[main] recording=real needs backend.mode!=mock and media=real; using mock Recording service\n");
+            fprintf(stderr, "[main] recording=real needs backend.mode!=mock and media=real; Recording service disabled\n");
         } else {
             // Kho job/cấu hình (spec: phải sống qua mất điện) nằm trên ổ dữ liệu /media: ổ hệ thống
             // `/` nhỏ, hay đầy, và triển khai lại có thể xóa thư mục repo. Máy không có /media/database
@@ -174,19 +174,19 @@ int main(int argc, char* argv[]) {
             const std::string storeDir = "/media/database";
             const std::string storePath = access(storeDir.c_str(), W_OK) == 0
                 ? storeDir + "/onvif_recording.dat" : "recording_store.dat";
-            auto recording = std::make_unique<DvrRecordingService>(
+            auto recording = std::make_unique<RecordingService>(
                 dvrClient, std::make_shared<RecordingJobStore>(storePath),
                 "http://" + cfg.deviceIp + ":" + std::to_string(cfg.httpPort) + "/onvif/recording");
             // Search thật dùng cùng danh sách Recording/Track với Recording Control và đọc thư mục
             // file ghi của DVR (RecordingIndex), nên chỉ bật khi recording cũng thật.
             if (cfg.capability("search") == CapabilityMode::Real)
-                searchService = std::make_unique<DvrSearchService>(
+                searchService = std::make_unique<SearchService>(
                     *recording, std::make_shared<RecordingIndex>("/media/records"));
             recordingService = std::move(recording);
         }
     }
     if (cfg.capability("search") == CapabilityMode::Real && !searchService)
-        fprintf(stderr, "[main] search=real needs recording=real; using mock Search service\n");
+        fprintf(stderr, "[main] search=real needs recording=real; Search service disabled\n");
 
     OnvifServer server(svcCfg, backend, cfg.discoveryEnabled, authClient, std::move(recordingService), std::move(searchService));
     

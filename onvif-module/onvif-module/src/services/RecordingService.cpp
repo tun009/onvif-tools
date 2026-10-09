@@ -1,435 +1,519 @@
-// RecordingService.cpp — ONVIF Recording Control ver10 (Profile G) — string-based.
-// STUB-FEATURES: trả response schema-hợp-lệ cho mọi op §9.1 mandatory (non-dynamic,
-// 1 recording tĩnh Recording_0 = VIDEO_0 + META_0, 1 job Job_0). Đủ để DTT Feature
-// Definition đánh dấu Profile G SUPPORTED. Data model tĩnh → không cần backend/IPC.
-
+// RecordingService.cpp — Recording Control trên DVR thật: dispatch, truy cập DVR, helper XML,
+// Recording / Track / Options. Phần Recording Job nằm ở RecordingJobs.cpp.
 #include "services/RecordingService.h"
-#include "services/MockSubscriptionManager.h"
+
 #include "utils/FaultBuilder.h"
-#include <mutex>
+
+#include <algorithm>
+#include <atomic>
+#include <cstdio>
+#include <exception>
 #include <sstream>
+#include <utility>
 
 namespace {
-const char* NS_RECORDING = "http://www.onvif.org/ver10/recording/wsdl";
-const char* ACT = "http://www.onvif.org/ver10/recording/wsdl/RecordingPort/";
 
-// ── Data model tĩnh (khớp scope đã chốt) ──────────────────────────────────────
-const char* REC = "Recording_0";
-const char* JOB = "Job_0";
-const char* SRC_PROFILE = "profile_main";   // on-board media source (Media profile)
+// Chuỗi client đặt tối đa bấy nhiêu ký tự: chặn dữ liệu rác phình file lưu. Từ chối thay vì
+// cắt để Get luôn trả đúng thứ đã Set.
+constexpr std::size_t kMaxTextLength = 4096;
 
-// RecordingConfiguration — dùng chung GetRecordings & GetRecordingConfiguration.
-std::string defaultRecordingConfig() {
-    return
-        "<tt:Source>"
-          "<tt:SourceId>http://localhost/sourceId</tt:SourceId>"
-          "<tt:Name>MockCam-4K</tt:Name>"
-          "<tt:Location>MockSite</tt:Location>"
-          "<tt:Description>On-board recording</tt:Description>"
-          "<tt:Address>http://localhost/recording</tt:Address>"
-        "</tt:Source>"
-        "<tt:Content>Mock on-board recording</tt:Content>"
-        "<tt:MaximumRetentionTime>P30D</tt:MaximumRetentionTime>";
+std::atomic<bool> g_realRunning{false};        // đã có RecordingService đang chạy
+std::atomic<std::size_t> g_knownSources{1};    // số sensor lần đọc DVR thành công gần nhất
+
+std::string trim(const std::string& value) {
+    const auto first = value.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) return "";
+    return value.substr(first, value.find_last_not_of(" \t\r\n") - first + 1);
 }
 
-std::mutex g_configMtx;
-std::string g_recordingConfig = defaultRecordingConfig();
-std::string g_videoTrackConfig =
-    "<tt:TrackType>Video</tt:TrackType>"
-    "<tt:Description>Video track</tt:Description>";
-std::string g_metadataTrackConfig =
-    "<tt:TrackType>Metadata</tt:TrackType>"
-    "<tt:Description>Metadata track</tt:Description>";
-
-std::string getRecordingConfig() {
-    std::lock_guard<std::mutex> lock(g_configMtx);
-    return g_recordingConfig;
-}
-
-void setRecordingConfig(const std::string& config) {
-    std::lock_guard<std::mutex> lock(g_configMtx);
-    g_recordingConfig = config;
-}
-
-std::string getTrackConfig(const std::string& token) {
-    std::lock_guard<std::mutex> lock(g_configMtx);
-    return token == "META_0" ? g_metadataTrackConfig : g_videoTrackConfig;
-}
-
-void setTrackConfig(const std::string& token, const std::string& config) {
-    std::lock_guard<std::mutex> lock(g_configMtx);
-    (token == "META_0" ? g_metadataTrackConfig : g_videoTrackConfig) = config;
-}
-
-std::string extractElementContent(const std::string& xml, const std::string& tag) {
-    auto p = xml.find("<" + tag);
-    if (p == std::string::npos) return "";
-    auto gt = xml.find('>', p);
-    if (gt == std::string::npos) return "";
-    auto end = xml.find("</" + tag + ">", gt);
-    if (end == std::string::npos) return "";
-    return xml.substr(gt + 1, end - gt - 1);
-}
-
-// 2 track: VIDEO_0 + META_0 (không audio).
-std::string tracks() {
-    return
-        "<tt:Track>"
-          "<tt:TrackToken>VIDEO_0</tt:TrackToken>"
-          "<tt:Configuration>"
-            "<tt:TrackType>Video</tt:TrackType>"
-            "<tt:Description>Video track</tt:Description>"
-          "</tt:Configuration>"
-        "</tt:Track>"
-        "<tt:Track>"
-          "<tt:TrackToken>META_0</tt:TrackToken>"
-          "<tt:Configuration>"
-            "<tt:TrackType>Metadata</tt:TrackType>"
-            "<tt:Description>Metadata track</tt:Description>"
-          "</tt:Configuration>"
-        "</tt:Track>";
-}
-
-struct JobState {
-    bool exists = true;
-    std::string mode = "Idle";
-    std::string priority = "10";
-    std::string sourceToken = SRC_PROFILE;
-    std::string sourceType = "http://www.onvif.org/ver10/schema/Profile";
-};
-std::mutex g_jobMtx;
-JobState g_job;
-
-std::string extractElementBlock(const std::string& xml, const std::string& element) {
-    for (const auto& prefix : {std::string("tt:"), std::string()}) {
-        const auto name = prefix + element;
-        auto p = xml.find("<" + name);
-        if (p == std::string::npos) continue;
-        auto end = xml.find("</" + name + ">", p);
-        if (end == std::string::npos) continue;
-        return xml.substr(p, end + name.size() + 3 - p);
+// Tên local của thẻ bắt đầu tại `open`; rỗng nếu là thẻ đóng/chú thích/khai báo.
+std::string openTagName(const std::string& xml, std::size_t open, std::size_t& nameEnd) {
+    const std::size_t start = open + 1;
+    if (start >= xml.size() || xml[start] == '/' || xml[start] == '!' || xml[start] == '?') {
+        nameEnd = start;
+        return "";
     }
-    return "";
+    nameEnd = xml.find_first_of(" >/\t\r\n", start);
+    if (nameEnd == std::string::npos) { nameEnd = xml.size(); return ""; }
+    const auto colon = xml.rfind(':', nameEnd);
+    const std::size_t local = (colon != std::string::npos && colon >= start) ? colon + 1 : start;
+    return xml.substr(local, nameEnd - local);
 }
 
-std::string extractAttribute(const std::string& xml, const std::string& element,
-                             const std::string& attr) {
-    auto p = xml.find("<" + element);
-    if (p == std::string::npos) return "";
-    auto gt = xml.find('>', p);
-    if (gt == std::string::npos) return "";
-    auto a = xml.find(attr + "=\"", p);
-    if (a == std::string::npos || a > gt) return "";
-    a += attr.size() + 2;
-    auto end = xml.find('"', a);
-    return end == std::string::npos ? "" : xml.substr(a, end - a);
+std::size_t findOpenTag(const std::string& xml, const std::string& name) {
+    std::size_t open = 0;
+    while ((open = xml.find('<', open)) != std::string::npos) {
+        std::size_t nameEnd = 0;
+        if (openTagName(xml, open, nameEnd) == name) return open;
+        open = nameEnd > open ? nameEnd : open + 1;
+    }
+    return std::string::npos;
 }
 
-std::string jobConfig(const JobState& job) {
-    return
-        "<tt:RecordingToken>" + std::string(REC) + "</tt:RecordingToken>"
-        "<tt:Mode>" + job.mode + "</tt:Mode>"
-        "<tt:Priority>" + job.priority + "</tt:Priority>"
-        "<tt:Source>"
-          "<tt:SourceToken Type=\"" + job.sourceType + "\">"
-            "<tt:Token>" + job.sourceToken + "</tt:Token>"
-          "</tt:SourceToken>"
-        "</tt:Source>";
-}
-
-JobState getJob() {
-    std::lock_guard<std::mutex> lock(g_jobMtx);
-    return g_job;
-}
-
-void setJob(const JobState& job) {
-    std::lock_guard<std::mutex> lock(g_jobMtx);
-    g_job = job;
-}
 } // namespace
 
-std::string RecordingService::recordingConfigXml() {
-    return getRecordingConfig();
-}
+// ── Cắt chuỗi / envelope ──────────────────────────────────────────────
 
-std::string RecordingService::extractRelatesTo(const std::string& xml) {
-    for (const char* tag : {"MessageID", "wsa:MessageID", "wsa5:MessageID"}) {
-        auto p = xml.find(tag);
-        if (p == std::string::npos) continue;
-        auto gt = xml.find('>', p);
-        if (gt == std::string::npos) continue;
-        auto lt = xml.find('<', gt);
-        if (lt == std::string::npos) continue;
-        return xml.substr(gt + 1, lt - gt - 1);
+std::string RecordingService::opName(const std::string& request) {
+    const std::size_t body = findOpenTag(request, "Body");
+    if (body == std::string::npos) return "";
+    std::size_t open = request.find('>', body);
+    while (open != std::string::npos && (open = request.find('<', open + 1)) != std::string::npos) {
+        std::size_t nameEnd = 0;
+        const std::string name = openTagName(request, open, nameEnd);
+        if (!name.empty()) return name;
+        if (open + 1 < request.size() && request[open + 1] == '/') return "";   // Body rỗng
     }
     return "";
 }
 
-std::string RecordingService::extractInnerTag(const std::string& xml,
-                                              const std::string& tag) {
-    size_t open = 0;
-    while ((open = xml.find('<', open)) != std::string::npos) {
-        const size_t nameStart = open + 1;
-        if (nameStart >= xml.size() || xml[nameStart] == '/' ||
-            xml[nameStart] == '!' || xml[nameStart] == '?') {
-            ++open;
-            continue;
-        }
-        const auto nameEnd = xml.find_first_of(" >\t\r\n", nameStart);
-        if (nameEnd == std::string::npos) return "";
-        const auto colon = xml.rfind(':', nameEnd);
-        const size_t localStart =
-            (colon != std::string::npos && colon >= nameStart) ? colon + 1 : nameStart;
-        if (xml.compare(localStart, nameEnd - localStart, tag) != 0) {
-            open = nameEnd;
-            continue;
-        }
-        const auto gt = xml.find('>', nameEnd);
-        if (gt == std::string::npos) return "";
-        const auto lt = xml.find('<', gt + 1);
-        if (lt == std::string::npos) return "";
-        return xml.substr(gt + 1, lt - gt - 1);
+std::string RecordingService::textOf(const std::string& xml, const std::string& name) {
+    const std::size_t open = findOpenTag(xml, name);
+    if (open == std::string::npos) return "";
+    const std::size_t gt = xml.find('>', open);
+    if (gt == std::string::npos || xml[gt - 1] == '/') return "";
+    const std::size_t lt = xml.find('<', gt + 1);
+    // Văn bản thuần phải kết thúc bằng thẻ đóng; gặp thẻ mở con → coi như rỗng.
+    if (lt == std::string::npos || lt + 1 >= xml.size() || xml[lt + 1] != '/') return "";
+    return trim(xml.substr(gt + 1, lt - gt - 1));
+}
+
+std::string RecordingService::blockOf(const std::string& xml, const std::string& name) {
+    const std::size_t open = findOpenTag(xml, name);
+    if (open == std::string::npos) return "";
+    const std::size_t gt = xml.find('>', open);
+    if (gt == std::string::npos) return "";
+    if (xml[gt - 1] == '/') return xml.substr(open, gt - open + 1);   // thẻ tự đóng
+    for (std::size_t close = gt; (close = xml.find("</", close + 1)) != std::string::npos;) {
+        const std::size_t end = xml.find('>', close);
+        if (end == std::string::npos) return "";
+        const std::string closing = trim(xml.substr(close + 2, end - close - 2));
+        const auto colon = closing.rfind(':');
+        if ((colon == std::string::npos ? closing : closing.substr(colon + 1)) == name)
+            return xml.substr(open, end - open + 1);
     }
     return "";
 }
 
-std::string RecordingService::wrap(const std::string& action,
-                                   const std::string& relatesTo,
-                                   const std::string& bodyXml) {
+std::string RecordingService::attrOf(const std::string& element, const std::string& name) {
+    const std::string tag = element.substr(0, element.find('>'));
+    for (const char quote : {'"', '\''}) {
+        const std::string key = name + "=" + quote;
+        for (std::size_t at = 0; (at = tag.find(key, at)) != std::string::npos; at += key.size()) {
+            // chỉ nhận khi đứng ngay sau khoảng trắng (tránh trúng đuôi thuộc tính khác)
+            if (at == 0 || std::string(" \t\r\n").find(tag[at - 1]) == std::string::npos) continue;
+            const std::size_t valueStart = at + key.size();
+            const std::size_t valueEnd = tag.find(quote, valueStart);
+            return valueEnd == std::string::npos ? "" : tag.substr(valueStart, valueEnd - valueStart);
+        }
+    }
+    return "";
+}
+
+std::string RecordingService::reply(const std::string& rel, const char* op, const std::string& body) {
     std::ostringstream os;
     os << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-       << "<SOAP-ENV:Envelope"
-       << " xmlns:SOAP-ENV=\"http://www.w3.org/2003/05/soap-envelope\""
-       << " xmlns:wsa=\"http://www.w3.org/2005/08/addressing\""
-       << " xmlns:trc=\"" << NS_RECORDING << "\""
-       << " xmlns:tt=\"http://www.onvif.org/ver10/schema\""
-       << " xmlns:ter=\"http://www.onvif.org/ver10/error\">"
-       << "<SOAP-ENV:Header>"
-       << "<wsa:Action>" << action << "</wsa:Action>";
-    if (!relatesTo.empty())
-        os << "<wsa:RelatesTo>" << relatesTo << "</wsa:RelatesTo>";
-    os << "</SOAP-ENV:Header>"
-       << "<SOAP-ENV:Body>" << bodyXml << "</SOAP-ENV:Body>"
-       << "</SOAP-ENV:Envelope>";
+          "<SOAP-ENV:Envelope xmlns:SOAP-ENV=\"http://www.w3.org/2003/05/soap-envelope\""
+          " xmlns:wsa=\"http://www.w3.org/2005/08/addressing\""
+          " xmlns:trc=\"http://www.onvif.org/ver10/recording/wsdl\""
+          " xmlns:tt=\"http://www.onvif.org/ver10/schema\""
+          " xmlns:ter=\"http://www.onvif.org/ver10/error\">"
+          "<SOAP-ENV:Header><wsa:Action>http://www.onvif.org/ver10/recording/wsdl/RecordingPort/"
+       << op << "</wsa:Action>";
+    if (!rel.empty()) os << "<wsa:RelatesTo>" << rel << "</wsa:RelatesTo>";
+    os << "</SOAP-ENV:Header><SOAP-ENV:Body>" << body << "</SOAP-ENV:Body></SOAP-ENV:Envelope>";
     return os.str();
 }
 
-// Dispatch theo op-name. THỨ TỰ QUAN TRỌNG: op tên dài chứa op tên ngắn phải
-// check trước (GetRecordingJobConfiguration/JobState trước GetRecordingJobs;
-// mọi *RecordingJob* trước GetRecordings tránh nuốt nhầm là không xảy ra vì
-// "GetRecordings" không phải substring của op khác, nhưng vẫn để nhóm rõ ràng).
-std::string RecordingService::handle(const std::string& req) {
-    std::string rel = extractRelatesTo(req);
-    auto R = [&](const char* op, const std::string& body) {
-        return wrap(std::string(ACT) + op, rel, body);
-    };
-    auto has = [&](const char* s) { return req.find(s) != std::string::npos; };
-    auto fault = [](const char* code, const char* reason) {
-        return FaultBuilder::sender("ter:InvalidArgVal", code, reason);
-    };
-    auto recordingToken = [&]() { return extractInnerTag(req, "RecordingToken"); };
-    auto jobToken = [&]() { return extractInnerTag(req, "JobToken"); };
+std::string RecordingService::esc(const std::string& text) {
+    std::string out;
+    out.reserve(text.size());
+    for (const char raw : text) {
+        switch (raw) {
+            case '&':  out += "&amp;";  break;
+            case '<':  out += "&lt;";   break;
+            case '>':  out += "&gt;";   break;
+            case '"':  out += "&quot;"; break;
+            case '\'': out += "&apos;"; break;
+            default:   // bỏ ký tự điều khiển không hợp lệ trong XML 1.0 (trừ tab, xuống dòng)
+                if (static_cast<unsigned char>(raw) >= 0x20 || raw == '\t' || raw == '\n' || raw == '\r')
+                    out += raw;
+        }
+    }
+    return out;
+}
 
-    if (has("GetServiceCapabilities"))
-        return R("GetServiceCapabilitiesResponse",
-            "<trc:GetServiceCapabilitiesResponse>"
-              "<trc:Capabilities DynamicRecordings=\"false\" DynamicTracks=\"false\" "
+std::string RecordingService::unesc(const std::string& text) {
+    static const struct { const char* entity; char ch; } kEntities[] = {
+        {"&amp;", '&'}, {"&lt;", '<'}, {"&gt;", '>'}, {"&quot;", '"'}, {"&apos;", '\''}};
+    std::string out;
+    for (std::size_t i = 0; i < text.size();) {
+        bool matched = false;
+        if (text[i] == '&') {
+            for (const auto& e : kEntities) {
+                const std::string entity = e.entity;
+                if (text.compare(i, entity.size(), entity) != 0) continue;
+                out += e.ch;
+                i += entity.size();
+                matched = true;
+                break;
+            }
+        }
+        if (!matched) out += text[i++];
+    }
+    return out;
+}
+
+std::string RecordingService::faultNoRecording() {
+    return FaultBuilder::sender("ter:InvalidArgVal", "ter:NoRecording", "No recording with the given token");
+}
+std::string RecordingService::faultNoTrack() {
+    return FaultBuilder::sender("ter:InvalidArgVal", "ter:NoTrack", "No track with the given token");
+}
+std::string RecordingService::faultNoJob() {
+    return FaultBuilder::sender("ter:InvalidArgVal", "ter:NoRecordingJob", "No recording job with the given token");
+}
+std::string RecordingService::faultBadConfig(const char* reason) {
+    return FaultBuilder::sender("ter:InvalidArgVal", "ter:BadConfiguration", reason);
+}
+std::string RecordingService::faultBackend() {
+    return FaultBuilder::receiver("ter:Action", "Recording backend unavailable");
+}
+
+// ── Khởi tạo, capability, dispatch ────────────────────────────────────
+
+const RecordingService::Stream* RecordingService::Source::byProfile(const std::string& token) const {
+    for (const auto& s : streams) if (s.profileToken == token) return &s;
+    return nullptr;
+}
+const RecordingService::Stream* RecordingService::Source::byTrack(const std::string& token) const {
+    for (const auto& s : streams) if (s.trackToken == token) return &s;
+    return nullptr;
+}
+
+RecordingService::RecordingService(std::shared_ptr<IDvrClient> dvr,
+                                         std::shared_ptr<RecordingJobStore> store,
+                                         std::string serviceAddress)
+    : dvr_(std::move(dvr)), store_(std::move(store)), serviceAddress_(std::move(serviceAddress)) {
+    // Gieo số sensor thật cho Capabilities; DVR chưa sẵn sàng thì giữ mặc định, thao tác sau cập nhật.
+    std::vector<Source> sources;
+    std::string ignored;
+    loadSources(sources, ignored);
+
+    g_realRunning = true;
+    MockSubscriptionManager::getInstance().setRecordingJobProvider([this] { return initialJobEvents(); });
+}
+
+RecordingService::~RecordingService() {
+    g_realRunning = false;
+    MockSubscriptionManager::getInstance().setRecordingJobProvider(nullptr);
+}
+
+std::string RecordingService::capabilitiesXml() {
+    if (!g_realRunning)   // giá trị mock cũ (1 recording, 1 job), khớp RecordingService mock
+        return "<trc:Capabilities DynamicRecordings=\"false\" DynamicTracks=\"false\" "
                "DeleteData=\"false\" Encoding=\"H264\" MaxRate=\"20000\" "
-               "MaxTotalRate=\"20000\" MaxRecordings=\"1\" MaxRecordingJobs=\"1\" "
-               "Options=\"true\"/>"
-            "</trc:GetServiceCapabilitiesResponse>");
+               "MaxTotalRate=\"20000\" MaxRecordings=\"1\" MaxRecordingJobs=\"1\" Options=\"true\"/>";
+    // MaxRate/MaxTotalRate (kbps) là giá trị khai báo, chưa đối chiếu giới hạn thật của DVR. Encoding
+    // chỉ H264 (giá trị mock đã qua DTT): DVR cũng ghi được H.265 nhưng chưa rõ chuỗi hợp lệ.
+    const std::size_t n = g_knownSources.load();   // mỗi Recording tối đa 1 job
+    return "<trc:Capabilities DynamicRecordings=\"false\" DynamicTracks=\"false\" "
+           "DeleteData=\"false\" Encoding=\"H264\" MaxRate=\"20000\" MaxTotalRate=\"" +
+           std::to_string(20000 * n) + "\" MaxRecordings=\"" + std::to_string(n) +
+           "\" MaxRecordingJobs=\"" + std::to_string(n) + "\" Options=\"true\"/>";
+}
 
-    if (has("GetRecordingOptions")) {
-        if (recordingToken() != REC)
-            return fault("ter:NoRecording", "No recording with the given token");
-        return R("GetRecordingOptionsResponse",
-            "<trc:GetRecordingOptionsResponse>"
-              "<trc:Options>"
-                "<trc:Job Spare=\"1\" CompatibleSources=\"" +
-                    std::string(SRC_PROFILE) + "\"/>"
-                // DynamicTracks=false: báo không còn slot track động.
-                "<trc:Track SpareTotal=\"0\" SpareVideo=\"0\" "
-                           "SpareAudio=\"0\" SpareMetadata=\"0\"/>"
-              "</trc:Options>"
-            "</trc:GetRecordingOptionsResponse>");
-    }
+std::string RecordingService::handle(const std::string& req) {
+    const std::string op = opName(req);
+    const std::string rel = textOf(req, "MessageID");
 
-    if (has("GetRecordingConfiguration")) {
-        if (recordingToken() != REC)
-            return fault("ter:NoRecording", "No recording with the given token");
-        return R("GetRecordingConfigurationResponse",
-            "<trc:GetRecordingConfigurationResponse>"
-              "<trc:RecordingConfiguration>" + getRecordingConfig() +
-              "</trc:RecordingConfiguration>"
-            "</trc:GetRecordingConfigurationResponse>");
-    }
+    if (op == "GetServiceCapabilities")
+        return reply(rel, "GetServiceCapabilitiesResponse",
+                     "<trc:GetServiceCapabilitiesResponse>" + capabilitiesXml() +
+                     "</trc:GetServiceCapabilitiesResponse>");
+    if (op == "GetRecordings")                return getRecordings(rel);
+    if (op == "GetRecordingConfiguration")    return getRecordingConfiguration(req, rel);
+    if (op == "SetRecordingConfiguration")    return setRecordingConfiguration(req, rel);
+    if (op == "GetTrackConfiguration")        return getTrackConfiguration(req, rel);
+    if (op == "SetTrackConfiguration")        return setTrackConfiguration(req, rel);
+    if (op == "GetRecordingOptions")          return getRecordingOptions(req, rel);
+    if (op == "CreateRecordingJob")           return createJob(req, rel);
+    if (op == "DeleteRecordingJob")           return deleteJob(req, rel);
+    if (op == "GetRecordingJobs")             return getJobs(rel);
+    if (op == "GetRecordingJobConfiguration") return getJobConfiguration(req, rel);
+    if (op == "SetRecordingJobConfiguration") return setJobConfiguration(req, rel);
+    if (op == "SetRecordingJobMode")          return setJobMode(req, rel);
+    if (op == "GetRecordingJobState")         return getJobState(req, rel);
+    return "";   // không nhận diện (gồm các thao tác dynamic) → OnvifServer trả fault mặc định
+}
 
-    if (has("SetRecordingConfiguration")) {
-        if (recordingToken() != REC)
-            return fault("ter:NoRecording", "No recording with the given token");
-        auto config = extractElementContent(req, "RecordingConfiguration");
-        if (!config.empty()) {
-            setRecordingConfig(config);
-            MockSubscriptionManager::getInstance().fireRecordingConfigChanged(
-                "RecordingConfiguration",
-                "<tt:SimpleItem Name=\"RecordingToken\" Value=\"Recording_0\"/>",
-                "<tt:RecordingConfiguration>" + config + "</tt:RecordingConfiguration>");
+// ── DVR ───────────────────────────────────────────────────────────────
+
+bool RecordingService::loadSources(std::vector<Source>& sources, std::string& fault) const {
+    try {
+        const std::vector<StreamProfile> profiles = dvr_->getProfiles();
+        sources.clear();
+        for (const auto& recorder : dvr_->getRecorderSources()) {
+            Source source;
+            source.recordingToken = "rec_" + recorder.videoSourceId;
+            source.videoSourceId = recorder.videoSourceId;
+            source.name = recorder.name;
+            for (const auto& state : recorder.streams) {
+                // Media profile của luồng: cùng sensor ("sourceToken" của profile chính là
+                // VideoSourceId của DVR) và cùng loại luồng. "third"/"fourth" của DVR bị dồn vào SUB2
+                // nên không phân biệt được — chỉ hỗ trợ main và sub.
+                const auto profile = std::find_if(profiles.begin(), profiles.end(),
+                    [&](const StreamProfile& p) {
+                        const char* type = p.streamType == StreamType::MAIN ? "main"
+                                         : p.streamType == StreamType::SUB1 ? "sub" : "";
+                        return p.sourceToken == recorder.videoSourceId && state.streamType == type;
+                    });
+                if (profile == profiles.end()) continue;
+                source.streams.push_back(
+                    {profile->token, state.streamType, "VIDEO_" + state.streamType, state.isRecording});
+                Stream& added = source.streams.back();
+                added.width = profile->videoConfig.resolution.width;
+                added.height = profile->videoConfig.resolution.height;
+                added.framerate = profile->videoConfig.framerate;
+                added.bitrate = profile->videoConfig.bitrate;
+            }
+            if (!source.streams.empty()) sources.push_back(std::move(source));
         }
-        return R("SetRecordingConfigurationResponse",
-            "<trc:SetRecordingConfigurationResponse/>");
+        g_knownSources = std::max<std::size_t>(sources.size(), 1);
+        return true;
+    } catch (const std::exception& e) {
+        fprintf(stderr, "[Recording] DVR unavailable: %s\n", e.what());
+        fault = faultBackend();
+        return false;
     }
+}
 
-    if (has("GetTrackConfiguration")) {
-        if (recordingToken() != REC)
-            return fault("ter:NoRecording", "No recording with the given token");
-        const auto trackToken = extractInnerTag(req, "TrackToken");
-        if (trackToken != "VIDEO_0" && trackToken != "META_0")
-            return fault("ter:NoTrack", "No track with the given token");
-        return R("GetTrackConfigurationResponse",
-            "<trc:GetTrackConfigurationResponse>"
-              "<trc:TrackConfiguration>" + getTrackConfig(trackToken) +
-              "</trc:TrackConfiguration>"
-            "</trc:GetTrackConfigurationResponse>");
+const RecordingService::Source* RecordingService::findSource(const std::vector<Source>& sources,
+                                                                   const std::string& token) {
+    for (const auto& s : sources) if (s.recordingToken == token) return &s;
+    return nullptr;
+}
+
+void RecordingService::setManualRecord(const Source& source, const Stream& stream, bool enable) const {
+    dvr_->setManualRecord(source.videoSourceId, stream.streamType, enable);
+    if (!enable) return;
+    for (const auto& recorder : dvr_->getRecorderSources()) {
+        if (recorder.videoSourceId != source.videoSourceId) continue;
+        for (const auto& state : recorder.streams)
+            if (state.streamType == stream.streamType && state.isRecording) return;
     }
+    throw RefusedError("DVR did not start recording (stream disabled or camera not streaming)");
+}
 
-    if (has("SetTrackConfiguration")) {
-        if (recordingToken() != REC)
-            return fault("ter:NoRecording", "No recording with the given token");
-        const auto trackToken = extractInnerTag(req, "TrackToken");
-        if (trackToken != "VIDEO_0" && trackToken != "META_0")
-            return fault("ter:NoTrack", "No track with the given token");
-        const auto config = extractElementContent(req, "TrackConfiguration");
-        if (!config.empty()) {
-            setTrackConfig(trackToken, config);
-            MockSubscriptionManager::getInstance().fireRecordingConfigChanged(
-                "TrackConfiguration",
-                "<tt:SimpleItem Name=\"RecordingToken\" Value=\"Recording_0\"/>"
-                "<tt:SimpleItem Name=\"TrackToken\" Value=\"" + trackToken + "\"/>",
-                "<tt:TrackConfiguration>" + config + "</tt:TrackConfiguration>");
+// ── XML ───────────────────────────────────────────────────────────────
+
+RecordingConfigRecord RecordingService::effectiveConfig(const Source& source) const {
+    RecordingConfigRecord config;
+    if (store_->getConfig(source.recordingToken, config)) return config;
+    const std::string name = source.name.empty() ? "Sensor " + source.videoSourceId : source.name;
+    config.sourceId = "urn:alvis:videosource:" + source.videoSourceId;
+    config.name = name;
+    config.description = "Recording of " + name;
+    config.address = serviceAddress_;
+    config.content = "Recorded video of " + name;
+    config.maxRetention = "PT0S";   // DVR chỉ xóa khi đầy đĩa, không giới hạn theo thời gian
+    return config;
+}
+
+std::string RecordingService::sourceXml(const RecordingConfigRecord& c) {
+    return "<tt:Source>"
+             "<tt:SourceId>" + esc(c.sourceId) + "</tt:SourceId>"
+             "<tt:Name>" + esc(c.name) + "</tt:Name>"
+             "<tt:Location>" + esc(c.location) + "</tt:Location>"
+             "<tt:Description>" + esc(c.description) + "</tt:Description>"
+             "<tt:Address>" + esc(c.address) + "</tt:Address>"
+           "</tt:Source>";
+}
+
+std::string RecordingService::contentXml(const RecordingConfigRecord& c) {
+    return "<tt:Content>" + esc(c.content) + "</tt:Content>";
+}
+
+std::string RecordingService::configXml(const Source& source) const {
+    const RecordingConfigRecord c = effectiveConfig(source);
+    return sourceXml(c) + contentXml(c) +
+           "<tt:MaximumRetentionTime>" + esc(c.maxRetention) + "</tt:MaximumRetentionTime>";
+}
+
+bool RecordingService::catalog(std::vector<CatalogRecording>& out) const {
+    std::vector<Source> sources;
+    std::string ignored;
+    if (!loadSources(sources, ignored)) return false;
+    out.clear();
+    for (const auto& source : sources) {
+        const RecordingConfigRecord config = effectiveConfig(source);
+        CatalogRecording rec;
+        rec.token = source.recordingToken;
+        rec.videoSourceId = source.videoSourceId;
+        rec.sourceId = config.sourceId;
+        rec.sourceXml = sourceXml(config);
+        rec.contentXml = contentXml(config);
+        for (const auto& stream : source.streams) {
+            CatalogTrack track;
+            track.token = stream.trackToken;
+            track.streamType = stream.streamType;
+            if (!store_->getTrackDescription(source.recordingToken, stream.trackToken, track.description))
+                track.description = "Video " + stream.streamType + " stream";
+            track.width = stream.width;
+            track.height = stream.height;
+            track.framerate = stream.framerate;
+            track.bitrate = stream.bitrate;
+            track.isRecording = stream.isRecording;
+            rec.tracks.push_back(std::move(track));
         }
-        return R("SetTrackConfigurationResponse",
-            "<trc:SetTrackConfigurationResponse/>");
+        out.push_back(std::move(rec));
     }
+    return true;
+}
 
-    if (has("GetRecordingJobConfiguration")) {
-        const auto job = getJob();
-        if (jobToken() != JOB || !job.exists)
-            return fault("ter:NoRecordingJob", "No recording job with the given token");
-        return R("GetRecordingJobConfigurationResponse",
-            "<trc:GetRecordingJobConfigurationResponse>"
-              "<trc:JobConfiguration>" + jobConfig(job) + "</trc:JobConfiguration>"
-            "</trc:GetRecordingJobConfigurationResponse>");
+std::string RecordingService::tracksXml(const Source& source) const {
+    std::string xml;
+    for (const auto& stream : source.streams) {
+        std::string description;
+        if (!store_->getTrackDescription(source.recordingToken, stream.trackToken, description))
+            description = "Video " + stream.streamType + " stream";
+        xml += "<tt:Track><tt:TrackToken>" + stream.trackToken + "</tt:TrackToken>"
+               "<tt:Configuration><tt:TrackType>Video</tt:TrackType>"
+               "<tt:Description>" + esc(description) + "</tt:Description></tt:Configuration></tt:Track>";
     }
+    return xml;
+}
 
-    if (has("SetRecordingJobConfiguration")) {
-        auto job = getJob();
-        if (jobToken() != JOB || !job.exists)
-            return fault("ter:NoRecordingJob", "No recording job with the given token");
-        auto mode = extractInnerTag(req, "Mode");
-        auto priority = extractInnerTag(req, "Priority");
-        const auto sourceBlock = extractElementBlock(req, "SourceToken");
-        auto sourceToken = extractInnerTag(sourceBlock, "Token");
-        auto sourceType = extractAttribute(sourceBlock, "SourceToken", "Type");
-        if (!mode.empty()) job.mode = mode;
-        if (!priority.empty()) job.priority = priority;
-        if (!sourceToken.empty()) job.sourceToken = sourceToken;
-        if (!sourceType.empty()) job.sourceType = sourceType;
-        setJob(job);
-        MockSubscriptionManager::getInstance().fireRecordingConfigChanged(
-            "RecordingJobConfiguration",
-            "<tt:SimpleItem Name=\"RecordingJobToken\" Value=\"Job_0\"/>",
-            "<tt:RecordingJobConfiguration>" + jobConfig(job) +
-            "</tt:RecordingJobConfiguration>");
-        return R("SetRecordingJobConfigurationResponse",
-            "<trc:SetRecordingJobConfigurationResponse>"
-              "<trc:JobConfiguration>" + jobConfig(job) + "</trc:JobConfiguration>"
-            "</trc:SetRecordingJobConfigurationResponse>");
-    }
+// ── Recording ─────────────────────────────────────────────────────────
 
-    if (has("GetRecordingJobState")) {
-        const auto job = getJob();
-        if (jobToken() != JOB || !job.exists)
-            return fault("ter:NoRecordingJob", "No recording job with the given token");
-        return R("GetRecordingJobStateResponse",
-            "<trc:GetRecordingJobStateResponse>"
-              "<trc:State>"
-                "<tt:RecordingToken>" + std::string(REC) + "</tt:RecordingToken>"
-                "<tt:State>" + job.mode + "</tt:State>"
-                "<tt:Sources>"
-                  "<tt:SourceToken Type=\"" + job.sourceType + "\">"
-                    "<tt:Token>" + job.sourceToken + "</tt:Token>"
-                  "</tt:SourceToken>"
-                  "<tt:State>" + job.mode + "</tt:State>"
-                  "<tt:Tracks/>"
-                "</tt:Sources>"
-              "</trc:State>"
-            "</trc:GetRecordingJobStateResponse>");
-    }
+std::string RecordingService::getRecordings(const std::string& rel) {
+    std::vector<Source> sources;
+    std::string fault;
+    if (!loadSources(sources, fault)) return fault;
+    std::string items;
+    for (const auto& source : sources)
+        items += "<trc:RecordingItem><tt:RecordingToken>" + source.recordingToken + "</tt:RecordingToken>"
+                 "<tt:Configuration>" + configXml(source) + "</tt:Configuration>"
+                 "<tt:Tracks>" + tracksXml(source) + "</tt:Tracks></trc:RecordingItem>";
+    return reply(rel, "GetRecordingsResponse", "<trc:GetRecordingsResponse>" + items + "</trc:GetRecordingsResponse>");
+}
 
-    if (has("SetRecordingJobMode")) {
-        auto job = getJob();
-        if (jobToken() != JOB || !job.exists)
-            return fault("ter:NoRecordingJob", "No recording job with the given token");
-        auto mode = extractInnerTag(req, "Mode");
-        if (!mode.empty()) job.mode = mode;
-        setJob(job);
-        MockSubscriptionManager::getInstance().fireRecordingJobState(JOB, job.mode);
-        return R("SetRecordingJobModeResponse",
-            "<trc:SetRecordingJobModeResponse/>");
-    }
+std::string RecordingService::getRecordingConfiguration(const std::string& req, const std::string& rel) {
+    std::vector<Source> sources;
+    std::string fault;
+    if (!loadSources(sources, fault)) return fault;
+    const Source* source = findSource(sources, textOf(req, "RecordingToken"));
+    if (!source) return faultNoRecording();
+    return reply(rel, "GetRecordingConfigurationResponse",
+                 "<trc:GetRecordingConfigurationResponse><trc:RecordingConfiguration>" + configXml(*source) +
+                 "</trc:RecordingConfiguration></trc:GetRecordingConfigurationResponse>");
+}
 
-    if (has("CreateRecordingJob")) {
-        JobState job;
-        job.exists = true;
-        auto mode = extractInnerTag(req, "Mode");
-        auto priority = extractInnerTag(req, "Priority");
-        const auto sourceBlock = extractElementBlock(req, "SourceToken");
-        auto sourceToken = extractInnerTag(sourceBlock, "Token");
-        auto sourceType = extractAttribute(sourceBlock, "SourceToken", "Type");
-        if (!mode.empty()) job.mode = mode;
-        if (!priority.empty()) job.priority = priority;
-        if (!sourceToken.empty()) job.sourceToken = sourceToken;
-        if (!sourceType.empty()) job.sourceType = sourceType;
-        setJob(job);
-        MockSubscriptionManager::getInstance().fireRecordingJobState(JOB, job.mode);
-        return R("CreateRecordingJobResponse",
-            "<trc:CreateRecordingJobResponse>"
-              "<trc:JobToken>" + std::string(JOB) + "</trc:JobToken>"
-              "<trc:JobConfiguration>" + jobConfig(job) + "</trc:JobConfiguration>"
-            "</trc:CreateRecordingJobResponse>");
-    }
+std::string RecordingService::setRecordingConfiguration(const std::string& req, const std::string& rel) {
+    std::lock_guard<std::mutex> lock(mutateMutex_);
+    std::vector<Source> sources;
+    std::string fault;
+    if (!loadSources(sources, fault)) return fault;
+    const Source* source = findSource(sources, textOf(req, "RecordingToken"));
+    if (!source) return faultNoRecording();
 
-    if (has("DeleteRecordingJob")) {
-        auto job = getJob();
-        if (jobToken() != JOB || !job.exists)
-            return fault("ter:NoRecordingJob", "No recording job with the given token");
-        job.exists = false;
-        setJob(job);
-        return R("DeleteRecordingJobResponse",
-            "<trc:DeleteRecordingJobResponse/>");
-    }
+    const std::string scope = blockOf(req, "RecordingConfiguration");
+    if (scope.empty()) return faultBadConfig("Missing RecordingConfiguration");
+    RecordingConfigRecord c = effectiveConfig(*source);
+    // phần tử vắng mặt → giữ giá trị hiện tại
+    auto get = [&](const char* name, const std::string& current) {
+        return blockOf(scope, name).empty() ? current : unesc(textOf(scope, name));
+    };
+    c.sourceId = get("SourceId", c.sourceId);
+    c.name = get("Name", c.name);
+    c.location = get("Location", c.location);
+    c.description = get("Description", c.description);
+    c.address = get("Address", c.address);
+    c.content = get("Content", c.content);
+    c.maxRetention = get("MaximumRetentionTime", c.maxRetention);
 
-    if (has("GetRecordingJobs")) {
-        const auto job = getJob();
-        return R("GetRecordingJobsResponse",
-            "<trc:GetRecordingJobsResponse>" +
-              (job.exists ?
-                "<trc:JobItem>"
-                  "<tt:JobToken>" + std::string(JOB) + "</tt:JobToken>"
-                  "<tt:JobConfiguration>" + jobConfig(job) + "</tt:JobConfiguration>"
-                "</trc:JobItem>" : "") +
-            "</trc:GetRecordingJobsResponse>");
-    }
+    for (const std::string* v : {&c.sourceId, &c.name, &c.location, &c.description, &c.address, &c.content})
+        if (v->size() > kMaxTextLength) return faultBadConfig("Configuration value too long");
+    // xs:duration ("PT0S", "P30D"); chỉ kiểm dạng vì DVR không áp retention theo thời gian.
+    if (c.maxRetention.empty() || c.maxRetention.size() > 64 || c.maxRetention.find('P') == std::string::npos)
+        return faultBadConfig("Invalid MaximumRetentionTime");
 
-    if (has("GetRecordings"))
-        return R("GetRecordingsResponse",
-            "<trc:GetRecordingsResponse>"
-              "<trc:RecordingItem>"
-                "<tt:RecordingToken>" + std::string(REC) + "</tt:RecordingToken>"
-                "<tt:Configuration>" + getRecordingConfig() + "</tt:Configuration>"
-                "<tt:Tracks>" + tracks() + "</tt:Tracks>"
-              "</trc:RecordingItem>"
-            "</trc:GetRecordingsResponse>");
+    store_->setConfig(source->recordingToken, c);
+    MockSubscriptionManager::getInstance().fireRecordingConfigChanged(
+        "RecordingConfiguration",
+        "<tt:SimpleItem Name=\"RecordingToken\" Value=\"" + source->recordingToken + "\"/>",
+        "<tt:RecordingConfiguration>" + configXml(*source) + "</tt:RecordingConfiguration>");
+    return reply(rel, "SetRecordingConfigurationResponse", "<trc:SetRecordingConfigurationResponse/>");
+}
 
-    return "";  // op không nhận diện → OnvifServer fallback fault.
+// ── Track ─────────────────────────────────────────────────────────────
+
+std::string RecordingService::getTrackConfiguration(const std::string& req, const std::string& rel) {
+    std::vector<Source> sources;
+    std::string fault;
+    if (!loadSources(sources, fault)) return fault;
+    const Source* source = findSource(sources, textOf(req, "RecordingToken"));
+    if (!source) return faultNoRecording();
+    const Stream* stream = source->byTrack(textOf(req, "TrackToken"));
+    if (!stream) return faultNoTrack();
+
+    std::string description;
+    if (!store_->getTrackDescription(source->recordingToken, stream->trackToken, description))
+        description = "Video " + stream->streamType + " stream";
+    return reply(rel, "GetTrackConfigurationResponse",
+                 "<trc:GetTrackConfigurationResponse><trc:TrackConfiguration><tt:TrackType>Video</tt:TrackType>"
+                 "<tt:Description>" + esc(description) + "</tt:Description>"
+                 "</trc:TrackConfiguration></trc:GetTrackConfigurationResponse>");
+}
+
+std::string RecordingService::setTrackConfiguration(const std::string& req, const std::string& rel) {
+    std::lock_guard<std::mutex> lock(mutateMutex_);
+    std::vector<Source> sources;
+    std::string fault;
+    if (!loadSources(sources, fault)) return fault;
+    const Source* source = findSource(sources, textOf(req, "RecordingToken"));
+    if (!source) return faultNoRecording();
+    const Stream* stream = source->byTrack(textOf(req, "TrackToken"));
+    if (!stream) return faultNoTrack();
+
+    const std::string scope = blockOf(req, "TrackConfiguration");
+    if (scope.empty()) return faultBadConfig("Missing TrackConfiguration");
+    const std::string type = textOf(scope, "TrackType");   // track của DVR luôn là video
+    if (!type.empty() && type != "Video") return faultBadConfig("Only Video tracks are supported");
+
+    std::string description;
+    store_->getTrackDescription(source->recordingToken, stream->trackToken, description);
+    if (!blockOf(scope, "Description").empty()) description = unesc(textOf(scope, "Description"));
+    if (description.size() > kMaxTextLength) return faultBadConfig("Configuration value too long");
+
+    store_->setTrackDescription(source->recordingToken, stream->trackToken, description);
+    MockSubscriptionManager::getInstance().fireRecordingConfigChanged(
+        "TrackConfiguration",
+        "<tt:SimpleItem Name=\"RecordingToken\" Value=\"" + source->recordingToken + "\"/>"
+        "<tt:SimpleItem Name=\"TrackToken\" Value=\"" + stream->trackToken + "\"/>",
+        "<tt:TrackConfiguration><tt:TrackType>Video</tt:TrackType><tt:Description>" + esc(description) +
+        "</tt:Description></tt:TrackConfiguration>");
+    return reply(rel, "SetTrackConfigurationResponse", "<trc:SetTrackConfigurationResponse/>");
+}
+
+// ── Options ───────────────────────────────────────────────────────────
+
+std::string RecordingService::getRecordingOptions(const std::string& req, const std::string& rel) {
+    std::vector<Source> sources;
+    std::string fault;
+    if (!loadSources(sources, fault)) return fault;
+    const Source* source = findSource(sources, textOf(req, "RecordingToken"));
+    if (!source) return faultNoRecording();
+
+    // Mỗi Recording chỉ 1 job (DVR chỉ ghi tay 1 luồng/sensor): đã có job thì hết slot.
+    RecordingJobRecord existing;
+    const bool hasJob = store_->findJobByRecording(source->recordingToken, existing);
+    std::string compatible;
+    for (const auto& stream : source->streams)
+        compatible += (compatible.empty() ? "" : " ") + stream.profileToken;
+    return reply(rel, "GetRecordingOptionsResponse",
+                 "<trc:GetRecordingOptionsResponse><trc:Options><trc:Job Spare=\"" +
+                 std::string(hasJob ? "0" : "1") + "\" CompatibleSources=\"" + esc(compatible) + "\"/>"
+                 "<trc:Track SpareTotal=\"0\" SpareVideo=\"0\" SpareAudio=\"0\" SpareMetadata=\"0\"/>"
+                 "</trc:Options></trc:GetRecordingOptionsResponse>");
 }

@@ -13,10 +13,9 @@ public:
                 std::shared_ptr<ICameraBackend> backend,
                 bool discoveryEnabled = true,
                 std::shared_ptr<IMgmtClient> authClient = nullptr,
-                // Service Recording Control thật (capability recording=real). nullptr =
-                // dùng RecordingService mock cũ (dữ liệu tĩnh Recording_0/Job_0).
+                // Service Recording Control thật (capability recording=real). nullptr = không đăng ký.
                 std::unique_ptr<IOnvifService> recordingService = nullptr,
-                // Service Recording Search thật (capability search=real). nullptr = SearchService mock.
+                // Service Recording Search thật (capability search=real). nullptr = không đăng ký.
                 std::unique_ptr<IOnvifService> searchService = nullptr);
     ~OnvifServer();
 

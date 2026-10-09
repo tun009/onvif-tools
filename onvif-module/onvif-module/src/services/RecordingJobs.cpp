@@ -1,9 +1,9 @@
-// DvrRecordingJobs.cpp — Recording Job của DvrRecordingService (tạo/xóa/đổi/đọc job, trạng thái).
+// RecordingJobs.cpp — Recording Job của RecordingService (tạo/xóa/đổi/đọc job, trạng thái).
 //
 // Job do onvif-module giữ (RecordingJobStore). Mode Active/Idle điều khiển ghi TAY của DVR;
 // trạng thái thật luôn đọc từ DVR. Mỗi Recording tối đa 1 job. Ngoài job đã lưu còn có job
 // "quan sát được": luồng đang ghi (từ web hoặc lịch) mà recording đó chưa có job nào.
-#include "services/DvrRecordingService.h"
+#include "services/RecordingService.h"
 
 #include "utils/FaultBuilder.h"
 
@@ -42,11 +42,11 @@ std::string trackStateXml(const std::string& trackToken, const std::string& stat
 } // namespace
 
 // Các trường client gửi trong <JobConfiguration>; trường vắng mặt để rỗng.
-struct DvrRecordingService::JobFields {
+struct RecordingService::JobFields {
     std::string recordingToken, mode, priority, sourceToken, sourceType;
 };
 
-DvrRecordingService::JobFields DvrRecordingService::parseJob(const std::string& scope) {
+RecordingService::JobFields RecordingService::parseJob(const std::string& scope) {
     JobFields f;
     f.recordingToken = unesc(textOf(scope, "RecordingToken"));
     f.mode = textOf(scope, "Mode");
@@ -57,13 +57,13 @@ DvrRecordingService::JobFields DvrRecordingService::parseJob(const std::string& 
     return f;
 }
 
-std::string DvrRecordingService::trackOf(const RecordingJobRecord& job, const std::vector<Source>& sources) {
+std::string RecordingService::trackOf(const RecordingJobRecord& job, const std::vector<Source>& sources) {
     const Source* source = findSource(sources, job.recordingToken);
     const Stream* stream = source ? source->byProfile(job.sourceToken) : nullptr;
     return stream ? stream->trackToken : "";
 }
 
-std::string DvrRecordingService::jobConfigXml(const RecordingJobRecord& job,
+std::string RecordingService::jobConfigXml(const RecordingJobRecord& job,
                                               const std::vector<Source>* sources) const {
     // Spec: thiết bị trả cấu hình đầy đủ gồm track đích. Job của ta ghi đúng 1 luồng vào 1 track.
     const std::string track = sources ? trackOf(job, *sources) : "";
@@ -76,21 +76,21 @@ std::string DvrRecordingService::jobConfigXml(const RecordingJobRecord& job,
            "<tt:Token>" + esc(job.sourceToken) + "</tt:Token></tt:SourceToken>" + tracks + "</tt:Source>";
 }
 
-std::string DvrRecordingService::jobStateOf(const RecordingJobRecord& job, const std::vector<Source>& sources) {
+std::string RecordingService::jobStateOf(const RecordingJobRecord& job, const std::vector<Source>& sources) {
     if (job.mode != "Active") return "Idle";
     const Source* source = findSource(sources, job.recordingToken);
     const Stream* stream = source ? source->byProfile(job.sourceToken) : nullptr;
     return (stream && stream->isRecording) ? "Active" : "Idle";
 }
 
-RecordingJobEvent DvrRecordingService::jobEvent(const RecordingJobRecord& job, const std::string& state,
+RecordingJobEvent RecordingService::jobEvent(const RecordingJobRecord& job, const std::string& state,
                                                 const std::string& trackToken) {
     return {job.token, job.recordingToken, job.sourceToken, job.sourceType, state, trackToken};
 }
 
 // ── Danh sách job: đã lưu + quan sát được ─────────────────────────────
 
-std::vector<DvrRecordingService::JobView> DvrRecordingService::listJobs(const std::vector<Source>& sources) const {
+std::vector<RecordingService::JobView> RecordingService::listJobs(const std::vector<Source>& sources) const {
     std::vector<JobView> views;
     for (const auto& job : store_->jobs()) views.push_back({job, false});
 
@@ -115,7 +115,7 @@ std::vector<DvrRecordingService::JobView> DvrRecordingService::listJobs(const st
     return views;
 }
 
-bool DvrRecordingService::findJobView(const std::string& token, const std::vector<Source>& sources,
+bool RecordingService::findJobView(const std::string& token, const std::vector<Source>& sources,
                                       JobView& out) const {
     for (auto& view : listJobs(sources)) {
         if (view.job.token != token) continue;
@@ -125,7 +125,7 @@ bool DvrRecordingService::findJobView(const std::string& token, const std::vecto
     return false;
 }
 
-std::vector<RecordingJobEvent> DvrRecordingService::initialJobEvents() const {
+std::vector<RecordingJobEvent> RecordingService::initialJobEvents() const {
     // Chạy từ PullMessages, không giữ khóa nào của event manager nên được gọi xuống DVR.
     std::vector<Source> sources;
     std::string ignored;
@@ -139,7 +139,7 @@ std::vector<RecordingJobEvent> DvrRecordingService::initialJobEvents() const {
 
 // ── Đọc ───────────────────────────────────────────────────────────────
 
-std::string DvrRecordingService::getJobs(const std::string& rel) {
+std::string RecordingService::getJobs(const std::string& rel) {
     std::vector<Source> sources;
     std::string ignored;
     const bool known = loadSources(sources, ignored);   // DVR lỗi → chỉ job đã lưu, không kèm Tracks
@@ -151,7 +151,7 @@ std::string DvrRecordingService::getJobs(const std::string& rel) {
     return reply(rel, "GetRecordingJobsResponse", "<trc:GetRecordingJobsResponse>" + items + "</trc:GetRecordingJobsResponse>");
 }
 
-std::string DvrRecordingService::getJobConfiguration(const std::string& req, const std::string& rel) {
+std::string RecordingService::getJobConfiguration(const std::string& req, const std::string& rel) {
     std::vector<Source> sources;
     std::string ignored;
     const bool known = loadSources(sources, ignored);
@@ -163,7 +163,7 @@ std::string DvrRecordingService::getJobConfiguration(const std::string& req, con
                  "</trc:JobConfiguration></trc:GetRecordingJobConfigurationResponse>");
 }
 
-std::string DvrRecordingService::getJobState(const std::string& req, const std::string& rel) {
+std::string RecordingService::getJobState(const std::string& req, const std::string& rel) {
     std::vector<Source> sources;
     std::string fault;
     if (!loadSources(sources, fault)) return fault;
@@ -184,7 +184,7 @@ std::string DvrRecordingService::getJobState(const std::string& req, const std::
 
 // ── Ghi ───────────────────────────────────────────────────────────────
 
-std::string DvrRecordingService::createJob(const std::string& req, const std::string& rel) {
+std::string RecordingService::createJob(const std::string& req, const std::string& rel) {
     std::lock_guard<std::mutex> lock(mutateMutex_);
     const std::string scope = blockOf(req, "JobConfiguration");
     if (scope.empty()) return faultBadConfig("Missing JobConfiguration");
@@ -215,10 +215,10 @@ std::string DvrRecordingService::createJob(const std::string& req, const std::st
         try {
             setManualRecord(*source, *stream, true);
         } catch (const RefusedError& e) {
-            fprintf(stderr, "[DvrRecording] CreateRecordingJob refused: %s\n", e.what());
+            fprintf(stderr, "[Recording] CreateRecordingJob refused: %s\n", e.what());
             return faultNotStarted();
         } catch (const std::exception& e) {
-            fprintf(stderr, "[DvrRecording] CreateRecordingJob failed: %s\n", e.what());
+            fprintf(stderr, "[Recording] CreateRecordingJob failed: %s\n", e.what());
             return faultBackend();
         }
     }
@@ -238,7 +238,7 @@ std::string DvrRecordingService::createJob(const std::string& req, const std::st
                  "</trc:CreateRecordingJobResponse>");
 }
 
-std::string DvrRecordingService::deleteJob(const std::string& req, const std::string& rel) {
+std::string RecordingService::deleteJob(const std::string& req, const std::string& rel) {
     std::lock_guard<std::mutex> lock(mutateMutex_);
     const std::string token = unesc(textOf(req, "JobToken"));
 
@@ -256,7 +256,7 @@ std::string DvrRecordingService::deleteJob(const std::string& req, const std::st
                 try {
                     setManualRecord(*source, *stream, false);
                 } catch (const std::exception& e) {
-                    fprintf(stderr, "[DvrRecording] DeleteRecordingJob could not stop recording: %s\n", e.what());
+                    fprintf(stderr, "[Recording] DeleteRecordingJob could not stop recording: %s\n", e.what());
                     return faultBackend();
                 }
             }
@@ -279,14 +279,14 @@ std::string DvrRecordingService::deleteJob(const std::string& req, const std::st
         try {
             setManualRecord(*source, *stream, false);
         } catch (const std::exception& e) {
-            fprintf(stderr, "[DvrRecording] DeleteRecordingJob could not stop recording: %s\n", e.what());
+            fprintf(stderr, "[Recording] DeleteRecordingJob could not stop recording: %s\n", e.what());
             return faultBackend();
         }
     }
     return reply(rel, "DeleteRecordingJobResponse", "<trc:DeleteRecordingJobResponse/>");
 }
 
-std::string DvrRecordingService::setJobMode(const std::string& req, const std::string& rel) {
+std::string RecordingService::setJobMode(const std::string& req, const std::string& rel) {
     std::lock_guard<std::mutex> lock(mutateMutex_);
     const std::string token = unesc(textOf(req, "JobToken"));
     RecordingJobRecord probe;
@@ -311,10 +311,10 @@ std::string DvrRecordingService::setJobMode(const std::string& req, const std::s
             setManualRecord(*source, *stream, false);
         }
     } catch (const RefusedError& e) {
-        fprintf(stderr, "[DvrRecording] SetRecordingJobMode refused: %s\n", e.what());
+        fprintf(stderr, "[Recording] SetRecordingJobMode refused: %s\n", e.what());
         return faultNotStarted();
     } catch (const std::exception& e) {
-        fprintf(stderr, "[DvrRecording] SetRecordingJobMode failed: %s\n", e.what());
+        fprintf(stderr, "[Recording] SetRecordingJobMode failed: %s\n", e.what());
         return faultBackend();
     }
 
@@ -327,7 +327,7 @@ std::string DvrRecordingService::setJobMode(const std::string& req, const std::s
     return reply(rel, "SetRecordingJobModeResponse", "<trc:SetRecordingJobModeResponse/>");
 }
 
-std::string DvrRecordingService::setJobConfiguration(const std::string& req, const std::string& rel) {
+std::string RecordingService::setJobConfiguration(const std::string& req, const std::string& rel) {
     std::lock_guard<std::mutex> lock(mutateMutex_);
     const std::string token = unesc(textOf(req, "JobToken"));
     RecordingJobRecord probe;
@@ -372,10 +372,10 @@ std::string DvrRecordingService::setJobConfiguration(const std::string& req, con
         if (newActive) setManualRecord(*source, *newStream, true);
         if (oldActive && oldStream && (!newActive || sourceChanged)) setManualRecord(*source, *oldStream, false);
     } catch (const RefusedError& e) {
-        fprintf(stderr, "[DvrRecording] SetRecordingJobConfiguration refused: %s\n", e.what());
+        fprintf(stderr, "[Recording] SetRecordingJobConfiguration refused: %s\n", e.what());
         return faultNotStarted();
     } catch (const std::exception& e) {
-        fprintf(stderr, "[DvrRecording] SetRecordingJobConfiguration failed: %s\n", e.what());
+        fprintf(stderr, "[Recording] SetRecordingJobConfiguration failed: %s\n", e.what());
         return faultBackend();
     }
 

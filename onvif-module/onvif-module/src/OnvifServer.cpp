@@ -9,8 +9,6 @@
 #include "services/Media2MetadataService.h"
 #include "services/EventSubscriptionService.h"
 #include "services/AnalyticsService.h"
-#include "services/RecordingService.h"
-#include "services/SearchService.h"
 #include "services/ReplayService.h"
 #include "core/ServiceRegistry.h"
 #include "utils/FaultBuilder.h"
@@ -264,12 +262,10 @@ OnvifServer::OnvifServer(const ServiceConfig& cfg,
         cfg_.deviceIp, cfg_.httpPort));
     // Profile M (M1): Analytics service — GetSupportedMetadata, analytics modules.
     registry_.registerService(std::make_unique<AnalyticsService>());
-    // Profile G skeleton: Recording/Search/Replay — GetServiceCapabilities để DTT
-    // nhận diện Profile G và mở test case con.
+    // Profile G: Recording Control và Search chạy trên DVR thật, do main.cpp dựng (chỉ khi capability
+    // = real). Không có → service không được đăng ký. Replay vẫn là mock.
     if (recordingService) registry_.registerService(std::move(recordingService));
-    else registry_.registerService(std::make_unique<RecordingService>());
     if (searchService) registry_.registerService(std::move(searchService));
-    else registry_.registerService(std::make_unique<SearchService>());
     registry_.registerService(std::make_unique<ReplayService>());
 }
 

@@ -1,6 +1,6 @@
 #include "services/DeviceService.h"
 #include "services/DiscoveryService.h"
-#include "services/DvrRecordingService.h"
+#include "services/RecordingService.h"
 #include "auth/WsSecurityHandler.h"
 #include "backend/IMgmtClient.h"
 #include <iostream>
@@ -648,7 +648,7 @@ int DeviceService::GetServices(
 
         // Recording Control (Profile G) — non-dynamic. Dùng chung nguồn với
         // RecordingService::GetServiceCapabilities (RECORDING-1-1-3 so hai bên).
-        std::string recCaps = DvrRecordingService::capabilitiesXml();
+        std::string recCaps = RecordingService::capabilitiesXml();
         svc("http://www.onvif.org/ver10/recording/wsdl", "/onvif/recording",
             21, 12, recCaps);
 
