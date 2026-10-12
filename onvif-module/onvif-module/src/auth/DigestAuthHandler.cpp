@@ -23,6 +23,9 @@ struct NonceRecord {
 };
 
 std::mutex g_nonceMutex;
+// validate() và generateChallenge() chạy liên tiếp trên cùng luồng xử lý một request: validate đánh dấu
+// "nonce cũ nhưng thông tin đăng nhập đúng", generateChallenge đọc rồi xóa cờ để thêm stale=true.
+thread_local bool g_lastRejectStale = false;
 std::unordered_map<std::string, NonceRecord> g_nonces;
 
 bool isHex(const std::string& value, std::size_t requiredSize) {
@@ -171,10 +174,13 @@ std::string DigestAuthHandler::generateChallenge() const {
               << "algorithm=MD5, "
               << "nonce=\"" << nonce << "\", "
               << "opaque=\"" << opaque << "\"";
+    if (g_lastRejectStale) challenge << ", stale=true";
+    g_lastRejectStale = false;
     return challenge.str();
 }
 
 bool DigestAuthHandler::validate(const std::string& rawHeaders, const std::string& method) const {
+    g_lastRejectStale = false;
     std::stringstream ss(rawHeaders);
     std::string line;
     std::string authHeader;
@@ -235,29 +241,26 @@ bool DigestAuthHandler::validate(const std::string& rawHeaders, const std::strin
         return false;
     }
     const std::string useKey = params.at("username") + ':' + params.at("cnonce");
-    if (!nonceCanBeUsed(params.at("nonce"), useKey, nonceCount)) {
-        std::cerr << "[DigestAuth] Unknown, expired or replayed nonce" << std::endl;
-        return false;
-    }
 
-    bool authenticated = false;
-    if (mgmtClient_) {
-        try {
-            const OnvifAuthenticationResult result =
-                mgmtClient_->verifyHttpDigest(HttpDigestCredential{
-                params.at("username"), params.at("realm"), method,
-                params.at("uri"), params.at("nonce"), params.at("qop"),
-                params.at("nc"), params.at("cnonce"), algorithm,
-                params.at("response")});
-            authenticated = result.authenticated;
-            std::cerr << "[DigestAuth] MGMT verification: "
-                      << (authenticated ? "accepted" : "rejected") << std::endl;
-        } catch (const std::exception& error) {
-            std::cerr << "[DigestAuth] MGMT authentication unavailable: "
-                      << error.what() << std::endl;
-            return false;
+    // Kiểm tra bằng chứng (response) với MGMT hoặc tài khoản tĩnh; không đụng bảng nonce.
+    const auto verifyCredentials = [&]() -> bool {
+        if (mgmtClient_) {
+            try {
+                const OnvifAuthenticationResult result =
+                    mgmtClient_->verifyHttpDigest(HttpDigestCredential{
+                    params.at("username"), params.at("realm"), method,
+                    params.at("uri"), params.at("nonce"), params.at("qop"),
+                    params.at("nc"), params.at("cnonce"), algorithm,
+                    params.at("response")});
+                std::cerr << "[DigestAuth] MGMT verification: "
+                          << (result.authenticated ? "accepted" : "rejected") << std::endl;
+                return result.authenticated;
+            } catch (const std::exception& error) {
+                std::cerr << "[DigestAuth] MGMT authentication unavailable: "
+                          << error.what() << std::endl;
+                return false;
+            }
         }
-    } else {
         if (params.at("username") != username_) return false;
         const std::string ha1 = calculateMD5(username_ + ':' + realm_ + ':' + password_);
         const std::string ha2 = calculateMD5(method + ':' + params.at("uri"));
@@ -267,14 +270,25 @@ bool DigestAuthHandler::validate(const std::string& rawHeaders, const std::strin
         std::string supplied = params.at("response");
         std::transform(supplied.begin(), supplied.end(), supplied.begin(),
                        [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-        authenticated = expected == supplied;
+        return expected == supplied;
+    };
+
+    if (!nonceCanBeUsed(params.at("nonce"), useKey, nonceCount)) {
+        std::cerr << "[DigestAuth] Unknown, expired or replayed nonce" << std::endl;
+        // RFC 7616 §3.3: thông tin đăng nhập đúng nhưng nonce cũ (hết hạn, server vừa khởi động
+        // lại, bị đẩy khỏi bảng) → challenge kế tiếp kèm stale=true để client tự thử lại với
+        // nonce mới thay vì coi là sai mật khẩu. Sai mật khẩu thì không báo stale.
+        g_lastRejectStale = verifyCredentials();
+        return false;
     }
 
+    const bool authenticated = verifyCredentials();
     if (!authenticated) {
         std::cerr << "[DigestAuth] Reject: credential verification failed" << std::endl;
         return false;
     }
     if (!commitNonceUse(params.at("nonce"), useKey, nonceCount)) {
+        g_lastRejectStale = true;   // thông tin đăng nhập đã đúng, chỉ nonce hết hạn/lặp lại
         std::cerr << "[DigestAuth] Reject: nonce expired or nonce-count replayed during commit"
                   << std::endl;
         return false;
