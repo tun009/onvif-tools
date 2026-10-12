@@ -81,3 +81,12 @@ struct NetworkProtocolEntry {
     bool enabled = false;
     int  port = 0;
 };
+
+// User ONVIF (Device Management: GetUsers/CreateUsers/SetUser/DeleteUsers).
+// `level` là tên tt:UserLevel của ONVIF: Administrator | Operator | User |
+// Anonymous | Extended. Password chỉ dùng khi tạo/sửa, không bao giờ đọc ra.
+struct OnvifUser {
+    std::string username;
+    std::string password;
+    std::string level = "User";
+};

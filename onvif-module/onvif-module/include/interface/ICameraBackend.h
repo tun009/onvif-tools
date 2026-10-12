@@ -31,6 +31,14 @@ public:
     virtual SystemDateTime getSystemDateAndTime()                       = 0;
     virtual bool           setSystemDateAndTime(const SystemDateTime&)  = 0;
     virtual bool           reboot()                                     = 0;
+    // User ONVIF (Device Management). Mặc định backend không quản lý user: DeviceService dùng
+    // danh sách nội bộ. Backend thật (MGMT) ghi đè và trả true ở supportsUserManagement().
+    // Create/Set/Delete ném std::runtime_error khi thất bại; level theo tên tt:UserLevel.
+    virtual bool           supportsUserManagement() const               { return false; }
+    virtual std::vector<OnvifUser> getOnvifUsers()                      { return {}; }
+    virtual void           createOnvifUsers(const std::vector<OnvifUser>&) {}
+    virtual void           setOnvifUser(const OnvifUser&)               {}
+    virtual void           deleteOnvifUsers(const std::vector<std::string>&) {}
     virtual bool           factoryReset(bool hard)                      = 0;
 
     // ── Media2 ───────────────────────────────────────────────────

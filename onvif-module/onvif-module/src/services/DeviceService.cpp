@@ -844,6 +844,7 @@ int DeviceService::GetUsers(
         return soap_sender_fault_subcode(this->soap, "ter:NotAuthorized", "Sender", "Not Authorized");
     }
     this->soap->header = nullptr;
+    if (usersViaBackend()) return usersGet(tds__GetUsersResponse);
 
     auto soap = this->soap;
 
@@ -1627,6 +1628,7 @@ int DeviceService::CreateUsers(_tds__CreateUsers* req,
                                  "ter:InvalidArgVal", nullptr,
                                  "No users provided");
     }
+    if (usersViaBackend()) return usersCreate(req);
     std::lock_guard<std::mutex> lk(sysMtx_);
     for (auto* u : req->User) {
         if (!u || u->Username.empty()) {
@@ -1668,6 +1670,7 @@ int DeviceService::DeleteUsers(_tds__DeleteUsers* req,
                                  "ter:InvalidArgVal", nullptr,
                                  "No username provided");
     }
+    if (usersViaBackend()) return usersDelete(req);
     std::lock_guard<std::mutex> lk(sysMtx_);
     // Atomic: validate TẤT CẢ trước, delete sau. Nếu bất kỳ user nào sai,
     // reject cả lệnh — không delete gì (DEVICE-4-1-5 error case).
@@ -1711,6 +1714,7 @@ int DeviceService::SetUser(_tds__SetUser* req,
                                  "ter:InvalidArgVal", nullptr,
                                  "No users provided");
     }
+    if (usersViaBackend()) return usersSet(req);
     std::lock_guard<std::mutex> lk(sysMtx_);
     // Atomic: validate all trước, apply sau (DEVICE-4-1-8 error case).
     std::vector<size_t> targets;
@@ -1736,6 +1740,194 @@ int DeviceService::SetUser(_tds__SetUser* req,
         auto& mu = sys_.users[targets[i]];
         if (u->Password) mu.password = *u->Password;
         mu.level = static_cast<int>(u->UserLevel);
+    }
+    return SOAP_OK;
+}
+
+// ── User ONVIF qua backend (MGMT) ─────────────────────────────────────────
+// MGMT là nguồn duy nhất của user ONVIF (cùng danh sách với trang web). Mọi thao tác kiểm tra
+// trước khi ghi để giữ tính "tất cả hoặc không gì cả" của spec; MGMT chỉ báo thành công/thất bại.
+namespace {
+
+const char* userLevelName(tt__UserLevel level) {
+    switch (level) {
+        case tt__UserLevel::Administrator: return "Administrator";
+        case tt__UserLevel::Operator:      return "Operator";
+        case tt__UserLevel::Anonymous:     return "Anonymous";
+        case tt__UserLevel::Extended:      return "Extended";
+        default:                           return "User";
+    }
+}
+
+tt__UserLevel userLevelFromName(const std::string& name) {
+    if (name == "Administrator") return tt__UserLevel::Administrator;
+    if (name == "Operator")      return tt__UserLevel::Operator;
+    if (name == "Anonymous")     return tt__UserLevel::Anonymous;
+    if (name == "Extended")      return tt__UserLevel::Extended;
+    return tt__UserLevel::User;
+}
+
+} // namespace
+
+bool DeviceService::usersViaBackend() const {
+    return backend_ && backend_->supportsUserManagement();
+}
+
+int DeviceService::usersGet(_tds__GetUsersResponse& resp) {
+    std::vector<OnvifUser> users;
+    try {
+        users = backend_->getOnvifUsers();
+    } catch (const std::exception& e) {
+        std::cerr << "[DeviceService] GetUsers backend error: " << e.what() << "\n";
+        return devSendOnvifFault(this->soap, "SOAP-ENV:Receiver", "ter:Action", nullptr,
+                                 "User backend unavailable");
+    }
+    for (const auto& u : users) {
+        auto user = soap_new_tt__User(this->soap);
+        user->Username = u.username;   // không trả Password (secret)
+        user->UserLevel = userLevelFromName(u.level);
+        resp.User.push_back(user);
+    }
+    return SOAP_OK;
+}
+
+int DeviceService::usersCreate(_tds__CreateUsers* req) {
+    std::lock_guard<std::mutex> lk(sysMtx_);
+    std::vector<OnvifUser> existing;
+    try {
+        existing = backend_->getOnvifUsers();
+    } catch (const std::exception& e) {
+        std::cerr << "[DeviceService] CreateUsers backend error: " << e.what() << "\n";
+        return devSendOnvifFault(this->soap, "SOAP-ENV:Receiver", "ter:Action", nullptr,
+                                 "User backend unavailable");
+    }
+    std::vector<OnvifUser> toCreate;
+    for (auto* u : req->User) {
+        if (!u || u->Username.empty()) {
+            return devSendOnvifFault(this->soap, "SOAP-ENV:Sender", "ter:InvalidArgVal",
+                                     "ter:UsernameMissing", "Empty username");
+        }
+        if (u->UserLevel != tt__UserLevel::Anonymous && !u->Password) {
+            return devSendOnvifFault(this->soap, "SOAP-ENV:Sender", "ter:InvalidArgVal",
+                                     "ter:PasswordMissing", "Password required");
+        }
+        // Trùng với user có sẵn hoặc trùng nhau trong chính request → từ chối cả lệnh (spec).
+        const auto sameName = [&](const OnvifUser& o) { return o.username == u->Username; };
+        if (std::any_of(existing.begin(), existing.end(), sameName) ||
+            std::any_of(toCreate.begin(), toCreate.end(), sameName)) {
+            return devSendOnvifFault(this->soap, "SOAP-ENV:Sender", "ter:OperationProhibited",
+                                     "ter:UsernameClash", "Username already exists");
+        }
+        OnvifUser user;
+        user.username = u->Username;
+        user.password = u->Password ? *u->Password : "";
+        user.level = userLevelName(u->UserLevel);
+        toCreate.push_back(user);
+    }
+    try {
+        backend_->createOnvifUsers(toCreate);
+    } catch (const std::exception& e) {
+        std::cerr << "[DeviceService] CreateUsers failed: " << e.what() << "\n";
+        return devSendOnvifFault(this->soap, "SOAP-ENV:Receiver", "ter:Action", nullptr,
+                                 "Failed to create users");
+    }
+    return SOAP_OK;
+}
+
+int DeviceService::usersDelete(_tds__DeleteUsers* req) {
+    std::lock_guard<std::mutex> lk(sysMtx_);
+    std::vector<OnvifUser> existing;
+    try {
+        existing = backend_->getOnvifUsers();
+    } catch (const std::exception& e) {
+        std::cerr << "[DeviceService] DeleteUsers backend error: " << e.what() << "\n";
+        return devSendOnvifFault(this->soap, "SOAP-ENV:Receiver", "ter:Action", nullptr,
+                                 "User backend unavailable");
+    }
+    long admins = std::count_if(existing.begin(), existing.end(),
+                                [](const OnvifUser& u) { return u.level == "Administrator"; });
+    std::vector<std::string> names;
+    for (const auto& name : req->Username) {
+        if (std::find(names.begin(), names.end(), name) != names.end()) {
+            return devSendOnvifFault(this->soap, "SOAP-ENV:Sender", "ter:InvalidArgVal", nullptr,
+                                     "Username appears more than once");
+        }
+        const auto it = std::find_if(existing.begin(), existing.end(),
+                                     [&](const OnvifUser& u) { return u.username == name; });
+        if (it == existing.end()) {
+            const std::string msg = "User not found: " + name;
+            return devSendOnvifFault(this->soap, "SOAP-ENV:Sender", "ter:InvalidArgVal",
+                                     "ter:UsernameMissing", msg.c_str());
+        }
+        // Không để thiết bị mất hết quản trị viên (user cố định theo nghĩa spec).
+        if (it->level == "Administrator" && --admins < 1) {
+            return devSendOnvifFault(this->soap, "SOAP-ENV:Sender", "ter:OperationProhibited",
+                                     "ter:FixedUser", "Cannot delete the last administrator");
+        }
+        names.push_back(name);
+    }
+    try {
+        backend_->deleteOnvifUsers(names);
+    } catch (const std::exception& e) {
+        std::cerr << "[DeviceService] DeleteUsers failed: " << e.what() << "\n";
+        return devSendOnvifFault(this->soap, "SOAP-ENV:Receiver", "ter:Action", nullptr,
+                                 "Failed to delete users");
+    }
+    return SOAP_OK;
+}
+
+int DeviceService::usersSet(_tds__SetUser* req) {
+    std::lock_guard<std::mutex> lk(sysMtx_);
+    std::vector<OnvifUser> existing;
+    try {
+        existing = backend_->getOnvifUsers();
+    } catch (const std::exception& e) {
+        std::cerr << "[DeviceService] SetUser backend error: " << e.what() << "\n";
+        return devSendOnvifFault(this->soap, "SOAP-ENV:Receiver", "ter:Action", nullptr,
+                                 "User backend unavailable");
+    }
+    long admins = std::count_if(existing.begin(), existing.end(),
+                                [](const OnvifUser& u) { return u.level == "Administrator"; });
+    std::vector<OnvifUser> updates;
+    for (auto* u : req->User) {
+        if (!u || u->Username.empty()) {
+            return devSendOnvifFault(this->soap, "SOAP-ENV:Sender", "ter:InvalidArgVal",
+                                     "ter:UsernameMissing", "Empty username");
+        }
+        if (std::any_of(updates.begin(), updates.end(),
+                        [&](const OnvifUser& o) { return o.username == u->Username; })) {
+            return devSendOnvifFault(this->soap, "SOAP-ENV:Sender", "ter:InvalidArgVal", nullptr,
+                                     "Username appears more than once");
+        }
+        const auto it = std::find_if(existing.begin(), existing.end(),
+                                     [&](const OnvifUser& o) { return o.username == u->Username; });
+        if (it == existing.end()) {
+            const std::string msg = "User not found: " + u->Username;
+            return devSendOnvifFault(this->soap, "SOAP-ENV:Sender", "ter:InvalidArgVal",
+                                     "ter:UsernameMissing", msg.c_str());
+        }
+        // MGMT đòi gửi kèm mật khẩu khi sửa; thiếu thì không có cách đổi riêng mức quyền.
+        if (u->UserLevel != tt__UserLevel::Anonymous && !u->Password) {
+            return devSendOnvifFault(this->soap, "SOAP-ENV:Sender", "ter:InvalidArgVal",
+                                     "ter:PasswordMissing", "Password required");
+        }
+        OnvifUser user;
+        user.username = u->Username;
+        user.password = u->Password ? *u->Password : "";
+        user.level = userLevelName(u->UserLevel);
+        // Hạ quyền quản trị viên cuối cùng sẽ khóa thiết bị.
+        if (it->level == "Administrator" && user.level != "Administrator" && --admins < 1) {
+            return devSendOnvifFault(this->soap, "SOAP-ENV:Sender", "ter:OperationProhibited",
+                                     "ter:FixedUser", "Cannot demote the last administrator");
+        }
+        updates.push_back(user);
+    }
+    try {
+        for (const auto& user : updates) backend_->setOnvifUser(user);
+    } catch (const std::exception& e) {
+        std::cerr << "[DeviceService] SetUser failed: " << e.what() << "\n";
+        return devSendOnvifFault(this->soap, "SOAP-ENV:Receiver", "ter:Action", nullptr,
+                                 "Failed to update users");
     }
     return SOAP_OK;
 }

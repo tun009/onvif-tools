@@ -721,3 +721,64 @@ LensBounds HttpMgmtClient::getLensBounds(const std::string& sourceToken) {
     // trả về được response (chỉ là range mặc định), không phá cả request.
     return LensBounds{};
 }
+
+// ── User ONVIF ────────────────────────────────────────────────────────
+// MGMT và ONVIF khác nhau đúng một tên: mức "User" của ONVIF là "Viewer" ở MGMT
+// (Administrator, Operator, Anonymous, Extended giống nhau).
+namespace {
+std::string toMgmtLevel(const std::string& onvifLevel) {
+    return onvifLevel == "User" ? "Viewer" : onvifLevel;
+}
+std::string toOnvifLevel(const std::string& mgmtLevel) {
+    return mgmtLevel == "Viewer" ? "User" : mgmtLevel;
+}
+std::string userJson(const OnvifUser& user) {
+    return "{\"Username\":\"" + escapeJson(user.username) + "\",\"Password\":\"" +
+           escapeJson(user.password) + "\",\"UserLevel\":\"" + toMgmtLevel(user.level) +
+           "\",\"UserType\":\"onvif\"}";
+}
+} // namespace
+
+std::vector<OnvifUser> HttpMgmtClient::getOnvifUsers() {
+    const HttpResponse response = request("GET", "/mgmt/v1/Config/GetOnvifUsers");
+    if (response.status != 200 || SimpleJson::getInt(response.body, "result", 0) != 1)
+        throw std::runtime_error("MGMT rejected GetOnvifUsers request");
+    std::vector<OnvifUser> users;
+    const std::string root = jsonObject(response.body, "GetUsersResponse");
+    for (const auto& item : jsonArrayObjects(jsonArray(root, "User"))) {
+        OnvifUser user;
+        user.username = SimpleJson::getString(item, "Username");
+        user.level = toOnvifLevel(SimpleJson::getString(item, "UserLevel", "User"));
+        if (!user.username.empty()) users.push_back(user);
+    }
+    return users;
+}
+
+// MGMT chỉ báo result 1 (thành công) hoặc 0 (thất bại); không dùng err_code.
+static void requireUserResult(const std::string& name, int status, const std::string& body) {
+    if (status == 200 && SimpleJson::getInt(body, "result", 0) == 1) return;
+    throw std::runtime_error("MGMT " + name + " failed (status=" + std::to_string(status) + ")");
+}
+
+void HttpMgmtClient::createOnvifUsers(const std::vector<OnvifUser>& users) {
+    std::string body = "{\"User\":[";
+    for (std::size_t i = 0; i < users.size(); ++i) body += (i ? "," : "") + userJson(users[i]);
+    body += "]}";
+    const HttpResponse response = request("POST", "/mgmt/v1/Config/CreateUsers", body);
+    requireUserResult("CreateUsers", response.status, response.body);
+}
+
+void HttpMgmtClient::setOnvifUser(const OnvifUser& user) {
+    const HttpResponse response =
+        request("POST", "/mgmt/v1/Config/SetUser", "{\"User\":" + userJson(user) + "}");
+    requireUserResult("SetUser", response.status, response.body);
+}
+
+void HttpMgmtClient::deleteOnvifUsers(const std::vector<std::string>& usernames) {
+    std::string body = "{\"Username\":[";
+    for (std::size_t i = 0; i < usernames.size(); ++i)
+        body += std::string(i ? "," : "") + "\"" + escapeJson(usernames[i]) + "\"";
+    body += "],\"UserType\":\"onvif\"}";
+    const HttpResponse response = request("POST", "/mgmt/v1/Config/DeleteUsers", body);
+    requireUserResult("DeleteUsers", response.status, response.body);
+}

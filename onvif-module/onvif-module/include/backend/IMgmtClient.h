@@ -109,4 +109,12 @@ public:
     virtual void setZoomFocus(const std::string& sourceToken,
                                const ZoomFocusState& state) = 0;
     virtual LensBounds getLensBounds(const std::string& sourceToken) = 0;
+
+    // User ONVIF (MGMT Config/GetOnvifUsers|CreateUsers|SetUser|DeleteUsers, UserType=onvif).
+    // `level` ở phía ONVIF (User); MGMT gọi cùng mức đó là Viewer — client tự đổi tên.
+    // Create/Set/Delete ném std::runtime_error khi MGMT báo result != 1 hoặc lỗi kết nối.
+    virtual std::vector<OnvifUser> getOnvifUsers() = 0;
+    virtual void createOnvifUsers(const std::vector<OnvifUser>& users) = 0;
+    virtual void setOnvifUser(const OnvifUser& user) = 0;
+    virtual void deleteOnvifUsers(const std::vector<std::string>& usernames) = 0;
 };

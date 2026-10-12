@@ -25,6 +25,28 @@ DeviceInfo AlvisBackendFacade::getDeviceInfo()
     }
     return mock("GetDeviceInformation").getDeviceInfo();
 }
+// User ONVIF: chỉ khi device=real (MGMT là nguồn duy nhất của user ONVIF).
+bool AlvisBackendFacade::supportsUserManagement() const { return real("device") && mgmtClient_ != nullptr; }
+std::vector<OnvifUser> AlvisBackendFacade::getOnvifUsers()
+{
+    if (!supportsUserManagement()) throw std::runtime_error("MGMT client unavailable");
+    return mgmtClient_->getOnvifUsers();
+}
+void AlvisBackendFacade::createOnvifUsers(const std::vector<OnvifUser>& v)
+{
+    if (!supportsUserManagement()) throw std::runtime_error("MGMT client unavailable");
+    mgmtClient_->createOnvifUsers(v);
+}
+void AlvisBackendFacade::setOnvifUser(const OnvifUser& v)
+{
+    if (!supportsUserManagement()) throw std::runtime_error("MGMT client unavailable");
+    mgmtClient_->setOnvifUser(v);
+}
+void AlvisBackendFacade::deleteOnvifUsers(const std::vector<std::string>& v)
+{
+    if (!supportsUserManagement()) throw std::runtime_error("MGMT client unavailable");
+    mgmtClient_->deleteOnvifUsers(v);
+}
 NetworkConfig AlvisBackendFacade::getNetworkConfig() { return mock("GetNetworkConfig").getNetworkConfig(); }
 bool AlvisBackendFacade::setNetworkConfig(const NetworkConfig &v) { return mock("SetNetworkConfig").setNetworkConfig(v); }
 HostnameConfig AlvisBackendFacade::getHostname()

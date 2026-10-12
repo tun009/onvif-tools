@@ -73,6 +73,14 @@ public:
 private:
     bool validateAuth();
 
+    // User ONVIF lấy/ghi qua backend (MGMT) khi backend_->supportsUserManagement(); không thì dùng
+    // danh sách nội bộ sys_.users. Xem phần "User handling" ở DeviceService.cpp.
+    bool usersViaBackend() const;
+    int usersGet(_tds__GetUsersResponse& resp);
+    int usersCreate(_tds__CreateUsers* req);
+    int usersDelete(_tds__DeleteUsers* req);
+    int usersSet(_tds__SetUser* req);
+
     ServiceConfig cfg_;
     std::shared_ptr<ICameraBackend> backend_;
 

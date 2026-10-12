@@ -34,6 +34,9 @@ public:
     std::vector<AnalyticsModule> getSupportedAnalyticsModules(const std::string&) override; std::vector<AnalyticsRule> getAnalyticsRules(const std::string&) override;
     bool addAnalyticsRule(const std::string&, const AnalyticsRule&) override; bool deleteAnalyticsRule(const std::string&, const std::string&) override;
     bool subscribe(const std::string&, const std::string&, EventCallback) override; bool unsubscribe(const std::string&) override; bool renewSubscription(const std::string&, int) override;
+    bool supportsUserManagement() const override;
+    std::vector<OnvifUser> getOnvifUsers() override; void createOnvifUsers(const std::vector<OnvifUser>&) override;
+    void setOnvifUser(const OnvifUser&) override; void deleteOnvifUsers(const std::vector<std::string>&) override;
 private:
     bool real(const std::string&) const; ICameraBackend& mock(const char*) const;
     CameraBackendPtr mockBackend_; std::shared_ptr<IMgmtClient> mgmtClient_; std::shared_ptr<IDvrClient> dvrClient_; BackendMode mode_; std::map<std::string, CapabilityMode> capabilities_;
