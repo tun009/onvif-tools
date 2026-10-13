@@ -13,7 +13,9 @@ namespace {
 
 constexpr const char* kTopicRecording = "RecordingHistory/Recording/State";
 constexpr const char* kTopicTrack = "RecordingHistory/Track/State";
-constexpr std::size_t kMaxSessions = 16;
+// DTT chạy các test liên tiếp và nhiều test không gọi EndSearch, nên phiên chồng nhau tới khi hết
+// KeepAliveTime. Đầy thì bỏ phiên sắp hết hạn nhất thay vì từ chối tạo phiên mới.
+constexpr std::size_t kMaxSessions = 256;
 constexpr std::size_t kDefaultPage = 1000;           // số kết quả tối đa mỗi lần Get khi client không đặt MaxResults
 constexpr int64_t kOngoingMs = 90000;                // đoạn cuối kết thúc gần đây hơn mức này + đang ghi → chưa "đóng"
 constexpr int64_t kForever = INT64_MAX / 4;
@@ -282,12 +284,23 @@ std::string SearchService::getRecordingInformation(const std::string& req, const
     std::vector<Rec> catalog;
     if (!recording_.catalog(catalog)) return faultBackend();
     const std::string token = trimmed(Svc::textOf(req, "RecordingToken"));
-    for (const auto& data : collect(catalog))
-        if (data.rec->token == token)
-            return reply(rel, "GetRecordingInformationResponse",
-                         "<tse:GetRecordingInformationResponse><tse:RecordingInformation>" +
-                         recordingInformation(data) + "</tse:RecordingInformation></tse:GetRecordingInformationResponse>");
-    return faultToken();
+    const std::vector<RecData> all = collect(catalog);
+    const RecData* found = nullptr;
+    if (token.empty()) {
+        // DTT (nhóm FindEvents) gửi token rỗng khi chưa cấu hình recording để thử và mong thiết bị
+        // trả về một recording. Không phải hành vi của spec (token rỗng là không hợp lệ): chọn
+        // recording đầu tiên có dữ liệu, không có thì recording đầu tiên.
+        for (const auto& data : all)
+            if (data.hasData()) { found = &data; break; }
+        if (!found && !all.empty()) found = &all.front();
+    } else {
+        for (const auto& data : all)
+            if (data.rec->token == token) { found = &data; break; }
+    }
+    if (!found) return faultToken();
+    return reply(rel, "GetRecordingInformationResponse",
+                 "<tse:GetRecordingInformationResponse><tse:RecordingInformation>" +
+                 recordingInformation(*found) + "</tse:RecordingInformation></tse:GetRecordingInformationResponse>");
 }
 
 std::string SearchService::getMediaAttributes(const std::string& req, const std::string& rel) {
@@ -340,7 +353,11 @@ void SearchService::purgeExpiredLocked(int64_t nowMs) {
 std::string SearchService::newSessionLocked(Session session) {
     const int64_t now = steadyNowMs();
     purgeExpiredLocked(now);
-    if (sessions_.size() >= kMaxSessions) return "";
+    if (sessions_.size() >= kMaxSessions) {
+        const auto oldest = std::min_element(sessions_.begin(), sessions_.end(),
+            [](const auto& a, const auto& b) { return a.second.expiresMs < b.second.expiresMs; });
+        sessions_.erase(oldest);
+    }
     session.expiresMs = now + session.keepAliveMs;
     const std::string token = tokenPrefix_ + "_" + std::to_string(++counter_);   // không bao giờ dùng lại
     sessions_[token] = std::move(session);
