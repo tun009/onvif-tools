@@ -41,6 +41,7 @@ public:
     // Bật/tắt Discovery (SetDiscoveryMode). NonDiscoverable → không phát Hello
     // heartbeat + không response Probe. DISCOVERY-1-1-9.
     void setDiscoverable(bool on);
+    bool isDiscoverable() const { return discoverable_; }
 
     // Gửi Hello burst ngay lập tức (SetScopes/AddScopes cần Hello mới ngay
     // để tool validation trong window ngắn — không đợi heartbeat 3s).

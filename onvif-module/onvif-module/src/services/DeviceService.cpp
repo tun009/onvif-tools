@@ -733,6 +733,16 @@ int DeviceService::GetDiscoveryMode(_tds__GetDiscoveryMode* req,
     (void)req;
     this->soap->mustUnderstand = 0;
     this->soap->header = nullptr;
+    // Chế độ do MGMT giữ (chung với web). MGMT lỗi thì dùng giá trị đang cache.
+    if (backend_->supportsDiscoveryControl()) {
+        try {
+            const int mode = backend_->getDiscoverable() ? 0 : 1;   // 0 = Discoverable, 1 = NonDiscoverable
+            std::lock_guard<std::mutex> lk(sysMtx_);
+            sys_.discoveryMode = mode;
+        } catch (const std::exception& e) {
+            std::cerr << "[DeviceService] GetDiscoveryMode backend error: " << e.what() << std::endl;
+        }
+    }
     std::lock_guard<std::mutex> lk(sysMtx_);
     resp.DiscoveryMode = static_cast<tt__DiscoveryMode>(sys_.discoveryMode);
     return SOAP_OK;
@@ -744,6 +754,17 @@ int DeviceService::SetDiscoveryMode(_tds__SetDiscoveryMode* req,
     this->soap->mustUnderstand = 0;
     this->soap->header = nullptr;
     if (!req) return SOAP_OK;
+    if (backend_->supportsDiscoveryControl()) {
+        // Ghi xuống MGMT trước (DB dùng chung với web); thất bại thì báo lỗi, không đổi trạng thái cục bộ.
+        try {
+            backend_->setDiscoverable(static_cast<int>(req->DiscoveryMode) == 0);   // 0 = Discoverable
+        } catch (const std::exception& e) {
+            std::cerr << "[DeviceService] SetDiscoveryMode backend error: " << e.what() << std::endl;
+            return soap_receiver_fault_subcode(
+                this->soap, "\"http://www.onvif.org/ver10/error\":Action",
+                "SetDiscoveryMode backend unavailable", nullptr);
+        }
+    }
     int mode;
     {
         std::lock_guard<std::mutex> lk(sysMtx_);
@@ -1316,7 +1337,12 @@ int DeviceService::SetNetworkProtocols(_tds__SetNetworkProtocols* req,
         NetworkProtocolEntry entry;
         entry.enabled = p->Enabled;
         entry.port = p->Port.empty() ? 0 : p->Port[0];
-        if (p->Name == tt__NetworkProtocolType::HTTP) entry.name = "ONVIF";
+        if (p->Name == tt__NetworkProtocolType::HTTP) {
+            entry.name = "ONVIF";
+            // HTTP chính là kênh SOAP đang phục vụ request này: tắt đi thì thiết bị không còn
+            // điều khiển được qua ONVIF nữa, nên không bao giờ chuyển Enabled=false xuống MGMT.
+            entry.enabled = true;
+        }
         else if (p->Name == tt__NetworkProtocolType::RTSP) entry.name = "RTSP";
         else continue;
         updates.push_back(entry);

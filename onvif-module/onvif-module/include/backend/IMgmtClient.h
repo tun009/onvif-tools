@@ -117,4 +117,9 @@ public:
     virtual void createOnvifUsers(const std::vector<OnvifUser>& users) = 0;
     virtual void setOnvifUser(const OnvifUser& user) = 0;
     virtual void deleteOnvifUsers(const std::vector<std::string>& usernames) = 0;
+
+    // Chế độ WS-Discovery (MGMT GET/POST /mgmt/v1/GetDiscoveryMode|SetDiscoveryMode): true = Discoverable.
+    // MGMT giữ giá trị trong DB (web và ONVIF dùng chung); onvif-module đọc và tuân theo.
+    virtual bool getDiscoverable() = 0;
+    virtual void setDiscoverable(bool discoverable) = 0;
 };

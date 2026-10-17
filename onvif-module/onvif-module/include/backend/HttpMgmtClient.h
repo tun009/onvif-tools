@@ -37,6 +37,9 @@ public:
     void createOnvifUsers(const std::vector<OnvifUser>& users) override;
     void setOnvifUser(const OnvifUser& user) override;
     void deleteOnvifUsers(const std::vector<std::string>& usernames) override;
+
+    bool getDiscoverable() override;
+    void setDiscoverable(bool discoverable) override;
 private:
     struct HttpResponse { int status = 0; std::string body; };
     HttpResponse request(const std::string& method, const std::string& path,

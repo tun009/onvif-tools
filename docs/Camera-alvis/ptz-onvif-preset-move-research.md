@@ -141,6 +141,77 @@ Camera Jetson (`.102`, `.194`): zoom/focus/iris là động cơ bước qua PCA9
   `curl` gọi `/onvif/ptz` kèm Digest), DTT (nhóm `PTZ-*`, `MEDIA2_PTZ-*`).
 - Các công cụ này chỉ kiểm giao thức; ưu tiên PTZ/reserved/patrolling kiểm bằng VMS thật.
 
+## 9. Bổ sung 2026-10-14: preset của DVR cũ làm gì, Home theo ONVIF, đặt ở lớp nào
+
+### 9.1 Preset của DVR cũ (đọc từ source)
+
+Code: `D:\Elcom\Backend\dvr\dvr\lib\common-libs\ptz\ptz_controller.{h,cpp}` (lớp `PTZController`) và
+`dvr_control_worker.cpp` (`handlePTZPreset`); lưu DB ở `db_config_impl.cpp`.
+
+- **Là preset phần mềm, không phải preset của động cơ.** `pt_motor` (Pelco-D) có `pt_set_preset/goto_preset/
+  clear_preset` nhưng cả ba lệnh gọi đó đều bị **comment out** trong `set_preset`/`go_to_preset`/`clear_preset`.
+  DVR tự lưu vị trí và tự điều khiển tới vị trí đó.
+- Dữ liệu `struct preset_point`: `preset_name`, `preset_index`, `image_path` (ảnh xem trước), `timeout_ms`, `speed`,
+  `pan_degree`, `tilt_degree`, `zoom_position` (thang 0–100), `is_home`. **Không lưu focus.**
+- `set_preset`: đọc vị trí HIỆN TẠI (`params.pan_degree/tilt_degree/zoom_pos`) ghi vào map `params.preset[index]`.
+  Index -1 = tự cấp số trống đầu tiên; tối đa **255** preset (`index >= 255` bị từ chối). `is_home` → đánh dấu home
+  (chỉ một preset là home, `update_home_index`). Sau đó chụp ảnh xem trước `ptz_preset_N.png` và ghi DB.
+- `go_to_preset`: chưa lưu → lỗi; có → `go_to_degree(pan, tilt)` rồi `zoom_to_x(zoom)`, ghi nhớ preset hiện tại.
+- `clear_preset` (một, hoặc -1 = tất cả), `go_to_home` = `go_to_preset(home_index)`.
+- Zoom lưu theo thang 0–100, đổi qua `zoom_x_to_position/zoom_position_to_x` dựa trên `zoom_x_range`.
+- Lưu bền: hai bảng PostgreSQL: `ptz_preset` (cho web) và `camera_ptz_preset` (id/token, tên, pan, tilt, zoom, `is_home`,
+  `video_source_id`, dùng cho ONVIF).
+- Quanh preset có hệ ưu tiên (`MANUAL`, `PRESET`, `EVENT_TRIGGER`, `PANTROLLING_PREVIEW`, `PANTROLLING`) và luồng tuần
+  tra. Lớp ONVIF của DVR cũ khai cứng `MaximumNumberOfPresets = 2` dù lõi hỗ trợ 255.
+
+### 9.2 `is_home` và Home theo ONVIF
+
+- `tt:PTZPreset` chỉ có `token`, `Name`, `PTZPosition`; **không có trường home**.
+- Home là khái niệm riêng: `PTZNode.HomeSupported` ("availability of a home position"), thuộc tính
+  `FixedHomePosition` ("fixed or it can be changed via the SetHomePosition command"), thao tác `GotoHomePosition`
+  (cần `HomeSupported=true`) và `SetHomePosition` (lỗi nếu home cố định). Spec có mục riêng cho Home (5.5, tách khỏi
+  preset 5.4); test PTZ của ONVIF kiểm hai chế độ riêng: home cấu hình được và home cố định `[theo mục lục test spec,
+  chưa đọc nội dung]`.
+- Hệ quả: ONVIF **không bắt** có `is_home` trong bảng preset; chỉ cần nhớ được một vị trí home và thực thi hai thao tác
+  trên. Hai cách đều hợp lệ: (a) home là bản ghi riêng, mỗi nguồn video một vị trí (đề xuất, đơn giản và không lẫn vào
+  `GetPresets`); (b) cờ `is_home` nội bộ như DVR cũ.
+- Milestone hiển thị `home[1]` như một preset trong cây, nhưng tài liệu Milestone nói driver ONVIF **gửi
+  `GotoHomePosition`** khi chọn home, tức là cách hiển thị của VMS, không phải preset ONVIF thật.
+- DTT coi `GotoHomePosition` là bắt buộc khi có PTZ service (case `MEDIA2_PTZ-3-1-3`), nên vẫn nên làm Home.
+
+### 9.3 Spec ONVIF về di chuyển (đọc từ `onvif.xsd` / `ptz.wsdl`)
+
+- Space: tuyệt đối `AbsolutePanTiltPositionSpace`/`AbsoluteZoomPositionSpace` (generic, do mọi node hỗ trợ tuyệt đối
+  cung cấp); tương đối `RelativePanTiltTranslationSpace`/`RelativeZoomTranslationSpace`; liên tục
+  `ContinuousPanTiltVelocitySpace` ("shall be provided by every PTZ node") và `ContinuousZoomVelocitySpace` (vận tốc theo
+  hệ số zoom); tốc độ khi di chuyển tuyệt đối/tương đối: `PanTiltSpeedSpace`, `ZoomSpeedSpace`.
+- `PTZConfiguration`: node hỗ trợ tuyệt đối phải nêu `DefaultAbsolutePantTiltPositionSpace`, nên có `PanTiltLimits`/
+  `ZoomLimits`; tuyệt đối/tương đối phải có `DefaultPTZSpeed`; liên tục phải có `DefaultPTZTimeout` ("after which the
+  movement stops").
+- Thao tác: `AbsoluteMove` (bỏ `Speed` thì dùng tốc độ mặc định), `RelativeMove` (cần space tương đối),
+  `ContinuousMove` (cần space liên tục; `Timeout` tùy chọn; thiết bị phải khai khoảng Timeout trong
+  `GetConfigurationOptions`), `Stop` (cờ `PanTilt`, `Zoom`), `GetStatus` (vị trí và `MoveStatus` IDLE/MOVING/UNKNOWN
+  `[nhớ từ spec, chưa đọc nguyên văn]`).
+- Preset: nếu hỗ trợ một preset thì phải có đủ mọi thao tác preset (`MaximumNumberOfPresets`); `SetPreset` không có token
+  = tạo mới, có token = ghi đè, thất bại nếu đang di chuyển; `GotoPreset` có `Speed` tùy chọn; `RemovePreset` cần khả
+  năng preset.
+- **Chưa kiểm chứng:** nguyên văn mục 5.5 (lỗi khi home cố định) và định nghĩa `PTZStatus`/`PTZVector` (nằm ngoài vùng
+  đọc được).
+
+### 9.4 Đặt preset ở MGMT hay HAL — đề xuất: MGMT giữ dữ liệu và nghiệp vụ, HAL chỉ làm phần cứng
+
+- HAL (`libhal.so`) không giữ dữ liệu cấu hình; driver chỉ có thao tác cấp thấp (`ILensDriver`: `setZoom/Focus/Iris`,
+  `getZoom/Focus`, `isBusy`, `stop`…). MGMT đã có SQLite (`mgmt.db`), REST, tổ chức `domains/<tên>/` (controller,
+  service, repository) và API `ZoomFocus`/`LensInfo`. Một nguồn sự thật cho web, ONVIF và VMS.
+- Phân chia: **MGMT** — bảng preset (token, tên, `video_source_id`, zoom, focus, pan/tilt nếu có), home riêng, cấp token,
+  giới hạn số lượng, kiểm tra "đang di chuyển thì không lưu" (dùng `isBusy`), REST (liệt kê, lưu, xóa, gọi preset, home).
+  **HAL** — đọc vị trí hiện tại, đặt zoom/focus tuyệt đối, dừng (đã có); pan/tilt và di chuyển liên tục nếu cần (nối
+  `ptz_control`, hiện `TODO`). **onvif-module** — ánh xạ ONVIF (`GetPresets`, `SetPreset`, `GotoPreset`, `GotoHomePosition`,
+  `SetHomePosition`…) gọi REST MGMT.
+- Việc cần quyết: preset lưu zoom + focus mode + focus (focus không nằm trong `PTZPreset` của ONVIF nên là hành vi nội
+  bộ); số preset tối đa khai ONVIF (DVR cũ khai 2, lõi 255); token dạng số tăng dần để Milestone hiện `[1][2][3]`; có cần
+  ảnh xem trước (MGMT đã có `CaptureImages`) hay không.
+
 ## Nguồn
 
 - ONVIF PTZ WSDL: https://www.onvif.org/ver20/ptz/wsdl/ptz.wsdl
@@ -149,3 +220,5 @@ Camera Jetson (`.102`, `.194`): zoom/focus/iris là động cơ bước qua PCA9
 - Milestone — Configuring and Using Enhanced PTZ: https://learn.milestonesys.com/configurexp_ptz.htm
 - Milestone — Reserved PTZ sessions: https://www.milestonesys.com/globalassets/techcomm/2018-r1/sc/english-united-states/56161.htm
 - Milestone — Patrolling profiles: https://doc.milestonesys.com/2024R1/en-US/feature_flags/ff_extendedptz/sc_managepatrollingprofi_56591_.htm
+- Milestone — Home position (driver ONVIF): https://doc.milestonesys.com/2024r1/pt-BR/onvifdriver/home_position.htm
+- ONVIF PTZ Device Test Specification v17.06: https://www.onvif.org/wp-content/uploads/2017/07/ONVIF_PTZ_Device_Test_Specification_v17.06.pdf

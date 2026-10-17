@@ -782,3 +782,22 @@ void HttpMgmtClient::deleteOnvifUsers(const std::vector<std::string>& usernames)
     const HttpResponse response = request("POST", "/mgmt/v1/Config/DeleteUsers", body);
     requireUserResult("DeleteUsers", response.status, response.body);
 }
+
+// ── WS-Discovery mode ─────────────────────────────────────────────────
+// MGMT lưu chế độ trong DB (bảng network_discovery); web và ONVIF dùng chung giá trị này.
+bool HttpMgmtClient::getDiscoverable() {
+    const HttpResponse response = request("GET", "/mgmt/v1/GetDiscoveryMode");
+    if (response.status != 200) throw std::runtime_error("MGMT rejected GetDiscoveryMode request");
+    const std::string mode = SimpleJson::getString(response.body, "DiscoveryMode");
+    if (mode == "Discoverable") return true;
+    if (mode == "NonDiscoverable") return false;
+    throw std::runtime_error("MGMT returned invalid DiscoveryMode");
+}
+
+void HttpMgmtClient::setDiscoverable(bool discoverable) {
+    const std::string body = std::string("{\"DiscoveryMode\":\"") +
+                             (discoverable ? "Discoverable" : "NonDiscoverable") + "\"}";
+    const HttpResponse response = request("POST", "/mgmt/v1/SetDiscoveryMode", body);
+    if (response.status != 200)
+        throw std::runtime_error("MGMT SetDiscoveryMode failed (status=" + std::to_string(response.status) + ")");
+}

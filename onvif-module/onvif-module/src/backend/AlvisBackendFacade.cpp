@@ -47,6 +47,18 @@ void AlvisBackendFacade::deleteOnvifUsers(const std::vector<std::string>& v)
     if (!supportsUserManagement()) throw std::runtime_error("MGMT client unavailable");
     mgmtClient_->deleteOnvifUsers(v);
 }
+// Discovery: chỉ khi network=real (MGMT là nơi giữ chế độ Discoverable/NonDiscoverable).
+bool AlvisBackendFacade::supportsDiscoveryControl() const { return real("network") && mgmtClient_ != nullptr; }
+bool AlvisBackendFacade::getDiscoverable()
+{
+    if (!supportsDiscoveryControl()) throw std::runtime_error("MGMT client unavailable");
+    return mgmtClient_->getDiscoverable();
+}
+void AlvisBackendFacade::setDiscoverable(bool v)
+{
+    if (!supportsDiscoveryControl()) throw std::runtime_error("MGMT client unavailable");
+    mgmtClient_->setDiscoverable(v);
+}
 NetworkConfig AlvisBackendFacade::getNetworkConfig() { return mock("GetNetworkConfig").getNetworkConfig(); }
 bool AlvisBackendFacade::setNetworkConfig(const NetworkConfig &v) { return mock("SetNetworkConfig").setNetworkConfig(v); }
 HostnameConfig AlvisBackendFacade::getHostname()

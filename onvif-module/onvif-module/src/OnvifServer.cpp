@@ -21,6 +21,7 @@
 #include <cstdlib>
 #include <string>
 #include <thread>
+#include <chrono>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -281,9 +282,25 @@ bool OnvifServer::start() {
     if (discoveryEnabled_) {
         // Khởi động WS-Discovery (UDP multicast 3702).
         discovery_ = std::make_unique<DiscoveryService>(cfg_);
+        // Chế độ Discoverable/NonDiscoverable do MGMT giữ (web và ONVIF SetDiscoveryMode dùng chung).
+        // Đặt trước start() để NonDiscoverable thì không phát Hello lúc khởi động;
+        // MGMT không trả lời thì giữ mặc định Discoverable.
+        const bool managed = backend_ && backend_->supportsDiscoveryControl();
+        if (managed) {
+            try {
+                discovery_->setDiscoverable(backend_->getDiscoverable());
+            } catch (const std::exception& e) {
+                std::cerr << "[OnvifServer] Cannot read discovery mode from MGMT: " << e.what()
+                          << " (default Discoverable)\n";
+            }
+        }
         if (!discovery_->start()) {
             std::cerr << "[OnvifServer] WS-Discovery không khởi động được "
                          "(kiểm tra quyền bind UDP 3702)\n";
+        }
+        if (managed) {
+            discoveryModePolling_ = true;
+            discoveryModeThread_ = std::thread(&OnvifServer::pollDiscoveryMode, this);
         }
     } else {
         std::cout << "[OnvifServer] WS-Discovery disabled by configuration; "
@@ -292,7 +309,23 @@ bool OnvifServer::start() {
     return true;
 }
 
+void OnvifServer::pollDiscoveryMode() {
+    using namespace std::chrono_literals;
+    while (discoveryModePolling_) {
+        for (int i = 0; i < 50 && discoveryModePolling_; ++i) std::this_thread::sleep_for(100ms);  // 5 giây
+        if (!discoveryModePolling_) break;
+        try {
+            const bool wanted = backend_->getDiscoverable();
+            if (discovery_ && discovery_->isDiscoverable() != wanted) discovery_->setDiscoverable(wanted);
+        } catch (const std::exception&) {
+            // MGMT tạm không trả lời: giữ nguyên chế độ hiện tại, thử lại ở lượt sau.
+        }
+    }
+}
+
 void OnvifServer::stop() {
+    discoveryModePolling_ = false;
+    if (discoveryModeThread_.joinable()) discoveryModeThread_.join();
     if (discovery_) {
         discovery_->stop();
         discovery_.reset();

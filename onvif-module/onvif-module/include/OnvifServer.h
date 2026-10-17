@@ -24,6 +24,8 @@ public:
 
 private:
     void listenLoop();
+    // Hỏi MGMT chế độ Discovery định kỳ và áp dụng cho DiscoveryService (web đổi chế độ thì onvif-module theo).
+    void pollDiscoveryMode();
 
     ServiceConfig cfg_;
     std::shared_ptr<ICameraBackend> backend_;
@@ -34,6 +36,8 @@ private:
     std::shared_ptr<IMgmtClient> authClient_;
 
     std::unique_ptr<DiscoveryService> discovery_;
+    std::thread discoveryModeThread_;
+    std::atomic<bool> discoveryModePolling_{false};
 
     // Service Registry — route service string-based (Phase 2+ refactor).
     // Service chưa migrate vẫn theo if-else trong listenLoop.

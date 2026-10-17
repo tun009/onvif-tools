@@ -37,6 +37,7 @@ public:
     bool supportsUserManagement() const override;
     std::vector<OnvifUser> getOnvifUsers() override; void createOnvifUsers(const std::vector<OnvifUser>&) override;
     void setOnvifUser(const OnvifUser&) override; void deleteOnvifUsers(const std::vector<std::string>&) override;
+    bool supportsDiscoveryControl() const override; bool getDiscoverable() override; void setDiscoverable(bool) override;
 private:
     bool real(const std::string&) const; ICameraBackend& mock(const char*) const;
     CameraBackendPtr mockBackend_; std::shared_ptr<IMgmtClient> mgmtClient_; std::shared_ptr<IDvrClient> dvrClient_; BackendMode mode_; std::map<std::string, CapabilityMode> capabilities_;

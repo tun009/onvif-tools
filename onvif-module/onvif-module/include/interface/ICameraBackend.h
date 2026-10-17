@@ -39,6 +39,10 @@ public:
     virtual void           createOnvifUsers(const std::vector<OnvifUser>&) {}
     virtual void           setOnvifUser(const OnvifUser&)               {}
     virtual void           deleteOnvifUsers(const std::vector<std::string>&) {}
+    // Chế độ WS-Discovery do backend giữ (MGMT). Mặc định backend không quản lý: onvif-module tự giữ trạng thái.
+    virtual bool           supportsDiscoveryControl() const             { return false; }
+    virtual bool           getDiscoverable()                            { return true; }
+    virtual void           setDiscoverable(bool)                        {}
     virtual bool           factoryReset(bool hard)                      = 0;
 
     // ── Media2 ───────────────────────────────────────────────────

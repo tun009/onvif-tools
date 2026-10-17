@@ -426,7 +426,8 @@ bool DiscoveryService::start() {
 
     // Startup Hello burst: gửi 3 lần cách nhau 300ms để tăng khả năng tool
     // catch được Hello của mình (thay vì Hello nhiễu từ WSDAPI/camera khác).
-    for (int i = 0; i < 3; ++i) {
+    // (Không phát khi đang NonDiscoverable: chế độ này có thể đã được đặt trước start().)
+    for (int i = 0; i < 3 && discoverable_; ++i) {
         sendMulticast(buildHello());
         std::this_thread::sleep_for(std::chrono::milliseconds(300));
     }
